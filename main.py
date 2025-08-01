@@ -18,6 +18,7 @@ from providers.base import LLMProvider
 from providers.gemini_provider import GeminiProvider
 from providers.ollama_provider import OllamaProvider
 from services.command_handler import CommandHandler
+from services.executor import ExecutorService
 from services.llm_operator import LLMOperator
 
 # Setup logger for this module
@@ -81,8 +82,12 @@ def main() -> None:
     console = Console()
     history = InMemoryHistory()
     cmd_handler = CommandHandler(console=console)
-    # Inject the configured provider into the LLMOperator
-    llm_operator = LLMOperator(console=console, provider=provider)
+    # The ExecutorService subscribes to events upon initialization.
+    executor = ExecutorService(event_bus=event_bus)
+    # Inject the provider and event bus into the LLMOperator.
+    llm_operator = LLMOperator(
+        console=console, provider=provider, event_bus=event_bus
+    )
 
     # --- Wiring (Subscription) ---
     # The command handler is subscribed to command events. It will update its
