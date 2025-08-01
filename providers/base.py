@@ -4,6 +4,7 @@ ensuring architectural consistency.
 """
 import logging
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +17,20 @@ class LLMProvider(ABC):
     """
 
     @abstractmethod
-    def get_response(self, prompt: str, context: dict) -> str:
+    def get_response(
+        self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
+    ) -> Union[str, Dict[str, Any]]:
         """
-        Get a response from the LLM.
+        Get a response from the LLM, optionally with tool-calling capabilities.
 
         Args:
             prompt: The user's input prompt.
-            context: A dictionary containing any relevant context for the request.
+            tools: An optional list of tool definitions that the LLM can use.
+                   Each tool is a dictionary describing its name, description,
+                   and parameters.
 
         Returns:
-            The text response from the LLM.
+            A string containing the text response from the LLM, or a dictionary
+            representing a tool call if the LLM decides to use a tool.
         """
         pass

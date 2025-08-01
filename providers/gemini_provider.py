@@ -1,8 +1,10 @@
 """
 Implement the LLMProvider interface for Google's Gemini models,
-encapsulating all API-specific logic.
+encapsulating all API-specific logic, including native tool-calling.
 """
 import logging
+from typing import Any, Dict, List, Optional, Union
+
 import google.generativeai as genai
 from .base import LLMProvider
 
@@ -10,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(LLMProvider):
-    """An LLM provider for Google's Gemini models."""
+    """
+    An LLM provider for Google's Gemini models that supports tool-calling.
+    """
 
     def __init__(self, api_key: str, model_name: str = "gemini-pro") -> None:
         """
@@ -22,42 +26,83 @@ class GeminiProvider(LLMProvider):
 
         Raises:
             ValueError: If the API key is not provided.
+            RuntimeError: If the Gemini client fails to initialize.
         """
         if not api_key:
             raise ValueError("Google API key is required for GeminiProvider.")
-        
+
         try:
             genai.configure(api_key=api_key)
+            # For gemini-pro, tool calling is enabled by default.
+            # For newer models like 1.5, you might specify generation_config.
             self.model = genai.GenerativeModel(model_name)
             logger.info(f"GeminiProvider initialized with model: {model_name}")
         except Exception as e:
             logger.error(f"Failed to configure Gemini or initialize model: {e}", exc_info=True)
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e
 
-
-    def get_response(self, prompt: str, context: dict) -> str:
+    def get_response(
+        self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
+    ) -> Union[str, Dict[str, Any]]:
         """
         Sends the prompt to the Gemini API and returns the response.
 
+        If tools are provided, it enables tool-calling capabilities. If the model
+        decides to use a tool, it returns a structured dictionary representing
+        the tool call. Otherwise, it returns a standard text response.
+
         Args:
             prompt: The user's input prompt.
-            context: A dictionary containing any relevant context (currently unused).
+            tools: An optional list of tool definitions that the LLM can use.
+                   The format should be compatible with the Google AI Python SDK.
 
         Returns:
-            The text response from the Gemini model or an error message.
+            A string containing the text response from the LLM, or a dictionary
+            representing a tool call in the format:
+            {'tool_name': str, 'arguments': dict}.
+            Returns an error message string on failure.
         """
         logger.debug(f"Sending prompt to Gemini model: '{prompt[:100]}...'")
+        if tools:
+            tool_names = [
+                tool.get("function_declaration", {}).get("name", "unknown")
+                for tool in tools
+            ]
+            logger.debug(f"Providing tools to Gemini: {tool_names}")
+
         try:
-            response = self.model.generate_content(prompt)
-            # The response object might not have a 'text' attribute if generation fails
-            # due to safety settings or other reasons.
-            if hasattr(response, 'text'):
-                logger.info("Successfully received response from Gemini.")
+            response = self.model.generate_content(prompt, tools=tools)
+
+            # The response object's structure varies. We must inspect it carefully.
+            # Check for a function call first.
+            if (
+                response.candidates
+                and response.candidates[0].content.parts
+                and hasattr(response.candidates[0].content.parts[0], "function_call")
+            ):
+                tool_call = response.candidates[0].content.parts[0].function_call
+                if tool_call and tool_call.name:
+                    arguments = dict(tool_call.args)
+                    logger.info(f"Gemini model invoked tool: '{tool_call.name}' with args: {arguments}")
+                    return {
+                        "tool_name": tool_call.name,
+                        "arguments": arguments,
+                    }
+
+            # If no tool call, check for a text response.
+            if hasattr(response, "text"):
+                logger.info("Successfully received text response from Gemini.")
                 return response.text
-            else:
-                # Log the full response for debugging if text is missing
-                logger.warning(f"Gemini response did not contain text. Full response: {response}")
-                return "Error: Gemini response did not contain any text. This may be due to safety filters."
+
+            # If no text and no tool call, it's likely a blocked response.
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                reason = response.prompt_feedback.block_reason.name
+                logger.warning(f"Gemini response was blocked. Reason: {reason}")
+                return f"Error: Gemini response blocked due to safety filters. Reason: {reason}"
+
+            logger.warning(f"Gemini response did not contain text or a tool call. Full response: {response}")
+            return "Error: Gemini response was empty. This may be due to content filtering or other issues."
+
         except Exception as e:
             logger.error(f"An error occurred with the Gemini API: {e}", exc_info=True)
             return f"An error occurred with the Gemini API: {e}"
