@@ -1,8 +1,42 @@
-# Kintsugi AvA Default Ignore
+# --- Kintsugi AVM .gitignore ---
+
+# Virtual Environments
 .venv/
 venv/
+env/
+.env/
+ENV/
+
+# Python cache files
 __pycache__/
-*.py[co]
-rag_db/
+*.py[cod]
+*$py.class
+
+# IDE and editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local secrets and environment variables
+# Keep the example file, but ignore the actual secrets file.
 .env
+
+# Build and distribution artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Log files
 *.log
+logs/
+
+# Local databases or temporary files
+rag_db/
+*.db
+*.sqlite3
+
+# Operating System files
+.DS_Store
+Thumbs.db

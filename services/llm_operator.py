@@ -9,12 +9,12 @@ publishing typed action events.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from rich.console import Console
 
 from event_bus import EventBus
-from events import ActionReadyForExecution, BlueprintInvocation, UserPromptEntered
+from events import ActionReadyForExecution, BlueprintInvocation, RawCodeInstruction
 from foundry.foundry_manager import FoundryManager
 from providers.base import LLMProvider
 
@@ -28,7 +28,8 @@ class LLMOperator:
     This operator transforms a user's text prompt into a structured, typed action
     by querying an LLM with a predefined set of tools. It validates the LLM's
     response to ensure it corresponds to a known tool and, if valid, publishes
-    an `ActionReadyForExecution` event containing a `BlueprintInvocation` object.
+    an `ActionReadyForExecution` event containing a `BlueprintInvocation` or
+    `RawCodeInstruction` object.
     """
 
     def __init__(
@@ -53,92 +54,93 @@ class LLMOperator:
         self.foundry_manager = foundry_manager
 
     def _parse_and_validate_llm_response(
-        self, response_text: str
-    ) -> Optional[BlueprintInvocation]:
+        self, llm_response: Union[str, Dict[str, Any]]
+    ) -> Optional[Union[BlueprintInvocation, RawCodeInstruction]]:
         """
-        Parses the LLM's JSON response and validates it against known blueprints.
+        Parses the LLM's response and validates it against known blueprints.
 
-        This method performs the following steps:
-        1. Decodes the JSON string.
-        2. Validates that the top-level structure is a dictionary.
-        3. Checks for the presence and type of 'action' and 'parameters' keys.
-        4. Verifies that the 'action' name corresponds to a registered blueprint.
-        5. Constructs a typed `BlueprintInvocation` object if validation succeeds.
+        This method handles two cases:
+        1. If the response is a dictionary (a native tool call), it validates it.
+        2. If the response is a string, it attempts to parse it as JSON.
 
         Args:
-            response_text: The raw string response from the LLM.
+            llm_response: The raw response from the LLM provider.
 
         Returns:
-            A `BlueprintInvocation` object if the response is valid, otherwise `None`.
+            A `BlueprintInvocation` or `RawCodeInstruction` if valid, otherwise `None`.
         """
-        try:
-            data: Dict[str, Any] = json.loads(response_text)
-        except json.JSONDecodeError:
-            logger.error(
-                "Failed to decode LLM response as JSON: %s",
-                response_text,
-                exc_info=True,
-            )
-            self.console.print(
-                "[bold red]Error:[/bold red] The LLM response was not valid JSON."
-            )
-            self.console.print()
+        if isinstance(llm_response, str):
+            try:
+                data: Dict[str, Any] = json.loads(llm_response)
+            except json.JSONDecodeError:
+                logger.error(
+                    "Failed to decode LLM response as JSON: %s",
+                    llm_response,
+                    exc_info=True,
+                )
+                self.console.print(
+                    "[bold red]Error:[/bold red] The LLM response was not valid JSON."
+                )
+                self.console.print()
+                return None
+        elif isinstance(llm_response, dict):
+            data = llm_response
+        else:
+            logger.error("Received unexpected response type from provider: %s", type(llm_response).__name__)
             return None
 
-        if not isinstance(data, dict):
-            logger.warning(
-                "Validation failed: LLM output is not a dictionary. Data: %s", data
-            )
-            self.console.print(
-                "[bold red]Error:[/bold red] LLM output was not a valid action structure (expected a JSON object)."
-            )
-            self.console.print()
-            return None
 
-        action_name = data.get("action")
-        if not isinstance(action_name, str) or not action_name:
+        # --- VALIDATION LOGIC ---
+        # The provider returns a dictionary with 'tool_name' and 'arguments'.
+        tool_name = data.get("tool_name")
+        if not isinstance(tool_name, str) or not tool_name:
             logger.warning(
-                "Validation failed: 'action' key is missing or not a non-empty string. Data: %s",
+                "Validation failed: 'tool_name' key is missing or not a non-empty string. Data: %s",
                 data,
             )
             self.console.print(
-                "[bold red]Error:[/bold red] LLM output is missing a valid 'action' name."
+                "[bold red]Error:[/bold red] LLM output is missing a valid 'tool_name'."
             )
             self.console.print()
             return None
 
-        parameters = data.get("parameters")
-        if not isinstance(parameters, dict):
+        arguments = data.get("arguments")
+        if not isinstance(arguments, dict):
             logger.warning(
-                "Validation failed: 'parameters' key is missing or not a dictionary. Data: %s",
+                "Validation failed: 'arguments' key is missing or not a dictionary. Data: %s",
                 data,
             )
             self.console.print(
-                "[bold red]Error:[/bold red] LLM output is missing valid 'parameters'."
+                "[bold red]Error:[/bold red] LLM output is missing valid 'arguments'."
             )
             self.console.print()
             return None
+            
+        # --- End Validation ---
 
-        blueprint = self.foundry_manager.get_blueprint(action_name)
+
+        # Look up the blueprint corresponding to the tool name.
+        blueprint = self.foundry_manager.get_blueprint(tool_name)
         if not blueprint:
-            logger.warning("LLM requested an unknown tool: '%s'", action_name)
+            logger.warning("LLM requested an unknown tool: '%s'", tool_name)
             self.console.print(
-                f"[bold red]Error:[/bold red] The LLM requested a tool ('{action_name}') that does not exist."
+                f"[bold red]Error:[/bold red] The LLM requested a tool ('{tool_name}') that does not exist."
             )
             self.console.print()
             return None
 
-        logger.info("Successfully validated tool call for blueprint: %s", action_name)
-        return BlueprintInvocation(blueprint=blueprint, parameters=parameters)
+        logger.info("Successfully validated tool call for blueprint: %s", tool_name)
+        # Create the strongly-typed invocation object.
+        return BlueprintInvocation(blueprint=blueprint, parameters=arguments)
+
 
     def handle(self, event: UserPromptEntered) -> None:
         """
         Handles the event for a user entering a standard prompt.
 
-        This method displays a "thinking" status, sends the prompt and available
-        tool definitions to the LLM provider, attempts to parse and validate
-        the response, and publishes an `ActionReadyForExecution` event with a
-        typed `BlueprintInvocation` if successful.
+        This method gets tool definitions, sends the prompt to the LLM provider,
+        parses and validates the response, and publishes an `ActionReadyForExecution`
+        event with a typed instruction object if successful.
 
         Args:
             event: The UserPromptEntered event instance.
@@ -152,24 +154,18 @@ class LLMOperator:
                 "[bold green]Thinking...[/bold green]", spinner="dots"
             ):
                 tool_definitions = self.foundry_manager.get_llm_tool_definitions()
-                # We assume the provider's get_response method can accept a 'tools'
-                # argument to enable tool-calling mode.
-                response_text = self.provider.get_response(
+                response = self.provider.get_response(
                     event.prompt_text, tools=tool_definitions
                 )
-                logger.debug(f"Raw LLM response: {response_text}")
+                logger.debug(f"Raw LLM response: {response}")
 
-            invocation = self._parse_and_validate_llm_response(response_text)
+            instruction = self._parse_and_validate_llm_response(response)
 
-            if invocation:
-                logger.info(
-                    "Successfully parsed a valid action: %s",
-                    invocation.blueprint.name,
-                )
-                action_event = ActionReadyForExecution(instruction=invocation)
+            if instruction:
+                action_event = ActionReadyForExecution(instruction=instruction)
                 self.event_bus.publish(action_event)
                 logger.info("Published ActionReadyForExecution event to the event bus.")
-            # If invocation is None, the parsing method has already logged and printed errors.
+            # If instruction is None, the parsing method has already logged and printed errors.
 
         except Exception as e:
             logger.error(

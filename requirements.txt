@@ -1,0 +1,18 @@
+# --- AVM Project Requirements ---
+
+# For the slick, interactive command-line interface
+rich
+prompt-toolkit
+
+# For making HTTP requests in the Ollama provider
+requests
+
+# For the Google Gemini provider API
+google-generativeai
+
+# For native tool calling support in Gemini
+# This is often a dependency of google-generativeai but good to list explicitly
+google-ai-generativelanguage
+
+# For reading .env files (if you decide to use it later)
+# python-dotenv
