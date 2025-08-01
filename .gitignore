@@ -1,0 +1,8 @@
+# Kintsugi AvA Default Ignore
+.venv/
+venv/
+__pycache__/
+*.py[co]
+rag_db/
+.env
+*.log
