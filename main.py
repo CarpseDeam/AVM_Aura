@@ -14,6 +14,7 @@ from rich.console import Console
 
 from event_bus import EventBus
 from events import UserCommandEntered, UserPromptEntered
+from foundry.foundry_manager import FoundryManager
 from providers.base import LLMProvider
 from providers.gemini_provider import GeminiProvider
 from providers.ollama_provider import OllamaProvider
@@ -81,12 +82,16 @@ def main() -> None:
     event_bus = EventBus()
     console = Console()
     history = InMemoryHistory()
+    foundry_manager = FoundryManager()
     cmd_handler = CommandHandler(console=console)
     # The ExecutorService subscribes to events upon initialization.
     executor = ExecutorService(event_bus=event_bus)
-    # Inject the provider and event bus into the LLMOperator.
+    # Inject the provider, event bus, and foundry manager into the LLMOperator.
     llm_operator = LLMOperator(
-        console=console, provider=provider, event_bus=event_bus
+        console=console,
+        provider=provider,
+        event_bus=event_bus,
+        foundry_manager=foundry_manager,
     )
 
     # --- Wiring (Subscription) ---
