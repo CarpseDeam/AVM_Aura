@@ -18,27 +18,35 @@ class GeminiProvider(LLMProvider):
     An LLM provider for Google's Gemini models that supports tool-calling.
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-pro") -> None:
+    # <-- MODIFIED: Add temperature to the constructor
+    def __init__(self, api_key: str, model_name: str = "gemini-1.5-pro", temperature: float = 0.1) -> None:
         if not api_key:
             raise ValueError("Google API key is required for GeminiProvider.")
 
         try:
             genai.configure(api_key=api_key)
 
-            # --- THIS IS THE FINAL, IRON-CLAD INSTRUCTION ---
+            # --- NEW HYPER-RESTRICTIVE SYSTEM PROMPT ---
             system_instruction = (
-                "You are the Operator of a deterministic virtual machine. Your ONLY function is to translate user requests into a single, valid tool call from the provided list. "
-                "You MUST select one of the provided tools. Do NOT invent tools. Do NOT deviate from the provided tool schemas. "
+                "You are the Operator of a deterministic virtual machine. You are a component in a deterministic program. "
+                "Your ONLY function is to translate user requests into a single, valid tool call from the provided list. "
+                "The `name` field in the function definition is the EXACT string you must use in the `tool_name` field of your response. "
+                "You MUST select one of the provided tools. DO NOT invent tools. DO NOT deviate from the provided tool schemas. "
                 "Your entire response MUST be a single, valid JSON object representing the tool call, and nothing else. "
                 "If the user's request cannot be fulfilled by any of the available tools, you MUST respond with a JSON object containing an error: {\"tool_name\": \"error\", \"arguments\": {\"message\": \"Request cannot be fulfilled with available tools.\"}}"
             )
-            # --- END NEW INSTRUCTION ---
+            # --- END NEW PROMPT ---
+
+            # <-- NEW: Create a generation config with the specified temperature
+            generation_config = genai.GenerationConfig(temperature=temperature)
 
             self.model = genai.GenerativeModel(
                 model_name,
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                # <-- MODIFIED: Apply the generation config to the model
+                generation_config=generation_config
             )
-            logger.info(f"GeminiProvider initialized with model: {model_name} and IRON-CLAD system instructions.")
+            logger.info(f"GeminiProvider initialized for model: {model_name} with temperature {temperature} and HYPER-RESTRICTIVE system instructions.")
         except Exception as e:
             logger.error(f"Failed to configure Gemini or initialize model: {e}", exc_info=True)
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e

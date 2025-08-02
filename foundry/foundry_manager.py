@@ -24,10 +24,11 @@ class FoundryManager:
         logger.info("FoundryManager initialized with %d blueprints.", len(self._blueprints))
 
     def _add_blueprint(self, blueprint: Blueprint) -> None:
-        if blueprint.name in self._blueprints:
-            logger.warning("Blueprint with name '%s' is being overwritten.", blueprint.name)
-        self._blueprints[blueprint.name] = blueprint
-        logger.debug("Registered blueprint: %s", blueprint.name)
+        # <-- FIX: Changed blueprint.name to blueprint.id
+        if blueprint.id in self._blueprints:
+            logger.warning("Blueprint with id '%s' is being overwritten.", blueprint.id)
+        self._blueprints[blueprint.id] = blueprint
+        logger.debug("Registered blueprint: %s", blueprint.id)
 
     def _discover_and_load_blueprints(self) -> None:
         """
@@ -49,7 +50,8 @@ class FoundryManager:
                     # Convention: each blueprint file must define a 'blueprint' variable.
                     if hasattr(module, "blueprint") and isinstance(module.blueprint, Blueprint):
                         self._add_blueprint(module.blueprint)
-                        logger.info("Loaded blueprint '%s' from %s.", module.blueprint.name, file_path.name)
+                        # <-- FIX: Changed module.blueprint.name to module.blueprint.id
+                        logger.info("Loaded blueprint '%s' from %s.", module.blueprint.id, file_path.name)
                     else:
                         logger.warning("File %s does not contain a valid 'blueprint' instance.", file_path.name)
                 except Exception as e:
@@ -65,7 +67,8 @@ class FoundryManager:
         for bp in self._blueprints.values():
             tool_def = {
                 "type": "function",
-                "function": {"name": bp.name, "description": bp.description, "parameters": bp.parameters},
+                # <-- FIX: Changed bp.name to bp.id
+                "function": {"name": bp.id, "description": bp.description, "parameters": bp.parameters},
             }
             definitions.append(tool_def)
         return definitions

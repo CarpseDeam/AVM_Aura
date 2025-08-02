@@ -12,15 +12,16 @@ logger = logging.getLogger(__name__)
 
 CONFIG_FILE_PATH = "config.yaml"
 
-# --- FIX: Removed the API key from the default config ---
+# --- MODIFIED: Added default model names directly into the default config ---
 DEFAULT_CONFIG = {
-    'llm_provider': 'ollama', # Default to local provider
+    'llm_provider': 'ollama',
+    'temperature': 0.1,
     'ollama': {
-        'model': 'Qwen3-coder',  # Default model for Ollama
+        'model': 'Qwen3-coder',  # <-- Centralized default for Ollama
         'host': 'http://localhost:11434'
     },
     'gemini': {
-        'model': 'gemini-2.5-pro'
+        'model': 'gemini-2.5-pro'  # <-- Centralized default for Gemini
         # The API key should NOT be stored here.
         # It will be read from the GOOGLE_API_KEY environment variable.
     }
@@ -41,7 +42,7 @@ class ConfigManager:
         if not os.path.exists(self.config_path):
             logger.info(f"Config file not found. Creating default '{self.config_path}'.")
             self._create_default_config()
-        
+
         self._load_config()
 
     def _create_default_config(self) -> None:
@@ -59,7 +60,9 @@ class ConfigManager:
                 logger.info(f"Configuration loaded successfully from '{self.config_path}'.")
         except (IOError, yaml.YAMLError) as e:
             logger.error(f"Error loading or parsing config file '{self.config_path}': {e}")
-            self.config = {}
+            # --- MODIFIED: Load default config in case of error to ensure app can run ---
+            self.config = DEFAULT_CONFIG
+            logger.warning("Falling back to default configuration due to load error.")
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         keys = key.split('.')
@@ -69,5 +72,14 @@ class ConfigManager:
                 value = value[k]
             return value
         except (KeyError, TypeError):
-            logger.debug(f"Config key '{key}' not found, returning default.")
-            return default
+            # Now, if a key is not found in the file, we check the default config
+            default_value = DEFAULT_CONFIG
+            try:
+                for k in keys:
+                    default_value = default_value[k]
+                logger.debug(f"Config key '{key}' not found in file, returning default value from DEFAULT_CONFIG.")
+                return default_value
+            except (KeyError, TypeError):
+                logger.warning(
+                    f"Config key '{key}' not found in file or defaults, returning provided default: {default}.")
+                return default
