@@ -1,20 +1,20 @@
 """
 Create the main application window and entry point for the AVM GUI, wiring it to the backend services.
 
-This module sets up a tkinter-based graphical user interface for the AVM.
-It instantiates and connects the necessary backend services like the EventBus,
-LLMOperator, and ExecutorService. The GUI provides an input for user prompts
-and a display area for system messages, LLM responses, and action execution
-status, ensuring the backend operations do not block the UI thread.
+This module sets up a CustomTkinter-based graphical user interface for the AVM
+for a modern look and feel. It instantiates and connects the necessary backend
+services like the EventBus, LLMOperator, and ExecutorService. The GUI provides
+an input for user prompts and a display area for system messages, LLM responses,
+and action execution status, ensuring the backend operations do not block the
+UI thread.
 """
 
 import logging
 import queue
 import threading
-import tkinter as tk
-from tkinter import scrolledtext, ttk
 from typing import Optional
 
+import customtkinter as ctk
 from rich.console import Console
 
 from event_bus import EventBus
@@ -33,19 +33,25 @@ class AvmGui:
 
     This class encapsulates the entire graphical user interface, including widget
     setup, backend service initialization, and the logic for communication
-    between the UI and the backend services in a thread-safe manner.
+    between the UI and the backend services in a thread-safe manner using
+    CustomTkinter for a modern UI.
     """
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: ctk.CTk) -> None:
         """
         Initializes the GUI, widgets, and backend services.
 
         Args:
-            root: The root tkinter window.
+            root: The root CustomTkinter window.
         """
         self.root = root
         self.root.title("Autonomous Vision Machine (AVM)")
         self.root.geometry("800x600")
+
+        ctk.set_appearance_mode("System")  # Modes: "System" (default), "Dark", "Light"
+        ctk.set_default_color_theme(
+            "blue"
+        )  # Themes: "blue" (default), "green", "dark-blue"
 
         self.ui_queue = queue.Queue()
         self.event_bus: Optional[EventBus] = None
@@ -56,26 +62,34 @@ class AvmGui:
         self.root.after(100, self._process_queue)
 
     def _setup_widgets(self) -> None:
-        """Creates and arranges the tkinter widgets for the application."""
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        """Creates and arranges the CustomTkinter widgets for the application."""
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
 
-        self.output_text = scrolledtext.ScrolledText(
-            main_frame, wrap=tk.WORD, state="disabled", font=("Helvetica", 10)
+        main_frame = ctk.CTkFrame(self.root)
+        main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
+
+        self.output_text = ctk.CTkTextbox(
+            main_frame, wrap="word", state="disabled", font=("Helvetica", 12)
         )
-        self.output_text.pack(pady=5, fill=tk.BOTH, expand=True)
+        self.output_text.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
 
-        input_frame = ttk.Frame(main_frame)
-        input_frame.pack(fill=tk.X, pady=(5, 0))
+        input_frame = ctk.CTkFrame(main_frame)
+        input_frame.grid(row=1, column=0, sticky="ew")
+        input_frame.grid_columnconfigure(0, weight=1)
 
-        self.prompt_entry = ttk.Entry(input_frame, font=("Helvetica", 11))
-        self.prompt_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5)
+        self.prompt_entry = ctk.CTkEntry(
+            input_frame, font=("Helvetica", 12), placeholder_text="Enter your prompt..."
+        )
+        self.prompt_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=5)
         self.prompt_entry.bind("<Return>", self._submit_prompt)
 
-        self.submit_button = ttk.Button(
+        self.submit_button = ctk.CTkButton(
             input_frame, text="Submit", command=self._submit_prompt
         )
-        self.submit_button.pack(side=tk.RIGHT, padx=(5, 0))
+        self.submit_button.grid(row=0, column=1, sticky="e", padx=(0, 5), pady=5)
 
         self.prompt_entry.focus_set()
 
@@ -143,14 +157,14 @@ class AvmGui:
         try:
             while not self.ui_queue.empty():
                 message = self.ui_queue.get_nowait()
-                self.output_text.config(state="normal")
-                self.output_text.insert(tk.END, message + "\n\n")
-                self.output_text.config(state="disabled")
-                self.output_text.see(tk.END)  # Auto-scroll to the bottom
+                self.output_text.configure(state="normal")
+                self.output_text.insert("end", message + "\n\n")
+                self.output_text.configure(state="disabled")
+                self.output_text.see("end")  # Auto-scroll to the bottom
         finally:
             self.root.after(100, self._process_queue)
 
-    def _submit_prompt(self, event: Optional[tk.Event] = None) -> None:
+    def _submit_prompt(self, event: Optional[object] = None) -> None:
         """
         Handles the submission of a user prompt from the entry widget.
 
@@ -168,7 +182,7 @@ class AvmGui:
             self._display_message("System: Please wait, backend is not ready yet.")
             return
 
-        self.prompt_entry.delete(0, tk.END)
+        self.prompt_entry.delete(0, "end")
         self._display_message(f"👤 You:\n{prompt_text}")
 
         # Run the event publishing in a separate thread to avoid blocking the GUI
@@ -197,13 +211,10 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler("avm_gui.log"),
-            logging.StreamHandler()
-        ]
+        handlers=[logging.FileHandler("avm_gui.log"), logging.StreamHandler()],
     )
     logger.info("Starting AVM GUI application...")
-    root = tk.Tk()
+    root = ctk.CTk()
     app = AvmGui(root)
     root.mainloop()
     logger.info("AVM GUI application closed.")
