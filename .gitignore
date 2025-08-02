@@ -40,3 +40,4 @@ rag_db/
 # Operating System files
 .DS_Store
 Thumbs.db
+/config.yaml

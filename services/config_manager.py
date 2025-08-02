@@ -16,11 +16,11 @@ CONFIG_FILE_PATH = "config.yaml"
 DEFAULT_CONFIG = {
     'llm_provider': 'ollama', # Default to local provider
     'ollama': {
-        'model': 'llama3',
+        'model': 'Qwen3-coder',  # Default model for Ollama
         'host': 'http://localhost:11434'
     },
     'gemini': {
-        'model': 'gemini-1.5-pro'
+        'model': 'gemini-2.5-pro'
         # The API key should NOT be stored here.
         # It will be read from the GOOGLE_API_KEY environment variable.
     }

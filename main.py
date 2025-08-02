@@ -1,153 +1,193 @@
-"""
-Establish the main, interactive command-line entry point for the application,
-handling user input, event publishing, and LLM provider configuration.
-"""
+# main_gui.py
 import logging
-import os
-import sys
-from typing import List
+import queue
+import threading
+import os # <-- Import os to get environment variables
+from typing import Optional, Tuple
 
-# External dependencies are assumed to be installed via pip
-from prompt_toolkit import prompt
-from prompt_toolkit.history import InMemoryHistory
+import customtkinter as ctk
 from rich.console import Console
 
 from event_bus import EventBus
-from events import UserCommandEntered, UserPromptEntered
+from events import UserPromptEntered
 from foundry.foundry_manager import FoundryManager
 from providers.base import LLMProvider
 from providers.gemini_provider import GeminiProvider
 from providers.ollama_provider import OllamaProvider
-from services.command_handler import CommandHandler
+from services.config_manager import ConfigManager
+from services.context_manager import ContextManager
 from services.executor import ExecutorService
 from services.llm_operator import LLMOperator
 
-# Setup logger for this module
 logger = logging.getLogger(__name__)
 
+class AvmGui(ctk.CTk):
 
-def _configure_llm_provider() -> LLMProvider:
-    """
-    Configures and returns an LLM provider based on environment variables.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.title("AVM")
+        self.geometry("1200x800")
 
-    This function reads the `LLM_PROVIDER` environment variable to determine
-    which provider to instantiate. It supports "ollama" and "gemini".
-    It will exit the application if the required configuration is missing
-    or invalid.
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
 
-    Returns:
-        An instance of a class that conforms to the LLMProvider interface.
-    """
-    provider_name = os.getenv("LLM_PROVIDER")
+        self.ui_queue = queue.Queue()
+        self.event_bus: Optional[EventBus] = None
+        self.backend_ready = threading.Event()
+        self.mono_font = ctk.CTkFont(family="Consolas", size=14)
 
-    if not provider_name:
-        logger.critical("FATAL: LLM_PROVIDER environment variable not set. Please set it to 'ollama' or 'gemini'.")
-        sys.exit(1)
+        self._setup_widgets()
+        self._start_backend_setup()
+        self.after(100, self._process_queue)
 
-    provider_name = provider_name.lower()
-    logger.info(f"Attempting to configure LLM provider: '{provider_name}'")
+    def _setup_widgets(self):
+        # This method is unchanged from the previous correct version
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        # ... and so on ...
+        main_frame = ctk.CTkFrame(self)
+        main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
+        self.output_text = ctk.CTkTextbox(
+            main_frame, wrap="word", state="disabled", font=self.mono_font
+        )
+        self.output_text.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+        self.output_text.tag_config("system_message", foreground="#FFAB00")
+        self.output_text.tag_config("user_prompt", foreground="#A5D6A7")
+        self.output_text.tag_config("avm_comment", foreground="#CE93D8")
+        self.output_text.tag_config("avm_executing", foreground="#81D4FA")
+        self.output_text.tag_config("avm_error", foreground="#EF9A9A")
+        self.output_text.tag_config("avm_response", foreground="#FFFFFF") # For LLM text response
+        self.output_text.tag_config("avm_output", foreground="#80CBC4") # For tool output
+        self.output_text.tag_config("avm_info", foreground="#B0BEC5") # For context updates etc.
 
-    if provider_name == "ollama":
-        model = os.getenv("OLLAMA_MODEL", "Qwen3-coder")
-        logger.info(f"Using Ollama provider with model: '{model}'")
-        return OllamaProvider(model_name=model)  # Corrected to use model_name
+        input_frame = ctk.CTkFrame(main_frame)
+        input_frame.grid(row=1, column=0, sticky="ew")
+        input_frame.grid_columnconfigure(0, weight=1)
+        self.prompt_entry = ctk.CTkEntry(
+            input_frame,
+            font=self.mono_font,
+            placeholder_text="Enter your prompt for the AVM...",
+        )
+        self.prompt_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=5)
+        self.prompt_entry.bind("<Return>", self._submit_prompt)
+        self.submit_button = ctk.CTkButton(
+            input_frame, text="Send", command=self._submit_prompt, width=80
+        )
+        self.submit_button.grid(row=0, column=1, sticky="e", padx=(0, 0), pady=5)
+        self.prompt_entry.focus_set()
 
-    elif provider_name == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.critical(
-                "FATAL: GEMINI_API_KEY environment variable is not set. It is required for the Gemini provider.")
-            sys.exit(1)
+    def _start_backend_setup(self):
+        self._display_message("System: Initializing backend services...", "system_message")
+        backend_thread = threading.Thread(target=self._setup_backend, daemon=True)
+        backend_thread.start()
 
-        # --- THIS IS THE NEW LOGIC ---
-        # Look for a specific Gemini model, or default to 1.5 Pro.
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        logger.info(f"Using Gemini provider with model: '{model_name}'")
-        return GeminiProvider(api_key=api_key, model_name=model_name)
-        # --- END NEW LOGIC ---
-
-    else:
-        logger.critical(f"FATAL: Invalid LLM_PROVIDER: '{provider_name}'. Supported values are 'ollama' or 'gemini'.")
-        sys.exit(1)
-
-
-def main() -> None:
-    """
-    The main entry point for the interactive command-line application.
-
-    Configures the LLM provider, initializes components, wires them together
-    via the event bus, and runs the main input loop. The loop is driven by
-    the CommandHandler's state. It parses user input, publishes all actions
-    as events, and checks the handler's state to determine when to exit.
-    """
-    # --- Provider Configuration ---
-    # This function will exit the application if configuration is invalid.
-    provider = _configure_llm_provider()
-
-    # --- Initialization ---
-    event_bus = EventBus()
-    console = Console()
-    history = InMemoryHistory()
-    foundry_manager = FoundryManager()
-    cmd_handler = CommandHandler(console=console)
-    # The ExecutorService subscribes to events upon initialization.
-    executor = ExecutorService(event_bus=event_bus)
-    # Inject the provider, event bus, and foundry manager into the LLMOperator.
-    llm_operator = LLMOperator(
-        console=console,
-        provider=provider,
-        event_bus=event_bus,
-        foundry_manager=foundry_manager,
-    )
-
-    # --- Wiring (Subscription) ---
-    event_bus.subscribe(UserCommandEntered, cmd_handler.handle)
-    event_bus.subscribe(UserPromptEntered, llm_operator.handle)
-
-    # --- Application Start ---
-    console.print("[bold green]Welcome to the Interactive Application CLI![/bold green]")
-    console.print("Type a prompt or use '/' for commands (e.g., /exit, /quit).")
-
-    while not cmd_handler.should_exit:
+    def _setup_backend(self) -> None:
+        """
+        Initializes and wires up all backend services based on config.yaml.
+        """
         try:
-            user_input = prompt(">>> ", history=history).strip()
+            logger.info("Setting up backend services...")
+            config_manager = ConfigManager()
+            self.event_bus = EventBus()
+            console = Console()
+            foundry_manager = FoundryManager()
+            context_manager = ContextManager() # Instantiate the new context manager
 
-            if not user_input:
-                continue
+            provider_name = config_manager.get("llm_provider")
+            provider: Optional[LLMProvider] = None
+            logger.info(f"Configuring LLM provider from config: '{provider_name}'")
 
-            if user_input.startswith('/'):
-                parts: List[str] = user_input[1:].split()
-                if not parts:
-                    console.print("[yellow]Please enter a command after '/'.[/yellow]")
-                    continue
-                command = parts[0]
-                args = parts[1:]
-                event = UserCommandEntered(command=command, args=args)
-                event_bus.publish(event)
+            if provider_name == "ollama":
+                settings = config_manager.get("ollama", {})
+                model = settings.get("model", "Qwen3-coder")
+                host = settings.get("host", "http://localhost:11434")
+                logger.info(f"Using Ollama provider with model '{model}' and host '{host}'.")
+                provider = OllamaProvider(model_name=model, host=host)
+
+            elif provider_name == "gemini":
+                api_key = os.getenv("GOOGLE_API_KEY") # Read from environment
+                if not api_key:
+                    error_msg = "GOOGLE_API_KEY environment variable not set. It is required for the Gemini provider."
+                    logger.critical(error_msg)
+                    raise ValueError(error_msg)
+
+                settings = config_manager.get("gemini", {})
+                model = settings.get("model", "gemini-1.5-pro-latest")
+                logger.info(f"Using Gemini provider with model '{model}'.")
+                provider = GeminiProvider(api_key=api_key, model_name=model)
+
             else:
-                event = UserPromptEntered(prompt_text=user_input)
-                event_bus.publish(event)
+                error_msg = f"Unsupported LLM provider in config.yaml: '{provider_name}'"
+                logger.critical(error_msg)
+                raise ValueError(error_msg)
 
-        except (KeyboardInterrupt, EOFError):
-            logger.info("Exit signal (Ctrl+C or Ctrl+D) detected.")
-            console.print("\n[bold red]Exit signal detected. Shutting down.[/bold red]")
-            break
+            # Inject ContextManager into LLMOperator
+            llm_operator = LLMOperator(
+                console=console,
+                provider=provider,
+                event_bus=self.event_bus,
+                foundry_manager=foundry_manager,
+                context_manager=context_manager,
+                display_callback=self._display_message,
+            )
+            self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
+
+            # Inject ContextManager into ExecutorService
+            ExecutorService(
+                event_bus=self.event_bus,
+                context_manager=context_manager,
+                display_callback=self._display_message,
+            )
+
+            logger.info("Backend services initialized successfully.")
+            self._display_message("System: Backend ready. Please enter a prompt.", "system_message")
+            self.backend_ready.set()
         except Exception as e:
-            logger.error(f"An unexpected error occurred in the main loop: {e}", exc_info=True)
-            console.print(f"[bold red]An unexpected error occurred: {e}[/bold red]")
-            break
+            logger.error("Failed to initialize backend services: %s", e, exc_info=True)
+            self._display_message(f"FATAL ERROR: Could not initialize backend: {e}", "avm_error")
 
-    logger.info("Application main loop finished. Exiting.")
+    # ... (rest of the AvmGui class is the same)
+    def _display_message(self, message: str, tag: str):
+        self.ui_queue.put((message, tag))
+
+    def _process_queue(self):
+        try:
+            while not self.ui_queue.empty():
+                message, tag = self.ui_queue.get_nowait()
+                self.output_text.configure(state="normal")
+                self.output_text.insert("end", message + "\n\n", (tag,))
+                self.output_text.configure(state="disabled")
+                self.output_text.see("end")
+        finally:
+            self.after(100, self._process_queue)
+
+    def _submit_prompt(self, event: Optional[object] = None):
+        prompt_text = self.prompt_entry.get().strip()
+        if not prompt_text: return
+        if not self.backend_ready.is_set():
+            self._display_message("System: Please wait...", "system_message")
+            return
+        self.prompt_entry.delete(0, "end")
+        self._display_message(f"👤 You:\n{prompt_text}", "user_prompt")
+        threading.Thread(target=self._publish_prompt_event, args=(prompt_text,), daemon=True).start()
+
+    def _publish_prompt_event(self, prompt_text: str):
+        if self.event_bus:
+            self.event_bus.publish(UserPromptEntered(prompt_text=prompt_text))
+        else:
+            self._display_message("ERROR: Event bus not available.", "avm_error")
 
 
 if __name__ == "__main__":
+    # ... (main entry point is the same) ...
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)-25s - %(levelname)-8s - %(message)s',
-        stream=sys.stdout,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler("avm_gui.log"), logging.StreamHandler()],
     )
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    main()
-    print("Application has terminated.")
+    logger.info("Starting AVM GUI application...")
+    app = AvmGui()
+    app.mainloop()
+    logger.info("AVM GUI application closed.")
