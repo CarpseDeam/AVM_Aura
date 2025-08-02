@@ -51,12 +51,8 @@ def read_file(path: str) -> str:
 def list_files(path: str) -> str:
     """Lists files and directories at a given path."""
     try:
-        # --- THIS IS THE FIX ---
-        # If the path provided is an empty string or None, default to "."
-        # which represents the current directory.
         if not path:
             path = "."
-        # --- END FIX ---
 
         logger.info(f"Listing contents of directory: {path}")
         path_obj = Path(path)
@@ -103,25 +99,25 @@ def assign_variable(variable_name: str, value: str) -> ast.Assign:
     """
     logger.info(f"Creating AST for: {variable_name} = {value}")
 
-    # Create the target for the assignment (the variable name on the left)
     target = ast.Name(id=variable_name, ctx=ast.Store())
 
-    # Determine if the value is a literal or an identifier
     value_node: Union[ast.Constant, ast.Name]
     try:
-        # Handles numbers, strings, booleans, lists, dicts, etc.
-        # For example, "123" -> 123, "'hello'" -> "hello", "True" -> True
         evaluated_value = ast.literal_eval(value)
         value_node = ast.Constant(value=evaluated_value)
         logger.debug(f"Treated assignment value '{value}' as a literal.")
     except (ValueError, SyntaxError):
-        # If it's not a literal, treat it as a variable name (identifier)
-        # For example, "my_var" -> Name(id='my_var', ctx=Load())
         value_node = ast.Name(id=value, ctx=ast.Load())
         logger.debug(f"Treated assignment value '{value}' as an identifier.")
 
-    # Create the assignment expression
     assignment = ast.Assign(targets=[target], value=value_node)
+
+    # --- THIS IS THE FIX ---
+    # Add the missing line number and column offset attributes that
+    # ast.unparse() requires to function correctly.
+    ast.fix_missing_locations(assignment)
+    # --- END FIX ---
+
     return assignment
 
 
@@ -137,7 +133,12 @@ def get_generated_code(code_ast: ast.Module) -> str:
     """
     logger.info("Unparsing the current AST to generate code string.")
     try:
-        # ast.unparse requires Python 3.9+
+        # --- ADDED A SAFETY FIX HERE TOO ---
+        # As a best practice, fix any missing locations on the entire tree
+        # before attempting to unparse it.
+        ast.fix_missing_locations(code_ast)
+        # --- END FIX ---
+
         generated_code = ast.unparse(code_ast)
         logger.info("Successfully unparsed AST to code.")
         return generated_code

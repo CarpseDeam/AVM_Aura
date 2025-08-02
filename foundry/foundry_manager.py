@@ -1,154 +1,71 @@
 # foundry/foundry_manager.py
-
 """
-Provides a manager to centralize the creation and retrieval of Blueprint tools.
-
-This module defines the FoundryManager class, which is responsible for dynamically
-discovering, loading, and providing access to all available Blueprint objects
-from the 'blueprints/' directory. It acts as a single source of truth for the
-tools that the LLM can use.
+Provides a manager to centralize the creation and retrieval of Blueprint tools by
+dynamically discovering them from the filesystem.
 """
 
 import importlib
-import inspect
 import logging
-import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from foundry.blueprints import Blueprint
 
 logger = logging.getLogger(__name__)
 
-
 class FoundryManager:
     """
-    Manages the lifecycle and retrieval of available Blueprint tools by
-    dynamically discovering them from the filesystem.
+    Manages Blueprint tools by dynamically discovering them from the 'blueprints' directory.
     """
 
     def __init__(self) -> None:
-        """Initializes the FoundryManager and loads all discoverable blueprints."""
         self._blueprints: Dict[str, Blueprint] = {}
         self._discover_and_load_blueprints()
-        logger.info(
-            "FoundryManager initialized with %d blueprints.", len(self._blueprints)
-        )
+        logger.info("FoundryManager initialized with %d blueprints.", len(self._blueprints))
 
     def _add_blueprint(self, blueprint: Blueprint) -> None:
-        """
-        Registers a single blueprint with the manager.
-
-        Args:
-            blueprint (Blueprint): The blueprint instance to register.
-        """
         if blueprint.name in self._blueprints:
-            logger.warning(
-                "Blueprint with name '%s' is being overwritten.", blueprint.name
-            )
+            logger.warning("Blueprint with name '%s' is being overwritten.", blueprint.name)
         self._blueprints[blueprint.name] = blueprint
         logger.debug("Registered blueprint: %s", blueprint.name)
 
     def _discover_and_load_blueprints(self) -> None:
         """
-        Discovers and loads all blueprints from the 'blueprints' directory.
-
-        This method scans the 'blueprints' package, imports each module,
-        and registers any instances of the Blueprint class it finds.
+        Scans the 'blueprints' package, imports each module, and registers the
+        Blueprint instance named 'blueprint' found within.
         """
         try:
-            # Assumes 'foundry' and 'blueprints' are sibling directories.
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            blueprints_dir = os.path.join(project_root, "blueprints")
+            # Assumes the 'blueprints' directory is a sibling to 'foundry'
+            blueprints_dir = Path(__file__).parent.parent / "blueprints"
             package_name = "blueprints"
 
-            if not os.path.isdir(blueprints_dir):
-                logger.error(
-                    "Blueprints directory not found at '%s'. No blueprints will be loaded.",
-                    blueprints_dir,
-                )
-                return
+            for file_path in blueprints_dir.glob("*.py"):
+                if file_path.name.startswith("__"):
+                    continue
 
-            for filename in os.listdir(blueprints_dir):
-                # Load only Python files that are not __init__.py
-                if filename.endswith(".py") and not filename.startswith("__"):
-                    module_name = filename[:-3]  # Remove .py extension
-                    full_module_path = f"{package_name}.{module_name}"
-                    try:
-                        module = importlib.import_module(full_module_path)
-                        # Find all Blueprint instances in the loaded module
-                        for _, obj in inspect.getmembers(module):
-                            if isinstance(obj, Blueprint):
-                                self._add_blueprint(obj)
-                                logger.info(
-                                    "Successfully loaded blueprint '%s' from %s.",
-                                    obj.name,
-                                    filename,
-                                )
-                    except ImportError as e:
-                        logger.error(
-                            "Failed to import blueprint module %s: %s",
-                            full_module_path,
-                            e,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "An unexpected error occurred while loading from %s: %s",
-                            filename,
-                            e,
-                        )
+                module_name = f"{package_name}.{file_path.stem}"
+                try:
+                    module = importlib.import_module(module_name)
+                    # Convention: each blueprint file must define a 'blueprint' variable.
+                    if hasattr(module, "blueprint") and isinstance(module.blueprint, Blueprint):
+                        self._add_blueprint(module.blueprint)
+                        logger.info("Loaded blueprint '%s' from %s.", module.blueprint.name, file_path.name)
+                    else:
+                        logger.warning("File %s does not contain a valid 'blueprint' instance.", file_path.name)
+                except Exception as e:
+                    logger.error("Failed to load blueprint from %s: %s", file_path.name, e)
         except Exception as e:
-            logger.critical(
-                "A critical error occurred during blueprint discovery: %s", e
-            )
+            logger.critical("A critical error occurred during blueprint discovery: %s", e)
 
     def get_blueprint(self, name: str) -> Optional[Blueprint]:
-        """
-        Retrieves a blueprint by its unique name.
-
-        Args:
-            name (str): The name of the blueprint to retrieve.
-
-        Returns:
-            Optional[Blueprint]: The blueprint instance if found, otherwise None.
-        """
         return self._blueprints.get(name)
 
-    def get_all_blueprints(self) -> List[Blueprint]:
-        """
-        Retrieves a list of all registered blueprint instances.
-
-        Returns:
-            List[Blueprint]: A list of all blueprints.
-        """
-        return list(self._blueprints.values())
-
     def get_llm_tool_definitions(self) -> List[Dict[str, Any]]:
-        """
-        Generates a list of tool definitions formatted for an LLM.
-
-        This format is typically used to inform the LLM about the available
-        functions it can call.
-
-        Returns:
-            List[Dict[str, Any]]: A list of tool definitions suitable for LLM APIs.
-        """
         definitions: List[Dict[str, Any]] = []
-        for blueprint in self._blueprints.values():
-            try:
-                tool_def = {
-                    "type": "function",
-                    "function": {
-                        "name": blueprint.name,
-                        "description": blueprint.description,
-                        "parameters": blueprint.parameters,
-                    },
-                }
-                definitions.append(tool_def)
-            except AttributeError as e:
-                logger.error(
-                    "Failed to create tool definition for blueprint '%s'. "
-                    "The Blueprint object may be missing required attributes. Error: %s",
-                    blueprint.name,
-                    e,
-                )
+        for bp in self._blueprints.values():
+            tool_def = {
+                "type": "function",
+                "function": {"name": bp.name, "description": bp.description, "parameters": bp.parameters},
+            }
+            definitions.append(tool_def)
         return definitions
