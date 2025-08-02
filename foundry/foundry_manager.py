@@ -3,37 +3,33 @@
 """
 Provides a manager to centralize the creation and retrieval of Blueprint tools.
 
-This module defines the FoundryManager class, which is responsible for instantiating,
-registering, and providing access to all available Blueprint objects in the system.
-It acts as a single source of truth for the tools that the LLM can use.
+This module defines the FoundryManager class, which is responsible for dynamically
+discovering, loading, and providing access to all available Blueprint objects
+from the 'blueprints/' directory. It acts as a single source of truth for the
+tools that the LLM can use.
 """
 
+import importlib
+import inspect
 import logging
-from typing import List, Dict, Optional, Any
+import os
+from typing import Any, Dict, List, Optional
 
-# We are importing our corrected Blueprint class definition
 from foundry.blueprints import Blueprint
-# Import the concrete action functions to be wired to the blueprints
-from foundry.actions import (
-    write_file,
-    read_file,
-    list_files,
-    assign_variable,
-    get_generated_code,
-)
 
 logger = logging.getLogger(__name__)
 
 
 class FoundryManager:
     """
-    Manages the lifecycle and retrieval of available Blueprint tools.
+    Manages the lifecycle and retrieval of available Blueprint tools by
+    dynamically discovering them from the filesystem.
     """
 
     def __init__(self) -> None:
-        """Initializes the FoundryManager and registers all core blueprints."""
+        """Initializes the FoundryManager and loads all discoverable blueprints."""
         self._blueprints: Dict[str, Blueprint] = {}
-        self._register_core_blueprints()
+        self._discover_and_load_blueprints()
         logger.info(
             "FoundryManager initialized with %d blueprints.", len(self._blueprints)
         )
@@ -52,115 +48,58 @@ class FoundryManager:
         self._blueprints[blueprint.name] = blueprint
         logger.debug("Registered blueprint: %s", blueprint.name)
 
-    def _register_core_blueprints(self) -> None:
+    def _discover_and_load_blueprints(self) -> None:
         """
-        Creates and registers the set of core, built-in blueprints.
+        Discovers and loads all blueprints from the 'blueprints' directory.
 
-        This method defines the schema for each tool and wires it to its
-        corresponding implementation function from `foundry.actions`.
+        This method scans the 'blueprints' package, imports each module,
+        and registers any instances of the Blueprint class it finds.
         """
-        # Define the schema for the write_file tool
-        write_file_params = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The relative or absolute path to the file.",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The full content to write into the file.",
-                },
-            },
-            "required": ["path", "content"],
-        }
-        write_file_blueprint = Blueprint(
-            name="write_file",
-            description="Writes content to a specified file. Creates the file if it doesn't exist, or overwrites it if it does.",
-            template="",
-            parameters=write_file_params,
-            execution_logic=write_file,  # Wire to the actual function
-        )
-        self._add_blueprint(write_file_blueprint)
+        try:
+            # Assumes 'foundry' and 'blueprints' are sibling directories.
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            blueprints_dir = os.path.join(project_root, "blueprints")
+            package_name = "blueprints"
 
-        # Define the schema for the read_file tool
-        read_file_params = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The relative or absolute path of the file to read.",
-                }
-            },
-            "required": ["path"],
-        }
-        read_file_blueprint = Blueprint(
-            name="read_file",
-            description="Reads the entire content of a specified file and returns it as a string.",
-            template="",
-            parameters=read_file_params,
-            execution_logic=read_file,  # Wire to the actual function
-        )
-        self._add_blueprint(read_file_blueprint)
+            if not os.path.isdir(blueprints_dir):
+                logger.error(
+                    "Blueprints directory not found at '%s'. No blueprints will be loaded.",
+                    blueprints_dir,
+                )
+                return
 
-        # Define the schema for the list_files tool
-        list_files_params = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The path to the directory to list. Defaults to the current directory if not provided.",
-                }
-            },
-            "required": [],
-        }
-        list_files_blueprint = Blueprint(
-            name="list_files",
-            description="Lists all files and directories in a specified path.",
-            template="",
-            parameters=list_files_params,
-            execution_logic=list_files,  # Wire to the actual function
-        )
-        self._add_blueprint(list_files_blueprint)
-
-        # Define the schema for the assign_variable tool
-        assign_variable_params = {
-            "type": "object",
-            "properties": {
-                "variable_name": {
-                    "type": "string",
-                    "description": "The name of the variable to create or assign to.",
-                },
-                "value": {
-                    "type": "string",
-                    "description": "The value to assign. This can be a literal (e.g., \"123\", \"'hello'\", \"True\") or an identifier for another variable (e.g., \"other_var\").",
-                },
-            },
-            "required": ["variable_name", "value"],
-        }
-        assign_variable_blueprint = Blueprint(
-            name="assign_variable",
-            description="Creates a Python variable assignment statement. The result is an AST node that will be added to the code being generated.",
-            template="",
-            parameters=assign_variable_params,
-            execution_logic=assign_variable,
-        )
-        self._add_blueprint(assign_variable_blueprint)
-
-        # Define the schema for the get_generated_code tool
-        get_generated_code_params = {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-        get_generated_code_blueprint = Blueprint(
-            name="get_generated_code",
-            description="Retrieves the complete Python code generated so far from all previous code-building actions (like 'assign_variable'). This is useful for reviewing the code before writing it to a file.",
-            template="",
-            parameters=get_generated_code_params,
-            execution_logic=get_generated_code,
-        )
-        self._add_blueprint(get_generated_code_blueprint)
+            for filename in os.listdir(blueprints_dir):
+                # Load only Python files that are not __init__.py
+                if filename.endswith(".py") and not filename.startswith("__"):
+                    module_name = filename[:-3]  # Remove .py extension
+                    full_module_path = f"{package_name}.{module_name}"
+                    try:
+                        module = importlib.import_module(full_module_path)
+                        # Find all Blueprint instances in the loaded module
+                        for _, obj in inspect.getmembers(module):
+                            if isinstance(obj, Blueprint):
+                                self._add_blueprint(obj)
+                                logger.info(
+                                    "Successfully loaded blueprint '%s' from %s.",
+                                    obj.name,
+                                    filename,
+                                )
+                    except ImportError as e:
+                        logger.error(
+                            "Failed to import blueprint module %s: %s",
+                            full_module_path,
+                            e,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "An unexpected error occurred while loading from %s: %s",
+                            filename,
+                            e,
+                        )
+        except Exception as e:
+            logger.critical(
+                "A critical error occurred during blueprint discovery: %s", e
+            )
 
     def get_blueprint(self, name: str) -> Optional[Blueprint]:
         """
