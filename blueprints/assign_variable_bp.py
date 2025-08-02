@@ -3,16 +3,23 @@ from foundry.blueprints import Blueprint
 from foundry.actions import assign_variable
 
 params = {
-    "type": "object", "properties": {
-        "variable_name": {"type": "string", "description": "The name of the variable."},
-        "value": {"type": "string", "description": "The value to assign (e.g., \"123\", \"'hello'\", \"other_var\")."}
-    }, "required": ["variable_name", "value"]
+    "type": "object",
+    "properties": {
+        "variable_name": {
+            "type": "string",
+            "description": "The name of the variable to create or assign to.",
+        },
+        "value": {
+            "type": "string",
+            "description": "The value to assign. This can be a literal (e.g., \"123\", \"'hello'\", \"True\") or an identifier for another variable (e.g., \"other_var\").",
+        },
+    },
+    "required": ["variable_name", "value"],
 }
 
 blueprint = Blueprint(
-    name="assign_variable",
+    id="assign_variable",
     description="Creates a Python variable assignment AST node.",
-    template="",
     parameters=params,
-    execution_logic=assign_variable
+    action_function=assign_variable
 )

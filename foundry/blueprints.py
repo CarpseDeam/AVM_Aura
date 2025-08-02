@@ -1,10 +1,5 @@
 # foundry/blueprints.py
 
-"""
-Defines the simple data structures for Blueprints and raw code instructions,
-used for code generation.
-"""
-
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
@@ -15,21 +10,24 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Blueprint:
     """
-    Represents a template for generating code or other artifacts.
+    Represents a self-contained, executable tool that the AVM can use.
 
-    Blueprints are the 'tools' the AVM can use. They define a structured
-    template with named parameters that can be filled in to produce a
-    final piece of code or configuration. They can also be linked to a
-    concrete Python function for direct execution.
+    This dataclass is the 'contract' for all blueprints. It defines the tool's
+    name, its purpose, the parameters it accepts (in a JSON Schema format),
+    and the actual Python function that gets executed when the tool is called.
     """
-    # --- All required fields come FIRST ---
-    name: str
+    # Use 'id' as the unique name for the tool, which is more intuitive.
+    id: str
     description: str
-    template: str
 
-    # --- Optional fields with default values come LAST ---
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    execution_logic: Optional[Callable[..., Any]] = None
+    # The JSON-schema compliant parameter definition that the LLM will see.
+    parameters: Dict[str, Any]
+
+    # A direct reference to the Python function that performs the action.
+    action_function: Callable[..., Any]
+
+    # Template is kept for potential future use in more complex blueprints.
+    template: str = ""
 
 
 @dataclass

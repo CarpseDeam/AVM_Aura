@@ -2,10 +2,15 @@
 from foundry.blueprints import Blueprint
 from foundry.actions import get_generated_code
 
+params = {
+    "type": "object",
+    "properties": {},
+    "required": []
+}
+
 blueprint = Blueprint(
-    name="get_generated_code",
-    description="Returns the Python code generated so far in the session.",
-    template="",
-    parameters={"type": "object", "properties": {}, "required": []},
-    execution_logic=get_generated_code
+    id="get_generated_code",
+    description="Returns the Python code generated so far in the session from all previous code-building actions.",
+    parameters=params,
+    action_function=get_generated_code
 )
