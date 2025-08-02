@@ -121,6 +121,125 @@ def assign_variable(variable_name: str, value: str) -> ast.Assign:
     return assignment
 
 
+def define_function(name: str, args: str) -> ast.FunctionDef:
+    """
+    Creates an AST node for a function definition with an empty body.
+
+    The function body is initialized with a single `pass` statement.
+    Arguments are provided as a single comma-separated string.
+
+    Args:
+        name: The name of the function.
+        args: A comma-separated string of argument names (e.g., "x, y, z").
+
+    Returns:
+        An ast.FunctionDef node representing the function definition.
+    """
+    logger.info(f"Creating AST for function definition: def {name}({args}): ...")
+
+    # Parse argument string into a list of ast.arg nodes
+    arg_names = [arg.strip() for arg in args.split(',') if arg.strip()]
+    arguments = ast.arguments(
+        posonlyargs=[],
+        args=[ast.arg(arg=name) for name in arg_names],
+        kwonlyargs=[],
+        kw_defaults=[],
+        defaults=[]
+    )
+
+    # Create a body with a single 'pass' statement
+    body = [ast.Pass()]
+
+    # Create the function definition node
+    func_def = ast.FunctionDef(
+        name=name,
+        args=arguments,
+        body=body,
+        decorator_list=[],
+        returns=None
+    )
+
+    ast.fix_missing_locations(func_def)
+    return func_def
+
+
+def function_call(function_name: str, args: str) -> ast.Expr:
+    """
+    Creates an AST node for a function call statement.
+
+    Arguments are provided as a single comma-separated string. Each argument
+    is parsed as a literal (e.g., "123", "'hello'") or treated as a
+    variable name if literal parsing fails.
+
+    Args:
+        function_name: The name of the function to call.
+        args: A comma-separated string of arguments.
+
+    Returns:
+        An ast.Expr node containing an ast.Call node.
+    """
+    logger.info(f"Creating AST for function call: {function_name}({args})")
+
+    # Create the function name node
+    func_node = ast.Name(id=function_name, ctx=ast.Load())
+
+    # Parse arguments
+    arg_nodes = []
+    if args:
+        arg_values = [arg.strip() for arg in args.split(',')]
+        for value in arg_values:
+            try:
+                evaluated_value = ast.literal_eval(value)
+                arg_nodes.append(ast.Constant(value=evaluated_value))
+            except (ValueError, SyntaxError):
+                arg_nodes.append(ast.Name(id=value, ctx=ast.Load()))
+
+    # Create the call node
+    call_node = ast.Call(
+        func=func_node,
+        args=arg_nodes,
+        keywords=[]
+    )
+
+    # Wrap in an expression to make it a statement
+    expr_statement = ast.Expr(value=call_node)
+
+    ast.fix_missing_locations(expr_statement)
+    return expr_statement
+
+
+def return_statement(value: str) -> ast.Return:
+    """
+    Creates an AST node for a return statement.
+
+    If the value is an empty string, a bare `return` is created.
+    Otherwise, the value is parsed as a literal (e.g., "123", "'hello'")
+    or treated as a variable name if literal parsing fails.
+
+    Args:
+        value: The value to return, or an empty string for a bare return.
+
+    Returns:
+        An ast.Return node.
+    """
+    logger.info(f"Creating AST for return statement: return {value or ''}")
+
+    value_node = None
+    if value:
+        try:
+            evaluated_value = ast.literal_eval(value)
+            value_node = ast.Constant(value=evaluated_value)
+            logger.debug(f"Treated return value '{value}' as a literal.")
+        except (ValueError, SyntaxError):
+            value_node = ast.Name(id=value, ctx=ast.Load())
+            logger.debug(f"Treated return value '{value}' as an identifier.")
+
+    return_node = ast.Return(value=value_node)
+
+    ast.fix_missing_locations(return_node)
+    return return_node
+
+
 def get_generated_code(code_ast: ast.Module) -> str:
     """
     Unparses a complete AST module into a Python code string.
