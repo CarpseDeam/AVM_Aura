@@ -5,7 +5,8 @@ This module defines the ExecutorService, responsible for running actions.
 The service listens for `ActionReadyForExecution` events and executes the
 instruction contained within, which can be either a structured Blueprint
 invocation or a raw code instruction. It handles the invocation of the
-correct logic and displays the results or errors.
+correct logic and displays the results or errors. After certain actions,
+like reading a file, it updates the context memory.
 """
 
 import logging
@@ -14,6 +15,7 @@ from typing import Callable, Optional
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation
 from foundry.blueprints import RawCodeInstruction, Blueprint
+from services.context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +26,13 @@ class ExecutorService:
 
     This service acts as the bridge between an abstract instruction (like a
     BlueprintInvocation) and its concrete execution. It invokes the associated
-    Python function and uses a callback to display the output.
+    Python function, uses a callback to display the output, and updates the
+    AVM's context memory when appropriate (e.g., after reading a file).
     """
     def __init__(
             self,
             event_bus: EventBus,
+            context_manager: ContextManager,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         """
@@ -36,11 +40,13 @@ class ExecutorService:
 
         Args:
             event_bus (EventBus): The central event bus for communication.
+            context_manager (ContextManager): The service for managing AVM context.
             display_callback (Optional[Callable[[str, str], None]]): A function
                 to call to display output to the user. It takes a message
                 string and a tag string.
         """
         self.event_bus = event_bus
+        self.context_manager = context_manager
         self.display_callback = display_callback
         self._register_handlers()
 
@@ -67,6 +73,9 @@ class ExecutorService:
         calls it with the provided parameters, and displays the result. It
         handles cases where no logic is defined or where execution fails.
 
+        If the executed blueprint is 'read_file', its output is added to the
+        ContextManager.
+
         Args:
             invocation (BlueprintInvocation): The event containing the blueprint
                 and parameters for execution.
@@ -91,6 +100,23 @@ class ExecutorService:
             result_message = f"✅ Result from {action_name}:\n{result}"
             logger.info("Blueprint '%s' executed successfully.", action_name)
             self._display(result_message, "avm_output")
+
+            # If the action was reading a file, add its content to the context.
+            if action_name == "read_file":
+                filename = action_params.get("filename")
+                if filename and isinstance(result, str):
+                    self.context_manager.add_to_context(key=filename, content=result)
+                    logger.info(
+                        "Added content of file '%s' to context memory.", filename
+                    )
+                    self._display(f"📝 Content of '{filename}' added to context.", "avm_info")
+                else:
+                    logger.warning(
+                        "Could not add 'read_file' result to context. "
+                        "Filename or result missing/invalid. Params: %s",
+                        action_params,
+                    )
+
         except Exception as e:
             error_msg = f"❌ Error executing Blueprint '{action_name}': {e}"
             logger.exception(
@@ -108,7 +134,6 @@ class ExecutorService:
             instruction (RawCodeInstruction): The instruction containing the
                 raw code to be executed.
         """
-        # This part remains mostly the same, just using the new display method
         display_message = f"▶️ Executing Raw Code..."
         self._display(display_message, "avm_executing")
         # A full implementation would require a secure sandbox environment.

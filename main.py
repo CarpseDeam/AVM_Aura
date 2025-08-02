@@ -48,17 +48,23 @@ def _configure_llm_provider() -> LLMProvider:
     logger.info(f"Attempting to configure LLM provider: '{provider_name}'")
 
     if provider_name == "ollama":
-        model = os.getenv("OLLAMA_MODEL", "llama3")
+        model = os.getenv("OLLAMA_MODEL", "Qwen3-coder")
         logger.info(f"Using Ollama provider with model: '{model}'")
-        return OllamaProvider(model=model)
+        return OllamaProvider(model_name=model)  # Corrected to use model_name
 
     elif provider_name == "gemini":
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            logger.critical("FATAL: GEMINI_API_KEY environment variable is not set. It is required for the Gemini provider.")
+            logger.critical(
+                "FATAL: GEMINI_API_KEY environment variable is not set. It is required for the Gemini provider.")
             sys.exit(1)
-        logger.info("Using Gemini provider.")
-        return GeminiProvider(api_key=api_key)
+
+        # --- THIS IS THE NEW LOGIC ---
+        # Look for a specific Gemini model, or default to 1.5 Pro.
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+        logger.info(f"Using Gemini provider with model: '{model_name}'")
+        return GeminiProvider(api_key=api_key, model_name=model_name)
+        # --- END NEW LOGIC ---
 
     else:
         logger.critical(f"FATAL: Invalid LLM_PROVIDER: '{provider_name}'. Supported values are 'ollama' or 'gemini'.")
@@ -95,8 +101,6 @@ def main() -> None:
     )
 
     # --- Wiring (Subscription) ---
-    # The command handler is subscribed to command events. It will update its
-    # internal state (e.g., `should_exit`) when it processes an exit command.
     event_bus.subscribe(UserCommandEntered, cmd_handler.handle)
     event_bus.subscribe(UserPromptEntered, llm_operator.handle)
 
@@ -104,8 +108,6 @@ def main() -> None:
     console.print("[bold green]Welcome to the Interactive Application CLI![/bold green]")
     console.print("Type a prompt or use '/' for commands (e.g., /exit, /quit).")
 
-    # The main loop is now driven by the command handler's `should_exit` property.
-    # This property will be flipped to True when the handler processes an exit command.
     while not cmd_handler.should_exit:
         try:
             user_input = prompt(">>> ", history=history).strip()
@@ -116,7 +118,6 @@ def main() -> None:
             if user_input.startswith('/'):
                 parts: List[str] = user_input[1:].split()
                 if not parts:
-                    # User just typed "/" with no command
                     console.print("[yellow]Please enter a command after '/'.[/yellow]")
                     continue
                 command = parts[0]
@@ -140,13 +141,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Configure basic logging for the entire application
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)-25s - %(levelname)-8s - %(message)s',
         stream=sys.stdout,
     )
-    # Suppress overly verbose loggers from dependencies to keep output clean
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 

@@ -1,3 +1,16 @@
+# --- AVM Project Requirements ---
+
+# For the modern GUI
 customtkinter
+
+# For rich text formatting in the backend/console
 rich
+
+# For parsing the config.yaml file
 PyYAML
+
+# For making HTTP requests in the Ollama provider
+requests
+
+# For the Google Gemini provider API
+google-generativeai

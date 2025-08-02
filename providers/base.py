@@ -18,13 +18,20 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def get_response(
-        self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
+        self,
+        prompt: str,
+        context: Optional[Dict[str, str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
-        Get a response from the LLM, optionally with tool-calling capabilities.
+        Get a response from the LLM, optionally with tool-calling capabilities
+        and a stateful context.
 
         Args:
             prompt: The user's input prompt.
+            context: An optional dictionary containing contextual information,
+                     such as the content of previously read files. This allows
+                     for stateful conversations.
             tools: An optional list of tool definitions that the LLM can use.
                    Each tool is a dictionary describing its name, description,
                    and parameters.

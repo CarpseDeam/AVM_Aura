@@ -42,17 +42,24 @@ class GeminiProvider(LLMProvider):
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e
 
     def get_response(
-        self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
+        self,
+        prompt: str,
+        context: Optional[Dict[str, str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
         Sends the prompt to the Gemini API and returns the response.
 
-        If tools are provided, it enables tool-calling capabilities. If the model
-        decides to use a tool, it returns a structured dictionary representing
-        the tool call. Otherwise, it returns a standard text response.
+        If context is provided, it is prepended to the user's prompt to provide
+        working memory for the LLM. If tools are provided, it enables
+        tool-calling capabilities. If the model decides to use a tool, it returns
+        a structured dictionary representing the tool call. Otherwise, it returns
+        a standard text response.
 
         Args:
             prompt: The user's input prompt.
+            context: An optional dictionary containing contextual information,
+                     such as the content of previously read files.
             tools: An optional list of tool definitions that the LLM can use.
                    The format should be compatible with the Google AI Python SDK.
 
@@ -62,7 +69,19 @@ class GeminiProvider(LLMProvider):
             {'tool_name': str, 'arguments': dict}.
             Returns an error message string on failure.
         """
-        logger.debug(f"Sending prompt to Gemini model: '{prompt[:100]}...'")
+        final_prompt = prompt
+        if context:
+            context_parts = ["--- CONTEXT ---"]
+            for key, content in context.items():
+                context_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
+            context_parts.append("--- END CONTEXT ---")
+            context_str = "\n\n".join(context_parts)
+            final_prompt = f"{context_str}\n\n{prompt}"
+            logger.info(f"Injecting context for {len(context)} files into the Gemini prompt.")
+        else:
+            logger.debug("No context provided for Gemini prompt.")
+
+        logger.debug(f"Sending prompt to Gemini model: '{final_prompt[:200]}...'")
         if tools:
             tool_names = [
                 tool.get("function_declaration", {}).get("name", "unknown")
@@ -71,7 +90,7 @@ class GeminiProvider(LLMProvider):
             logger.debug(f"Providing tools to Gemini: {tool_names}")
 
         try:
-            response = self.model.generate_content(prompt, tools=tools)
+            response = self.model.generate_content(final_prompt, tools=tools)
 
             # The response object's structure varies. We must inspect it carefully.
             # Check for a function call first.

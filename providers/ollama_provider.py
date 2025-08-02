@@ -17,6 +17,8 @@ class OllamaProvider(LLMProvider):
 
     This provider simulates tool-calling by constructing a system prompt
     that instructs the model to return a JSON object when it needs to use a tool.
+    It also injects contextual information (like file contents) into the system
+    prompt to provide working memory for the model.
     """
 
     def __init__(self, model_name: str, host: str = "http://localhost:11434") -> None:
@@ -31,40 +33,70 @@ class OllamaProvider(LLMProvider):
         self.api_url = f"{host}/api/generate"
         logger.info(f"OllamaProvider initialized for model '{model_name}' at {self.api_url}")
 
-    def _create_tool_prompt(self, tools: List[Dict[str, Any]]) -> str:
+    def _create_system_prompt(
+        self,
+        context: Optional[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]],
+    ) -> str:
         """
-        Creates a system prompt to instruct the model on how to use tools.
+        Creates a system prompt incorporating context and/or tool instructions.
 
         Args:
+            context: A dictionary of contextual information (e.g., file contents).
             tools: A list of tool definitions.
 
         Returns:
-            A formatted string to be used as the system prompt.
+            A formatted string to be used as the system prompt, or an empty string
+            if neither context nor tools are provided.
         """
-        tool_definitions = json.dumps(tools, indent=2)
-        prompt = (
-            "You are a helpful assistant. Based on the user's prompt, you must decide whether to call a tool or respond directly.\n\n"
-            "If you choose to call a tool, you MUST respond with a single, valid JSON object with two keys: 'tool_name' and 'arguments'.\n"
-            "- 'tool_name': The name of the tool to be called.\n"
-            "- 'arguments': An object containing the required parameters for that tool.\n\n"
-            "Your response MUST be ONLY the JSON object, with no additional text, commentary, or formatting.\n\n"
-            "If you do not need to use a tool, respond with a normal text answer.\n\n"
-            "Here are the available tools:\n"
-            f"{tool_definitions}"
-        )
-        return prompt
+        prompt_parts = []
+
+        if context:
+            context_header = (
+                "You have access to the following context from previously read files. "
+                "Use this information to inform your response and actions."
+            )
+            context_block_parts = ["--- CONTEXT ---"]
+            for key, content in context.items():
+                context_block_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
+            context_block_parts.append("--- END CONTEXT ---")
+            
+            full_context_block = f"{context_header}\n\n" + "\n".join(context_block_parts)
+            prompt_parts.append(full_context_block)
+
+        if tools:
+            tool_definitions = json.dumps(tools, indent=2)
+            tool_prompt = (
+                "You are a helpful assistant. Based on the user's prompt and the provided context, you must decide whether to call a tool or respond directly.\n\n"
+                "If you choose to call a tool, you MUST respond with a single, valid JSON object with two keys: 'tool_name' and 'arguments'.\n"
+                "- 'tool_name': The name of the tool to be called.\n"
+                "- 'arguments': An object containing the required parameters for that tool.\n\n"
+                "Your response MUST be ONLY the JSON object, with no additional text, commentary, or formatting.\n\n"
+                "If you do not need to use a tool, respond with a normal text answer.\n\n"
+                "Here are the available tools:\n"
+                f"{tool_definitions}"
+            )
+            prompt_parts.append(tool_prompt)
+
+        return "\n\n".join(prompt_parts)
 
     def get_response(
-        self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
+        self,
+        prompt: str,
+        context: Optional[Dict[str, str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
         Sends the prompt to the Ollama /api/generate endpoint and returns the response.
 
-        If tools are provided, it constructs a system prompt to simulate tool-calling
-        and requests a JSON response from the model.
+        If context or tools are provided, it constructs a system prompt to guide the
+        model. If tools are provided, it also requests a JSON response to simulate
+        tool-calling.
 
         Args:
             prompt: The user's input prompt.
+            context: An optional dictionary containing contextual information,
+                     such as the content of previously read files.
             tools: An optional list of tool definitions for the model to use.
 
         Returns:
@@ -77,11 +109,14 @@ class OllamaProvider(LLMProvider):
             "stream": False,
         }
 
-        if tools:
-            system_prompt = self._create_tool_prompt(tools)
+        system_prompt = self._create_system_prompt(context, tools)
+        if system_prompt:
             payload["system"] = system_prompt
+            logger.debug("Injecting system prompt with context and/or tool definitions.")
+
+        if tools:
             payload["format"] = "json"  # Request JSON output for tool calls
-            logger.debug("Tools provided. Using tool-simulation prompt and requesting JSON format.")
+            logger.debug("Tools provided. Requesting JSON format.")
 
         logger.debug(f"Sending payload to Ollama: {payload}")
 
