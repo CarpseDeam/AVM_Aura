@@ -1,10 +1,11 @@
+# services/executor.py
 """
-This module defines the ExecutorService, which is responsible for executing actions.
+This module defines the ExecutorService, responsible for running actions.
 
-The service listens for `ActionReadyForExecution` events on the event bus,
-and upon receiving one, it logs and "announces" the execution of the
-structured action contained within the event. It can also send status messages
-to a GUI via a display callback.
+The service listens for `ActionReadyForExecution` events and executes the
+instruction contained within, which can be either a structured Blueprint
+invocation or a raw code instruction. It handles the invocation of the
+correct logic and displays the results or errors.
 """
 
 import logging
@@ -12,149 +13,120 @@ from typing import Callable, Optional
 
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation
-from foundry.blueprints import RawCodeInstruction
+from foundry.blueprints import RawCodeInstruction, Blueprint
 
 logger = logging.getLogger(__name__)
 
 
 class ExecutorService:
     """
-    Listens for structured actions and announces their execution.
+    Executes instructions received from the event bus.
 
-    This service subscribes to the event bus for ActionReadyForExecution events,
-    logs the details of the action, and simulates its execution by announcing it.
-    It acts as the component that would ultimately perform file I/O, run commands,
-    or call other tools based on the LLM's structured output. It can be
-    configured with a display callback to send status updates to a UI.
+    This service acts as the bridge between an abstract instruction (like a
+    BlueprintInvocation) and its concrete execution. It invokes the associated
+    Python function and uses a callback to display the output.
     """
-
     def __init__(
-        self,
-        event_bus: EventBus,
-        display_callback: Optional[Callable[[str], None]] = None,
+            self,
+            event_bus: EventBus,
+            display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         """
         Initializes the ExecutorService.
 
         Args:
-            event_bus: The application's central event bus to subscribe to events.
-            display_callback: An optional function to send status messages to for
-                              display in a UI. It should accept a single string.
+            event_bus (EventBus): The central event bus for communication.
+            display_callback (Optional[Callable[[str, str], None]]): A function
+                to call to display output to the user. It takes a message
+                string and a tag string.
         """
         self.event_bus = event_bus
         self.display_callback = display_callback
         self._register_handlers()
 
     def _register_handlers(self) -> None:
-        """Registers event handlers with the event bus."""
+        """Subscribes to relevant events on the event bus."""
         self.event_bus.subscribe(ActionReadyForExecution, self._handle_action)
-        logger.info("ExecutorService initialized and handlers registered.")
 
-    def _display(self, message: str) -> None:
+    def _display(self, message: str, tag: str) -> None:
         """
-        Sends a message to the registered display callback, if available.
+        Sends a message to the display callback, if one is configured.
 
         Args:
-            message: The string message to display.
+            message (str): The message to display.
+            tag (str): A tag for classifying the message (e.g., 'avm_output').
         """
         if self.display_callback:
-            self.display_callback(message)
+            self.display_callback(message, tag)
 
     def _execute_blueprint(self, invocation: BlueprintInvocation) -> None:
         """
-        Logs and displays the details of a BlueprintInvocation.
+        Executes a blueprint by invoking its linked Python function.
+
+        This method retrieves the `execution_logic` callable from the blueprint,
+        calls it with the provided parameters, and displays the result. It
+        handles cases where no logic is defined or where execution fails.
 
         Args:
-            invocation: The BlueprintInvocation object to be "executed".
+            invocation (BlueprintInvocation): The event containing the blueprint
+                and parameters for execution.
         """
-        action_name = invocation.blueprint.name
+        blueprint = invocation.blueprint
+        action_name = blueprint.name
         action_params = invocation.parameters
 
-        display_message_parts = [f"▶️ Executing Blueprint: {action_name}"]
+        param_str = "\n".join([f"  - {key}: {value}" for key, value in action_params.items()])
+        display_message = f"▶️ Executing Blueprint: {action_name}\nParameters:\n{param_str}"
+        self._display(display_message, "avm_executing")
 
-        logger.info("--- EXECUTING BLUEPRINT ACTION ---")
-        logger.info("Action: %s", action_name)
+        if not blueprint.execution_logic:
+            error_msg = f"Error: Blueprint '{action_name}' has no execution logic."
+            logger.error(error_msg)
+            self._display(error_msg, "avm_error")
+            return
 
-        if action_params:
-            param_log_str = "\n".join(
-                [f"  - {key}: {value}" for key, value in action_params.items()]
+        try:
+            # Unpack the parameters dictionary as keyword arguments to the function
+            result = blueprint.execution_logic(**action_params)
+            result_message = f"✅ Result from {action_name}:\n{result}"
+            logger.info("Blueprint '%s' executed successfully.", action_name)
+            self._display(result_message, "avm_output")
+        except Exception as e:
+            error_msg = f"❌ Error executing Blueprint '{action_name}': {e}"
+            logger.exception(
+                "An exception occurred while executing blueprint '%s'.", action_name
             )
-            logger.info("Parameters:\n%s", param_log_str)
-
-            display_message_parts.append("Parameters:")
-            for key, value in action_params.items():
-                display_message_parts.append(f"  - {key}: {value}")
-        else:
-            logger.info("Parameters: None")
-            display_message_parts.append("Parameters: None")
-
-        self._display("\n".join(display_message_parts))
-        self._display("✅ Action Complete.")
-        logger.info("--- ACTION COMPLETE ---")
+            self._display(error_msg, "avm_error")
 
     def _execute_raw_code(self, instruction: RawCodeInstruction) -> None:
         """
-        Logs and displays the details of a RawCodeInstruction.
+        Handles the execution of a raw code instruction.
 
-        Note: This is a placeholder for actual code execution. In a real
-        scenario, this would involve sandboxing and careful security measures.
+        Note: This is currently a placeholder and does not execute the code.
 
         Args:
-            instruction: The RawCodeInstruction object to be "executed".
+            instruction (RawCodeInstruction): The instruction containing the
+                raw code to be executed.
         """
-        try:
-            code_to_run = instruction.code
-            language = getattr(instruction, "language", "unknown")
-
-            display_message = (
-                f"▶️ Executing Raw Code Instruction\n"
-                f"Language: {language}\n"
-                f"Code:\n---\n{code_to_run}\n---"
-            )
-            self._display(display_message)
-
-            logger.info("--- EXECUTING RAW CODE INSTRUCTION ---")
-            logger.info("Language: %s", language)
-            logger.info("Code:\n---\n%s\n---", code_to_run)
-
-            warning_msg = "Raw code execution is a placeholder. No code was actually run."
-            self._display(f"⚠️ {warning_msg}")
-            logger.warning(warning_msg)
-
-            self._display("✅ Action Complete.")
-            logger.info("--- ACTION COMPLETE ---")
-
-        except AttributeError:
-            error_msg = (
-                "Action execution failed: RawCodeInstruction object is missing "
-                f"the expected 'code' attribute. Instruction: {instruction}"
-            )
-            self._display(f"❌ {error_msg}")
-            logger.error(error_msg)
+        # This part remains mostly the same, just using the new display method
+        display_message = f"▶️ Executing Raw Code..."
+        self._display(display_message, "avm_executing")
+        # A full implementation would require a secure sandbox environment.
+        self._display("Raw code execution is not yet implemented.", "avm_info")
 
     def _handle_action(self, event: ActionReadyForExecution) -> None:
         """
-        Handles an ActionReadyForExecution event by processing the instruction.
-
-        This method inspects the type of the instruction (BlueprintInvocation or
-        RawCodeInstruction) contained within the event and dispatches to the
-        appropriate execution method.
+        Handles an ActionReadyForExecution event by dispatching to the correct handler.
 
         Args:
-            event: The event containing the structured instruction to execute.
+            event (ActionReadyForExecution): The event containing the instruction
+                to be executed.
         """
-        logger.debug("ExecutorService received event: %s", event)
-
         instruction = event.instruction
-
         if isinstance(instruction, BlueprintInvocation):
             self._execute_blueprint(instruction)
         elif isinstance(instruction, RawCodeInstruction):
             self._execute_raw_code(instruction)
         else:
-            error_msg = (
-                "Action execution failed: Unknown instruction type "
-                f"'{type(instruction).__name__}'."
-            )
-            self._display(f"❌ {error_msg}")
-            logger.error(error_msg)
+            logger.error("Unknown instruction type received: %s", type(instruction))
+            self._display(f"Error: Unknown instruction type.", "avm_error")

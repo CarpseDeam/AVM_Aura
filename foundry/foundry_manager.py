@@ -11,9 +11,10 @@ It acts as a single source of truth for the tools that the LLM can use.
 import logging
 from typing import List, Dict, Optional, Any
 
-# The architect has specified that `Blueprint` is available for import.
-# We assume it has at least `name`, `description`, and `parameters` attributes.
+# We are importing our corrected Blueprint class definition
 from foundry.blueprints import Blueprint
+# Import the concrete action functions to be wired to the blueprints
+from foundry.actions import write_file, read_file, list_files
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,6 @@ logger = logging.getLogger(__name__)
 class FoundryManager:
     """
     Manages the lifecycle and retrieval of available Blueprint tools.
-
-    This class discovers, creates, and stores all Blueprint instances, making them
-    accessible to other parts of the application, such as the LLMOperator. It
-    also provides methods to format these blueprints into a schema that can be
-    consumed by an LLM for tool-use functions.
     """
 
     def __init__(self) -> None:
@@ -41,7 +37,7 @@ class FoundryManager:
         Registers a single blueprint with the manager.
 
         Args:
-            blueprint: The Blueprint instance to register.
+            blueprint (Blueprint): The blueprint instance to register.
         """
         if blueprint.name in self._blueprints:
             logger.warning(
@@ -54,8 +50,8 @@ class FoundryManager:
         """
         Creates and registers the set of core, built-in blueprints.
 
-        This method defines the standard tools available to the AVM, such as
-        file system operations.
+        This method defines the schema for each tool and wires it to its
+        corresponding implementation function from `foundry.actions`.
         """
         # Define the schema for the write_file tool
         write_file_params = {
@@ -75,7 +71,9 @@ class FoundryManager:
         write_file_blueprint = Blueprint(
             name="write_file",
             description="Writes content to a specified file. Creates the file if it doesn't exist, or overwrites it if it does.",
+            template="",
             parameters=write_file_params,
+            execution_logic=write_file,  # Wire to the actual function
         )
         self._add_blueprint(write_file_blueprint)
 
@@ -93,7 +91,9 @@ class FoundryManager:
         read_file_blueprint = Blueprint(
             name="read_file",
             description="Reads the entire content of a specified file and returns it as a string.",
+            template="",
             parameters=read_file_params,
+            execution_logic=read_file,  # Wire to the actual function
         )
         self._add_blueprint(read_file_blueprint)
 
@@ -111,7 +111,9 @@ class FoundryManager:
         list_files_blueprint = Blueprint(
             name="list_files",
             description="Lists all files and directories in a specified path.",
+            template="",
             parameters=list_files_params,
+            execution_logic=list_files,  # Wire to the actual function
         )
         self._add_blueprint(list_files_blueprint)
 
@@ -120,10 +122,10 @@ class FoundryManager:
         Retrieves a blueprint by its unique name.
 
         Args:
-            name: The name of the blueprint to retrieve.
+            name (str): The name of the blueprint to retrieve.
 
         Returns:
-            The Blueprint instance if found, otherwise None.
+            Optional[Blueprint]: The blueprint instance if found, otherwise None.
         """
         return self._blueprints.get(name)
 
@@ -132,7 +134,7 @@ class FoundryManager:
         Retrieves a list of all registered blueprint instances.
 
         Returns:
-            A list containing all Blueprint objects managed by this instance.
+            List[Blueprint]: A list of all blueprints.
         """
         return list(self._blueprints.values())
 
@@ -140,18 +142,15 @@ class FoundryManager:
         """
         Generates a list of tool definitions formatted for an LLM.
 
-        This method transforms the registered blueprints into a JSON-serializable
-        list of dictionaries that conforms to the tool-calling schema of
-        modern LLMs (e.g., OpenAI, Google Gemini).
+        This format is typically used to inform the LLM about the available
+        functions it can call.
 
         Returns:
-            A list of dictionaries, where each dictionary defines a tool.
+            List[Dict[str, Any]]: A list of tool definitions suitable for LLM APIs.
         """
         definitions: List[Dict[str, Any]] = []
         for blueprint in self._blueprints.values():
             try:
-                # This structure is compatible with OpenAI's and Gemini's
-                # function calling/tool use APIs.
                 tool_def = {
                     "type": "function",
                     "function": {

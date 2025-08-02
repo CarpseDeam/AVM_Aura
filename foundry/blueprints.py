@@ -1,10 +1,13 @@
+# foundry/blueprints.py
+
 """
-Define the simple data structures for Blueprints and raw code instructions,
+Defines the simple data structures for Blueprints and raw code instructions,
 used for code generation.
 """
+
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +19,17 @@ class Blueprint:
 
     Blueprints are the 'tools' the AVM can use. They define a structured
     template with named parameters that can be filled in to produce a
-    final piece of code or configuration.
+    final piece of code or configuration. They can also be linked to a
+    concrete Python function for direct execution.
     """
+    # --- All required fields come FIRST ---
     name: str
     description: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
     template: str
+
+    # --- Optional fields with default values come LAST ---
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    execution_logic: Optional[Callable[..., Any]] = None
 
 
 @dataclass
@@ -33,3 +41,4 @@ class RawCodeInstruction:
     Blueprint but are instead a direct command or piece of code.
     """
     code: str
+    language: str = "python"
