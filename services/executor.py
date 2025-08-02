@@ -1,13 +1,11 @@
 # services/executor.py
 """
-This module defines the ExecutorService, which has been upgraded to an
-AST weaver. It executes actions, and if an action returns a Python AST node,
-it weaves that node into an in-memory code tree. It can also unparse
-this tree back into a code string.
+This module defines the ExecutorService, responsible for running actions
+and building the Abstract Syntax Tree (AST) for code generation.
 """
 
-import ast
 import logging
+import ast # <-- Import the ast module
 from typing import Callable, Optional
 
 from event_bus import EventBus
@@ -20,12 +18,11 @@ logger = logging.getLogger(__name__)
 
 class ExecutorService:
     """
-    Executes instructions, weaving returned AST nodes into a code structure.
+    Executes instructions, building an AST for code generation.
 
-    This service listens for `ActionReadyForExecution` events. When an action
-    is executed, it checks the result. If the result is an `ast.AST` object,
-    it is appended to an internal `ast.Module` body. This allows for the
-    incremental construction of a Python script in memory.
+    This service acts as the bridge between an abstract instruction and its
+    concrete execution. It invokes functions, displays string results, and
+    appends returned AST nodes to an internal code-building tree.
     """
     def __init__(
             self,
@@ -33,127 +30,90 @@ class ExecutorService:
             context_manager: ContextManager,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
-        """
-        Initializes the ExecutorService.
-
-        Args:
-            event_bus: The application's event bus for communication.
-            context_manager: The service for managing shared context.
-            display_callback: An optional function to display messages to the UI.
-        """
         self.event_bus = event_bus
         self.context_manager = context_manager
         self.display_callback = display_callback
-        self.code_ast: ast.Module = ast.Module(body=[], type_ignores=[])
+        
+        # --- NEW: Initialize the AST canvas ---
+        self.ast_root = ast.Module(body=[], type_ignores=[])
+        logger.info("ExecutorService initialized with a blank AST root.")
+        
         self._register_handlers()
 
     def _register_handlers(self) -> None:
-        """Subscribes to relevant events on the event bus."""
         self.event_bus.subscribe(ActionReadyForExecution, self._handle_action)
 
     def _display(self, message: str, tag: str) -> None:
-        """
-        Sends a message to the UI via the display callback, if available.
-
-        Args:
-            message: The message string to display.
-            tag: The tag for styling the message in the UI.
-        """
         if self.display_callback:
             self.display_callback(message, tag)
 
     def _execute_blueprint(self, invocation: BlueprintInvocation) -> None:
         """
-        Executes a blueprint's logic and handles the result.
-
-        If the result is an `ast.AST` node, it's woven into the code tree.
-        If it's a string or other data, it's displayed. Special handling
-        is included for actions like 'read_file' (to update context) and
-        'get_generated_code' (to provide the current AST).
-
-        Args:
-            invocation: The blueprint invocation details.
+        Executes a blueprint by invoking its logic and handling the result.
+        The result can be a string to display or an AST node to be woven
+        into the code being generated.
         """
         blueprint = invocation.blueprint
         action_name = blueprint.name
         action_params = invocation.parameters
 
-        param_str = "\n".join([f"  - {key}: {value}" for key, value in action_params.items()])
-        display_message = f"▶️ Executing Blueprint: {action_name}\nParameters:\n{param_str}"
+        display_message = f"▶️ Executing Blueprint: {action_name}"
         self._display(display_message, "avm_executing")
 
         if not blueprint.execution_logic:
-            error_msg = f"Error: Blueprint '{action_name}' has no execution logic."
-            self._display(error_msg, "avm_error")
-            logger.error(error_msg)
+            self._display(f"Error: Blueprint '{action_name}' has no execution logic.", "avm_error")
             return
 
         try:
-            # Inject the current AST for actions that need it
+            # --- NEW: Handle special meta-blueprints ---
             if action_name == "get_generated_code":
-                action_params['code_ast'] = self.code_ast
+                # This blueprint needs the AST itself as an argument.
+                result = blueprint.execution_logic(code_ast=self.ast_root)
+            else:
+                # Standard execution for all other blueprints.
+                result = blueprint.execution_logic(**action_params)
 
-            result = blueprint.execution_logic(**action_params)
-
-            # Handle AST nodes by weaving them into the code tree
-            if isinstance(result, ast.AST):
-                self.code_ast.body.append(result)
-                logger.info("Weaving AST node from '%s' into code tree.", action_name)
-                self._display(f"✅ Weaving AST node from '{action_name}' into code tree.", "avm_info")
-
-            # Handle non-AST results (e.g., strings from file reads or code generation)
-            elif result is not None:
+            # --- NEW: Handle the result based on its type ---
+            if isinstance(result, str):
+                # If it's a string, display it (e.g., from file operations).
                 result_message = f"✅ Result from {action_name}:\n{result}"
                 self._display(result_message, "avm_output")
-
-                # Special context handling for 'read_file'
+                
+                # Update context if it was a read_file action
                 if action_name == "read_file":
                     path = action_params.get("path")
-                    if path and isinstance(result, str):
+                    if path:
                         self.context_manager.add_to_context(key=path, content=result)
-                        logger.info("Added content of file '%s' to context memory.", path)
                         self._display(f"📝 Content of '{path}' added to context.", "avm_info")
-                    else:
-                        logger.warning(
-                            "Could not add 'read_file' result to context. Path or result missing/invalid."
-                        )
+            
+            elif isinstance(result, ast.AST):
+                # If it's an AST node, append it to our code tree.
+                self.ast_root.body.append(result)
+                node_type = type(result).__name__
+                success_msg = f"✅ Success: Added '{node_type}' node to the code tree."
+                self._display(success_msg, "avm_info")
+                logger.info(success_msg)
+
             else:
-                # For actions that return None (e.g., write_file)
-                self._display(f"✅ Blueprint '{action_name}' executed successfully.", "avm_info")
+                # Handle unexpected return types.
+                self._display(f"Blueprint '{action_name}' returned an unexpected type: {type(result)}", "avm_error")
 
         except Exception as e:
             error_msg = f"❌ Error executing Blueprint '{action_name}': {e}"
+            logger.exception("An exception occurred while executing blueprint '%s'.", action_name)
             self._display(error_msg, "avm_error")
-            logger.exception("Error executing blueprint '%s'", action_name)
 
     def _execute_raw_code(self, instruction: RawCodeInstruction) -> None:
-        """
-        Handles the execution of raw code instructions. Not yet implemented.
-
-        Args:
-            instruction: The raw code instruction to execute.
-        """
-        display_message = "▶️ Executing Raw Code..."
+        # This remains a placeholder for now.
+        display_message = f"▶️ Executing Raw Code..."
         self._display(display_message, "avm_executing")
         self._display("Raw code execution is not yet implemented.", "avm_info")
-        logger.warning("Attempted to execute raw code, which is not implemented.")
 
     def _handle_action(self, event: ActionReadyForExecution) -> None:
-        """
-        Event handler for when an action is ready for execution.
-
-        Routes the instruction to the appropriate execution method based on its type.
-
-        Args:
-            event: The event containing the instruction to execute.
-        """
         instruction = event.instruction
-        logger.info("Handling action for execution: %s", instruction.__class__.__name__)
         if isinstance(instruction, BlueprintInvocation):
             self._execute_blueprint(instruction)
         elif isinstance(instruction, RawCodeInstruction):
             self._execute_raw_code(instruction)
         else:
-            error_msg = f"Error: Unknown instruction type: {type(instruction)}"
-            self._display(error_msg, "avm_error")
-            logger.error(error_msg)
+            self._display(f"Error: Unknown instruction type.", "avm_error")
