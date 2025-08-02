@@ -14,7 +14,13 @@ from typing import List, Dict, Optional, Any
 # We are importing our corrected Blueprint class definition
 from foundry.blueprints import Blueprint
 # Import the concrete action functions to be wired to the blueprints
-from foundry.actions import write_file, read_file, list_files
+from foundry.actions import (
+    write_file,
+    read_file,
+    list_files,
+    assign_variable,
+    get_generated_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +122,45 @@ class FoundryManager:
             execution_logic=list_files,  # Wire to the actual function
         )
         self._add_blueprint(list_files_blueprint)
+
+        # Define the schema for the assign_variable tool
+        assign_variable_params = {
+            "type": "object",
+            "properties": {
+                "variable_name": {
+                    "type": "string",
+                    "description": "The name of the variable to create or assign to.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The value to assign. This can be a literal (e.g., \"123\", \"'hello'\", \"True\") or an identifier for another variable (e.g., \"other_var\").",
+                },
+            },
+            "required": ["variable_name", "value"],
+        }
+        assign_variable_blueprint = Blueprint(
+            name="assign_variable",
+            description="Creates a Python variable assignment statement. The result is an AST node that will be added to the code being generated.",
+            template="",
+            parameters=assign_variable_params,
+            execution_logic=assign_variable,
+        )
+        self._add_blueprint(assign_variable_blueprint)
+
+        # Define the schema for the get_generated_code tool
+        get_generated_code_params = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        get_generated_code_blueprint = Blueprint(
+            name="get_generated_code",
+            description="Retrieves the complete Python code generated so far from all previous code-building actions (like 'assign_variable'). This is useful for reviewing the code before writing it to a file.",
+            template="",
+            parameters=get_generated_code_params,
+            execution_logic=get_generated_code,
+        )
+        self._add_blueprint(get_generated_code_blueprint)
 
     def get_blueprint(self, name: str) -> Optional[Blueprint]:
         """
