@@ -1,6 +1,5 @@
 # blueprints/assign_variable_bp.py
 from foundry.blueprints import Blueprint
-from foundry.actions import assign_variable
 
 params = {
     "type": "object",
@@ -21,5 +20,5 @@ blueprint = Blueprint(
     id="assign_variable",
     description="Creates a Python variable assignment AST node.",
     parameters=params,
-    action_function=assign_variable
+    action_function_name="assign_variable"
 )

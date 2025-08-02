@@ -14,7 +14,7 @@ CONFIG_FILE_PATH = "config.yaml"
 
 # --- MODIFIED: Added default model names directly into the default config ---
 DEFAULT_CONFIG = {
-    'llm_provider': 'ollama',
+    'llm_provider': 'gemini',
     'temperature': 0.1,
     'ollama': {
         'model': 'Qwen3-coder',  # <-- Centralized default for Ollama

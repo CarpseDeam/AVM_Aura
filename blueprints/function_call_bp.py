@@ -1,18 +1,6 @@
 # blueprints/function_call_bp.py
-
-"""
-Blueprint definition for the 'function_call' action.
-
-This file creates a Blueprint instance that exposes the ability to create a
-Python function call to the LLM. The blueprint specifies the parameters required
-(the function's name and its arguments) and maps them to the corresponding
-action in foundry.actions.
-"""
-
 from foundry.blueprints import Blueprint
-from foundry.actions import function_call
 
-# <-- FIX: Changed parameter schema to the correct JSON schema format
 params = {
     "type": "object",
     "properties": {
@@ -29,8 +17,6 @@ params = {
     "required": ["func_name"],
 }
 
-
-# <-- FIX: Renamed variable to 'blueprint' and changed 'action' to 'action_function'
 blueprint = Blueprint(
     id="function_call",
     description=(
@@ -40,5 +26,5 @@ blueprint = Blueprint(
         "treated as a variable name if literal parsing fails."
     ),
     parameters=params,
-    action_function=function_call,
+    action_function_name="function_call"
 )

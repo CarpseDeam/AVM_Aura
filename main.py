@@ -21,32 +21,25 @@ from services.llm_operator import LLMOperator
 
 logger = logging.getLogger(__name__)
 
-
 class AvmGui(ctk.CTk):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # ... (no changes in __init__ or _setup_widgets) ...
         self.title("AVM")
         self.geometry("1200x800")
-
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-
         self.ui_queue = queue.Queue()
         self.event_bus: Optional[EventBus] = None
         self.backend_ready = threading.Event()
         self.mono_font = ctk.CTkFont(family="Consolas", size=14)
-
         self._setup_widgets()
         self._start_backend_setup()
         self.after(100, self._process_queue)
 
     def _setup_widgets(self):
-        # This method is unchanged from the previous correct version
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        # ... and so on ...
         main_frame = ctk.CTkFrame(self)
         main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         main_frame.grid_columnconfigure(0, weight=1)
@@ -60,10 +53,9 @@ class AvmGui(ctk.CTk):
         self.output_text.tag_config("avm_comment", foreground="#CE93D8")
         self.output_text.tag_config("avm_executing", foreground="#81D4FA")
         self.output_text.tag_config("avm_error", foreground="#EF9A9A")
-        self.output_text.tag_config("avm_response", foreground="#FFFFFF")  # For LLM text response
-        self.output_text.tag_config("avm_output", foreground="#80CBC4")  # For tool output
-        self.output_text.tag_config("avm_info", foreground="#B0BEC5")  # For context updates etc.
-
+        self.output_text.tag_config("avm_response", foreground="#FFFFFF")
+        self.output_text.tag_config("avm_output", foreground="#80CBC4")
+        self.output_text.tag_config("avm_info", foreground="#B0BEC5")
         input_frame = ctk.CTkFrame(main_frame)
         input_frame.grid(row=1, column=0, sticky="ew")
         input_frame.grid_columnconfigure(0, weight=1)
@@ -86,9 +78,6 @@ class AvmGui(ctk.CTk):
         backend_thread.start()
 
     def _setup_backend(self) -> None:
-        """
-        Initializes and wires up all backend services based on config.yaml.
-        """
         try:
             logger.info("Setting up backend services...")
             config_manager = ConfigManager()
@@ -96,40 +85,25 @@ class AvmGui(ctk.CTk):
             console = Console()
             foundry_manager = FoundryManager()
             context_manager = ContextManager()
-
-            # --- MODIFIED: No longer need to provide defaults here ---
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
             logger.info(f"Using temperature setting: {temperature}")
-
             provider: Optional[LLMProvider] = None
             logger.info(f"Configuring LLM provider from config: '{provider_name}'")
-
             if provider_name == "ollama":
-                # --- MODIFIED: Simplified by removing defaults ---
                 model = config_manager.get("ollama.model")
                 host = config_manager.get("ollama.host")
                 logger.info(f"Using Ollama provider with model '{model}' and host '{host}'.")
                 provider = OllamaProvider(model_name=model, host=host, temperature=temperature)
-
             elif provider_name == "gemini":
                 api_key = os.getenv("GOOGLE_API_KEY")
                 if not api_key:
-                    error_msg = "GOOGLE_API_KEY environment variable not set. It is required for the Gemini provider."
-                    logger.critical(error_msg)
-                    raise ValueError(error_msg)
-
-                # --- MODIFIED: Simplified by removing defaults ---
+                    raise ValueError("GOOGLE_API_KEY environment variable not set.")
                 model = config_manager.get("gemini.model")
                 logger.info(f"Using Gemini provider with model '{model}'.")
                 provider = GeminiProvider(api_key=api_key, model_name=model, temperature=temperature)
-
             else:
-                error_msg = f"Unsupported LLM provider in config.yaml: '{provider_name}'"
-                logger.critical(error_msg)
-                raise ValueError(error_msg)
-
-            # (The rest of the function remains the same)
+                raise ValueError(f"Unsupported LLM provider in config.yaml: '{provider_name}'")
             llm_operator = LLMOperator(
                 console=console,
                 provider=provider,
@@ -139,13 +113,12 @@ class AvmGui(ctk.CTk):
                 display_callback=self._display_message,
             )
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
-
             ExecutorService(
                 event_bus=self.event_bus,
                 context_manager=context_manager,
+                foundry_manager=foundry_manager,
                 display_callback=self._display_message,
             )
-
             logger.info("Backend services initialized successfully.")
             self._display_message("System: Backend ready. Please enter a prompt.", "system_message")
             self.backend_ready.set()
@@ -153,7 +126,6 @@ class AvmGui(ctk.CTk):
             logger.error("Failed to initialize backend services: %s", e, exc_info=True)
             self._display_message(f"FATAL ERROR: Could not initialize backend: {e}", "avm_error")
 
-    # ... (rest of the AvmGui class is the same and does not need to be repeated) ...
     def _display_message(self, message: str, tag: str):
         self.ui_queue.put((message, tag))
 
@@ -170,9 +142,7 @@ class AvmGui(ctk.CTk):
 
     def _submit_prompt(self, event: Optional[object] = None):
         prompt_text = self.prompt_entry.get().strip()
-        if not prompt_text: return
-        if not self.backend_ready.is_set():
-            self._display_message("System: Please wait...", "system_message")
+        if not prompt_text or not self.backend_ready.is_set():
             return
         self.prompt_entry.delete(0, "end")
         self._display_message(f"👤 You:\n{prompt_text}", "user_prompt")
@@ -183,7 +153,6 @@ class AvmGui(ctk.CTk):
             self.event_bus.publish(UserPromptEntered(prompt_text=prompt_text))
         else:
             self._display_message("ERROR: Event bus not available.", "avm_error")
-
 
 if __name__ == "__main__":
     logging.basicConfig(

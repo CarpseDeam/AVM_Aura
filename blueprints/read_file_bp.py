@@ -1,6 +1,5 @@
 # blueprints/read_file_bp.py
 from foundry.blueprints import Blueprint
-from foundry.actions import read_file
 
 params = {
     "type": "object",
@@ -17,5 +16,5 @@ blueprint = Blueprint(
     id="read_file",
     description="Reads the entire content of a specified file and adds it to the context.",
     parameters=params,
-    action_function=read_file
+    action_function_name="read_file"
 )
