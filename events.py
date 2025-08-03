@@ -29,8 +29,7 @@ class UserPromptEntered(Event):
     """Event published when a user enters a standard prompt."""
 
     prompt_text: str
-    # --- NEW: Flag to indicate if the user wants to auto-approve plans ---
-    auto_approve_plan: bool = False
+    auto_approve_plan: bool = False # Retained from previous feature
 
 
 @dataclass
@@ -54,7 +53,6 @@ class BlueprintInvocation:
 class ActionReadyForExecution(Event):
     """
     Event published when a structured action is parsed and ready for execution.
-    This is used for single actions or for plans that have been auto-approved.
     """
     instruction: Union[BlueprintInvocation, RawCodeInstruction, List[BlueprintInvocation]]
 
@@ -62,18 +60,16 @@ class ActionReadyForExecution(Event):
 @dataclass
 class PauseExecutionForUserInput(Event):
     """
+
     Published by the Executor when an action requires user input.
     """
     question: str
 
 
-# --- NEW: Events for the interactive plan approval workflow ---
-
 @dataclass
 class PlanReadyForApproval(Event):
     """
     Published by the LLMOperator when a plan is generated in interactive mode.
-    The GUI should listen for this, display the plan, and await user action.
     """
     plan: List[BlueprintInvocation] = field(default_factory=list)
 
@@ -82,7 +78,6 @@ class PlanReadyForApproval(Event):
 class PlanApproved(Event):
     """
     Published by the GUI when the user clicks 'Approve' on a plan.
-    The ExecutorService listens for this to proceed with execution.
     """
     plan: List[BlueprintInvocation] = field(default_factory=list)
 
@@ -91,6 +86,15 @@ class PlanApproved(Event):
 class PlanDenied(Event):
     """
     Published by the GUI when the user clicks 'Deny' on a plan.
-    This can be used to inform the user the action was cancelled.
     """
     pass
+
+
+@dataclass
+class DisplayFileInEditor(Event):
+    """
+    Published when a tool's action results in file content that should be
+    displayed to the user in a proper code editor, not the chat log.
+    """
+    file_path: str
+    file_content: str

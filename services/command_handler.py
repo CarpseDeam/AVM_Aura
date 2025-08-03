@@ -2,6 +2,8 @@
 import logging
 from foundry import FoundryManager
 from .view_formatter import format_as_box
+from events import DisplayFileInEditor
+from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -12,15 +14,17 @@ class CommandHandler:
     deterministic path for actions that don't require LLM reasoning.
     """
 
-    def __init__(self, foundry_manager: FoundryManager, display_callback):
+    def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus, display_callback):
         """
         Initializes the CommandHandler.
 
         Args:
             foundry_manager: An instance of FoundryManager to access tools.
+            event_bus: The central event bus for publishing events.
             display_callback: A thread-safe function to send output to the GUI.
         """
         self.foundry = foundry_manager
+        self.event_bus = event_bus
         self.display = display_callback
         logger.info("CommandHandler initialized and ready.")
 
@@ -58,7 +62,9 @@ class CommandHandler:
         self.display(formatted_output, "avm_output")
 
     def _handle_read_file(self, args: list):
-        """Handler for the /read command. Will add content to Code Viewer."""
+        """
+        Handler for the /read command. Now publishes an event for the Code Viewer.
+        """
         if not args:
             self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /read <path/to/file>"),
                          "avm_error")
@@ -68,14 +74,15 @@ class CommandHandler:
         path = args[0]
         content = read_file_action(path=path)
 
-        # In the future, this will publish an event to open the code viewer.
-        # For now, we'll display it in an ASCII box.
-        # This is a great placeholder for our next integration step!
-        title = f"Contents: {path}"
-        # Truncate content for display if it's too long
-        display_content = (content[:1000] + '...') if len(content) > 1000 else content
-        formatted_output = format_as_box(title, display_content)
-        self.display(formatted_output, "avm_output")
+        if "Error: File not found" in content or "Error: Path" in content:
+            self.display(format_as_box(f"Error reading file", content), "avm_error")
+            return
+
+        # Instead of displaying, publish an event with the file data.
+        logger.info(f"Publishing DisplayFileInEditor event for path: {path}")
+        self.event_bus.publish(DisplayFileInEditor(file_path=path, file_content=content))
+        # Provide simple feedback to the chat log
+        self.display(f"Opened `{path}` in Code Viewer.", "system_message")
 
     def _handle_lint(self, args: list):
         """Handler for the /lint command."""
@@ -96,7 +103,7 @@ class CommandHandler:
             "Aura Direct Commands:\n\n"
             "/help                 - Shows this help message.\n"
             "/list_files [path]    - Lists files in the specified directory.\n"
-            "/read <path>          - Reads the content of a file.\n"
+            "/read <path>          - Reads a file and opens it in the Code Viewer.\n"
             "/lint <path>          - Lints a Python file for style errors."
         )
         self.display(format_as_box("Aura Help", help_text), "system_message")

@@ -38,14 +38,12 @@ class AuraMainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Builds the main user interface."""
-        # Main layout is horizontal: [Chat Area | Tab Bar]
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- Left Side: The main Chat/CLI Interface ---
         chat_widget = QWidget()
         chat_layout = QVBoxLayout(chat_widget)
         chat_layout.setContentsMargins(10, 10, 10, 10)
@@ -54,34 +52,31 @@ class AuraMainWindow(QMainWindow):
         self.output_log = QTextEdit()
         self.output_log.setReadOnly(True)
         self.output_log.setObjectName("OutputLog")
-        chat_layout.addWidget(self.output_log, 1)  # Stretch factor
+        chat_layout.addWidget(self.output_log, 1)
 
-        # --- NEW: Multi-line input area ---
         input_area_layout = QHBoxLayout()
         self.command_input = QTextEdit()
         self.command_input.setObjectName("CommandInput")
         self.command_input.setPlaceholderText("Describe the new application you want to build...")
-        self.command_input.setFixedHeight(80)  # Set a fixed height for the input box
+        self.command_input.setFixedHeight(80)
         input_area_layout.addWidget(self.command_input, 1)
 
         self.send_button = QPushButton("Build")
         self.send_button.setObjectName("SendButton")
-        self.send_button.setFixedSize(QSize(100, 80))  # Match height of input box
+        self.send_button.setFixedSize(QSize(100, 80))
         self.send_button.clicked.connect(lambda: self.controller.submit_input())
         input_area_layout.addWidget(self.send_button)
 
         chat_layout.addLayout(input_area_layout)
 
-        # --- Right Side: The "Cutout" Tab Bar ---
         self.tab_bar = QWidget()
         self.tab_bar.setObjectName("SideBar")
-        self.tab_bar.setFixedWidth(120)  # A slim, fixed-width bar
+        self.tab_bar.setFixedWidth(120)
         tab_bar_layout = QVBoxLayout(self.tab_bar)
-        tab_bar_layout.setContentsMargins(0, 20, 0, 0)  # Start tabs lower
+        tab_bar_layout.setContentsMargins(0, 20, 0, 0)
         tab_bar_layout.setSpacing(5)
         tab_bar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Create custom tab buttons
         node_viewer_tab = QPushButton("Node Viewer")
         node_viewer_tab.setObjectName("SideTabButton")
         node_viewer_tab.clicked.connect(lambda: self.controller.toggle_node_viewer())
@@ -92,7 +87,6 @@ class AuraMainWindow(QMainWindow):
         code_viewer_tab.clicked.connect(lambda: self.controller.toggle_code_viewer())
         tab_bar_layout.addWidget(code_viewer_tab)
 
-        # Add main widgets to the horizontal layout
         main_layout.addWidget(chat_widget, 1)
         main_layout.addWidget(self.tab_bar)
 
@@ -127,11 +121,20 @@ class AuraMainWindow(QMainWindow):
             llm_operator = LLMOperator(console=None, provider=provider, event_bus=self.event_bus,
                                        foundry_manager=foundry_manager, context_manager=context_manager,
                                        vector_context_service=vector_context_service, display_callback=display_callback)
-            command_handler = CommandHandler(foundry_manager=foundry_manager, display_callback=display_callback)
+
+            # --- MODIFIED: Pass the event_bus to the CommandHandler ---
+            command_handler = CommandHandler(
+                foundry_manager=foundry_manager,
+                event_bus=self.event_bus,
+                display_callback=display_callback
+            )
+
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
                             vector_context_service=vector_context_service, display_callback=display_callback)
+
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
             self.event_bus.subscribe(UserCommandEntered, command_handler.handle)
+
             logger.info("Backend services initialized and ready.")
             display_callback("System online. All services ready.", "system_message")
         except Exception as e:
