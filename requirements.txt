@@ -14,3 +14,9 @@ requests
 
 # For the Google Gemini provider API
 google-generativeai
+
+# For linting Python code
+pycodestyle
+
+# For running automated tests
+pytest
