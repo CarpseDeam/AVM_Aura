@@ -1,173 +1,115 @@
 # gui/controller.py
 import logging
-import queue
 import threading
-from typing import Optional, List
-
+import shlex
+from PySide6.QtCore import QObject, Signal, Slot
 from event_bus import EventBus
-from events import (
-    UserPromptEntered,
-    PlanApproved,
-    PlanDenied,
-    BlueprintInvocation,
-    PauseExecutionForUserInput,
-    PlanReadyForApproval
-)
+from events import UserPromptEntered, UserCommandEntered
+
+from .node_viewer_placeholder import NodeViewerWindow
+from .code_viewer_placeholder import CodeViewerWindow
 
 logger = logging.getLogger(__name__)
 
+# --- NEW: A helper class to bridge threading and PySide6's signal/slot system ---
+class DisplayBridge(QObject):
+    """
+    This class lives in the main GUI thread and receives signals from other
+    threads to safely update the UI.
+    """
+    message_received = Signal(str, str) # Signal to emit with (message, tag)
+
+    def __init__(self, output_log_widget):
+        super().__init__()
+        self.output_log = output_log_widget
+        # Connect the signal to the slot that updates the QTextEdit
+        self.message_received.connect(self.append_message)
+
+    @Slot(str, str)
+    def append_message(self, message, tag):
+        """Safely appends a message to the output log from any thread."""
+        # For now, tags aren't used for styling, but we'll keep them for the future.
+        # The ASCII boxes are pre-formatted, so we just append.
+        self.output_log.append(message)
+        self.output_log.ensureCursorVisible()
+
 class GUIController:
-    """
-    Handles all the application logic and state management for the GUI.
-    The AuraMainWindow is the 'view', and this is the 'controller'.
-    """
+    """Manages the logic and state for the Aura Command Deck."""
 
-    def __init__(self, view, event_bus: EventBus):
-        self.view = view  # The AuraMainWindow instance
+    def __init__(self, main_window, event_bus: EventBus):
+        self.main_window = main_window
         self.event_bus = event_bus
+        self.output_log = main_window.output_log
+        self.command_input = main_window.command_input
 
-        # References to the view's widgets that this controller will manage
-        self.output_text = view.output_text
-        self.input_frame = view.input_frame
-        self.approval_frame = view.approval_frame
-        self.prompt_entry = view.prompt_entry
-        self.submit_button = view.submit_button
-        self.auto_approve_switch = view.auto_approve_switch
+        # State to track open windows
+        self.node_viewer_window = None
+        self.code_viewer_window = None
 
-        # Internal state
-        self.ui_queue = queue.Queue()
-        self.paused_question: Optional[str] = None
-        self.plan_for_approval: Optional[List[BlueprintInvocation]] = None
+        # --- NEW: The thread-safe way to update the GUI ---
+        self.display_bridge = DisplayBridge(self.output_log)
 
-    def start_ui_loop(self):
-        """Starts the recurring queue processing loop."""
-        self.view.after(100, self._process_queue)
+    def get_display_callback(self):
+        """Returns the thread-safe callback for the backend services to use."""
+        return self.display_bridge.message_received.emit
 
-    def display_message(self, message: str, tag: str):
-        """Public method for other threads (like the backend) to queue UI updates."""
-        self.ui_queue.put(('MESSAGE', message, tag))
-
-    def _process_queue(self):
-        """Processes tasks from the UI queue to update the GUI safely."""
-        try:
-            while not self.ui_queue.empty():
-                task_type, *data = self.ui_queue.get_nowait()
-                self.output_text.configure(state="normal")
-
-                if task_type == 'MESSAGE':
-                    message, tag = data
-                    self._insert_formatted_message(message, tag)
-
-                elif task_type == 'PAUSE':
-                    question, = data
-                    self.paused_question = question
-                    self.output_text.insert("end", f"🤔 Aura Asks:\n{question}\n\n", ("aura_question",))
-                    self.prompt_entry.configure(state="normal")
-                    self.submit_button.configure(state="normal")
-                    self.view._set_placeholder()
-                    self.prompt_entry.focus_set()
-
-                elif task_type == 'APPROVAL':
-                    plan, = data
-                    self.plan_for_approval = plan
-                    self.input_frame.grid_remove()  # Hide the normal input
-
-                    plan_text = "Aura's Plan requires your approval:\n"
-                    for i, invocation in enumerate(plan):
-                        params = ", ".join(f"{k}='{v}'" for k, v in invocation.parameters.items())
-                        plan_text += f"  {i+1}. {invocation.blueprint.id}({params})\n"
-
-                    self.output_text.insert("end", plan_text, ("plan_display",))
-                    self.approval_frame.grid()  # Show the Approve/Deny buttons
-
-                self.output_text.configure(state="disabled")
-                self.output_text.see("end")
-        finally:
-            self.view.after(100, self._process_queue)
-
-    def _insert_formatted_message(self, message, base_tag):
-        """Parses message for code blocks and inserts with syntax highlighting."""
-        parts = self.view.code_block_regex.split(message)
-
-        for i, part in enumerate(parts):
-            if not part: continue
-            is_code = (i % 2 == 1)
-            if is_code:
-                self.output_text.insert("end", "\n")
-                for text, tag in self.view.highlighter.get_tokens(part):
-                    self.output_text.insert("end", text, (tag,))
-                self.output_text.insert("end", "\n\n")
-            else:
-                self.output_text.insert("end", part, (base_tag,))
-
-        if not self.view.code_block_regex.search(message):
-            self.output_text.insert("end", "\n\n")
-
-    # --- Event Handlers ---
-    def handle_pause_for_input(self, event: PauseExecutionForUserInput):
-        logger.info(f"GUI received pause event. Question: {event.question}")
-        self.ui_queue.put(('PAUSE', event.question))
-
-    def handle_plan_for_approval(self, event: PlanReadyForApproval):
-        logger.info(f"GUI received a plan with {len(event.plan)} steps for approval.")
-        self.ui_queue.put(('APPROVAL', event.plan))
-
-    def handle_plan_denied(self, event: PlanDenied):
-        self.display_message("Plan denied by user.", "system_message")
-
-    # --- UI Action Methods ---
-    def cleanup_approval_ui(self):
-        """Hides approval buttons and re-enables the main prompt."""
-        self.approval_frame.grid_remove()
-        self.input_frame.grid()
-        self.plan_for_approval = None
-        self.prompt_entry.focus_set()
-
-    def approve_plan(self):
-        """Publishes the PlanApproved event when the user clicks approve."""
-        if not self.plan_for_approval: return
-        logger.info("User approved the plan.")
-        self.event_bus.publish(PlanApproved(plan=self.plan_for_approval))
-        self.cleanup_approval_ui()
-
-    def deny_plan(self):
-        """Publishes the PlanDenied event and cleans up the UI."""
-        if not self.plan_for_approval: return
-        logger.info("User denied the plan.")
-        self.event_bus.publish(PlanDenied())
-        self.cleanup_approval_ui()
-
-    def submit_prompt(self, event: Optional[object] = None):
-        """Handles the logic for submitting a prompt from the user."""
-        prompt_text = self.prompt_entry.get("1.0", "end-1c").strip()
-        if not prompt_text or "placeholder" in self.prompt_entry.tag_names("1.0") or not self.view.backend_ready.is_set():
+    def submit_input(self):
+        """Handles when the user presses Enter in the command input."""
+        input_text = self.command_input.text().strip()
+        if not input_text:
             return
 
-        self.prompt_entry.delete("1.0", "end")
-        self.prompt_entry.configure(state="disabled")
-        self.submit_button.configure(state="disabled")
+        # Display the user's input in the log
+        self.output_log.append(f"👤 {input_text}")
+        self.command_input.clear()
 
-        is_auto_approved = self.auto_approve_switch.get() == 1
-        logger.info(f"Submitting prompt with auto_approve_plan = {is_auto_approved}")
-
-        if self.paused_question:
-            self.display_message(f"👤 You (Answer):\n{prompt_text}", "user_prompt")
-            final_prompt = (
-                f"I previously asked: '{self.paused_question}'. "
-                f"The user has now replied: '{prompt_text}'. "
-                "Please continue the task based on this new information."
-            )
-            self.paused_question = None
+        # --- NEW: Full command dispatcher logic ---
+        if input_text.startswith("/"):
+            # This is a direct command, handle it immediately
+            try:
+                parts = shlex.split(input_text[1:])
+                command = parts[0]
+                args = parts[1:]
+                logger.info(f"Dispatching command: /{command} with args: {args}")
+                self.event_bus.publish(UserCommandEntered(command=command, args=args))
+            except Exception as e:
+                self.get_display_callback()(f"Error parsing command: {e}", "avm_error")
         else:
-            self.display_message(f"👤 You:\n{prompt_text}", "user_prompt")
-            final_prompt = prompt_text
+            # This is a natural language prompt for the LLM
+            logger.info("Dispatching prompt to LLM.")
+            # We run this in a thread so it doesn't freeze the GUI
+            threading.Thread(
+                target=self.event_bus.publish,
+                args=(UserPromptEntered(prompt_text=input_text),),
+                daemon=True
+            ).start()
 
-        self.view._set_placeholder()
-        threading.Thread(target=self._publish_prompt_event, args=(final_prompt, is_auto_approved), daemon=True).start()
+    def post_welcome_message(self):
+        """Displays the initial welcome message in the log."""
+        welcome_text = (
+            "┌─ Welcome to Aura ─────────────────────────┐\n"
+            "│                                           │\n"
+            "│ System online. Waiting for command...     │\n"
+            "└───────────────────────────────────────────┘"
+        )
+        self.output_log.setText(welcome_text)
 
-    def _publish_prompt_event(self, prompt_text: str, auto_approve: bool):
-        """Publishes the final prompt to the event bus."""
-        if self.event_bus:
-            self.event_bus.publish(UserPromptEntered(prompt_text=prompt_text, auto_approve_plan=auto_approve))
+    def toggle_node_viewer(self):
+        """Shows or focuses the Node Viewer window."""
+        if self.node_viewer_window is None or not self.node_viewer_window.isVisible():
+            logger.info("Launching Node Viewer window...")
+            self.node_viewer_window = NodeViewerWindow()
+            self.node_viewer_window.show()
         else:
-            self.display_message("ERROR: Event bus not available.", "avm_error")
+            logger.info("Focusing existing Node Viewer window.")
+            self.node_viewer_window.activateWindow()
+
+    def toggle_code_viewer(self):
+        """Shows or focuses the Code Viewer window."""
+        if self.code_viewer_window is None or not self.code_viewer_window.isVisible():
+            logger.info("Launching Code Viewer window...")
+            self.code_viewer_window = CodeViewerWindow()
+            self.code_viewer_window.show()
+        else:
+            logger.info("Focusing existing Code Viewer window.")
+            self.code_viewer_window.activateWindow()

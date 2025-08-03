@@ -1,7 +1,7 @@
 # --- AVM Project Requirements ---
 
 # For the modern GUI
-customtkinter
+Pyside6
 
 # For rich text formatting in the backend/console
 rich

@@ -1,0 +1,49 @@
+/* gui/style.qss */
+
+QWidget {
+    background-color: #1a1a1a; /* Very dark grey */
+    color: #00FF41; /* Classic green */
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 14px;
+}
+
+QMainWindow {
+    background-color: #1a1a1a;
+}
+
+/* The main output log */
+#OutputLog {
+    background-color: #0d0d0d; /* Even darker, like a monitor screen */
+    border: 1px solid #333333;
+    border-radius: 4px;
+    padding: 5px;
+}
+
+/* The command input line */
+#CommandInput {
+    background-color: #2a2a2a;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 16px;
+}
+
+#CommandInput:focus {
+    border: 1px solid #00FF41; /* Green glow on focus */
+}
+
+/* The right-hand docking station */
+#Dock {
+    background-color: #222222;
+    border-left: 1px solid #333333;
+}
+
+QToolBar QToolButton {
+    padding: 10px;
+    color: #cccccc;
+}
+
+QToolBar QToolButton:hover {
+    background-color: #333333;
+    color: #ffffff;
+}

@@ -1,60 +1,102 @@
 # services/command_handler.py
-"""
-Handles user-entered commands and manages application state, such as exiting.
-
-This module is responsible for processing command events, updating its internal
-state based on those commands, and providing a way for the main application
-loop to query that state (e.g., to determine if it should shut down).
-"""
-
 import logging
-from rich.console import Console
-from events import UserCommandEntered
+from foundry import FoundryManager
+from .view_formatter import format_as_box
 
 logger = logging.getLogger(__name__)
 
 
 class CommandHandler:
-    """Handles user-entered commands and manages application state like exiting."""
+    """
+    Handles direct, CLI-style slash commands from the user. It provides a fast,
+    deterministic path for actions that don't require LLM reasoning.
+    """
 
-    def __init__(self, console: Console):
+    def __init__(self, foundry_manager: FoundryManager, display_callback):
         """
-        Initializes the command handler.
+        Initializes the CommandHandler.
 
         Args:
-            console: The Rich Console object for printing user-facing output.
+            foundry_manager: An instance of FoundryManager to access tools.
+            display_callback: A thread-safe function to send output to the GUI.
         """
-        self.console = console
-        self._should_exit = False
+        self.foundry = foundry_manager
+        self.display = display_callback
+        logger.info("CommandHandler initialized and ready.")
 
-    @property
-    def should_exit(self) -> bool:
+    def handle(self, event):  # event is a UserCommandEntered event
         """
-        Property to query if the application has been signaled to exit.
-
-        Returns:
-            True if an exit command has been processed, False otherwise.
+        Receives a command event and routes it to the correct handler method.
         """
-        return self._should_exit
+        command = event.command.lower()
+        args = event.args
+        logger.info(f"Handling command '/{command}' with args: {args}")
 
-    def handle(self, event: UserCommandEntered) -> None:
-        """
-        Processes a command event and updates internal state.
+        try:
+            if command == "list_files":
+                self._handle_list_files(args)
+            elif command == "read":
+                self._handle_read_file(args)
+            elif command == "lint":
+                self._handle_lint(args)
+            elif command == "help":
+                self._handle_help()
+            else:
+                error_text = f"Unknown command: /{command}\nType /help to see a list of available commands."
+                self.display(format_as_box(f"Error: Unknown Command", error_text), "avm_error")
+        except Exception as e:
+            error_message = f"An unexpected error occurred while executing '/{command}': {e}"
+            logger.error(error_message, exc_info=True)
+            self.display(format_as_box(f"Error: {command}", error_message), "avm_error")
 
-        This method processes specific commands like '/exit' by setting an
-        internal flag and logs other commands. It does not return any value,
-        aligning with a pure event-driven architecture.
+    def _handle_list_files(self, args: list):
+        """Handler for the /list_files command."""
+        list_files_action = self.foundry.get_action("list_files")
+        path = args[0] if args else "."
+        result = list_files_action(path=path)
+        formatted_output = format_as_box(f"Directory Listing: {path}", result)
+        self.display(formatted_output, "avm_output")
 
-        Args:
-            event: The UserCommandEntered event instance.
-        """
-        logger.info(f"Handling UserCommandEntered event: '/{event.command}' with args: {event.args}")
+    def _handle_read_file(self, args: list):
+        """Handler for the /read command. Will add content to Code Viewer."""
+        if not args:
+            self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /read <path/to/file>"),
+                         "avm_error")
+            return
 
-        if event.command.lower() in ["exit", "quit"]:
-            self.console.print("[bold red]Exit command received. Shutting down.[/bold red]")
-            self._should_exit = True
-        else:
-            self.console.print(
-                f"[yellow]COMMAND RECEIVED:[/yellow] [italic]/{event.command}[/italic] | Args: {event.args}"
-            )
-            self.console.print("[dim]... (In a real app, command-specific logic would run) ...[/dim]\n")
+        read_file_action = self.foundry.get_action("read_file")
+        path = args[0]
+        content = read_file_action(path=path)
+
+        # In the future, this will publish an event to open the code viewer.
+        # For now, we'll display it in an ASCII box.
+        # This is a great placeholder for our next integration step!
+        title = f"Contents: {path}"
+        # Truncate content for display if it's too long
+        display_content = (content[:1000] + '...') if len(content) > 1000 else content
+        formatted_output = format_as_box(title, display_content)
+        self.display(formatted_output, "avm_output")
+
+    def _handle_lint(self, args: list):
+        """Handler for the /lint command."""
+        if not args:
+            self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /lint <path/to/file>"),
+                         "avm_error")
+            return
+
+        lint_action = self.foundry.get_action("lint_file")
+        path = args[0]
+        result = lint_action(path=path)
+        formatted_output = format_as_box(f"Lint Report: {path}", result)
+        self.display(formatted_output, "avm_output")
+
+    def _handle_help(self):
+        """Displays a help message with available commands."""
+        help_text = (
+            "Aura Direct Commands:\n\n"
+            "/help                 - Shows this help message.\n"
+            "/list_files [path]    - Lists files in the specified directory.\n"
+            "/read <path>          - Reads the content of a file.\n"
+            "/lint <path>          - Lints a Python file for style errors."
+        )
+        self.display(format_as_box("Aura Help", help_text), "system_message")

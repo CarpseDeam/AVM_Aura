@@ -8,3 +8,5 @@ from .context_manager import ContextManager
 from .executor import ExecutorService
 from .llm_operator import LLMOperator
 from .vector_context_service import VectorContextService
+from .command_handler import CommandHandler
+from .view_formatter import format_as_box
