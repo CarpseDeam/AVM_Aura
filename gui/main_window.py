@@ -11,15 +11,18 @@ from rich.console import Console
 
 from event_bus import EventBus
 from events import UserPromptEntered, PauseExecutionForUserInput
-from foundry.foundry_manager import FoundryManager
-from providers.base import LLMProvider
-from providers.gemini_provider import GeminiProvider
-from providers.ollama_provider import OllamaProvider
-from services.config_manager import ConfigManager
-from services.context_manager import ContextManager
-from services.executor import ExecutorService
-from services.llm_operator import LLMOperator
+from foundry import FoundryManager
+from providers import LLMProvider, GeminiProvider, OllamaProvider
+from services import (
+    ConfigManager,
+    ContextManager,
+    ExecutorService,
+    LLMOperator,
+    VectorContextService
+)
 from .syntax_highlighter import SyntaxHighlighter
+# --- NEW: Import the banner function ---
+from .utils import get_aura_banner
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +99,6 @@ class AuraMainWindow(ctk.CTk):
         input_frame = ctk.CTkFrame(main_frame)
         input_frame.grid(row=1, column=0, sticky="ew")
         input_frame.grid_columnconfigure(0, weight=1)
-        # --- LAYOUT FIX: Configure rows for the new layout ---
         input_frame.grid_rowconfigure(0, weight=1)
         input_frame.grid_rowconfigure(1, weight=0)
 
@@ -105,15 +107,12 @@ class AuraMainWindow(ctk.CTk):
             font=self.mono_font,
             height=100
         )
-        # --- LAYOUT FIX: Textbox now spans 2 rows ---
         self.prompt_entry.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
         self.prompt_entry.bind("<Control-Return>", self._submit_prompt)
 
-        # --- LAYOUT FIX: Label is now in the top-right cell ---
         self.shortcut_label = ctk.CTkLabel(input_frame, text="Ctrl+Enter to Send", font=ctk.CTkFont(size=10))
         self.shortcut_label.grid(row=0, column=1, sticky="ne", padx=(0, 10), pady=(5, 2))
 
-        # --- LAYOUT FIX: Button is now in the bottom-right cell ---
         self.submit_button = ctk.CTkButton(
             input_frame, text="Send", command=self._submit_prompt, width=80
         )
@@ -155,6 +154,8 @@ class AuraMainWindow(ctk.CTk):
             console = Console()
             foundry_manager = FoundryManager()
             context_manager = ContextManager()
+            vector_context_service = VectorContextService()
+
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
             provider: Optional[LLMProvider] = None
@@ -177,17 +178,23 @@ class AuraMainWindow(ctk.CTk):
                 event_bus=self.event_bus,
                 foundry_manager=foundry_manager,
                 context_manager=context_manager,
+                vector_context_service=vector_context_service,
                 display_callback=self._display_message,
             )
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
             self.event_bus.subscribe(PauseExecutionForUserInput, self._handle_pause_for_input)
+
             ExecutorService(
                 event_bus=self.event_bus,
                 context_manager=context_manager,
                 foundry_manager=foundry_manager,
+                vector_context_service=vector_context_service,
                 display_callback=self._display_message,
             )
             logger.info("Backend services initialized successfully.")
+
+            # --- DISPLAY BANNER IN GUI ---
+            self._display_message(get_aura_banner(), "system_message")
             self._display_message("System: Backend ready. Please enter a prompt.", "system_message")
             self.backend_ready.set()
         except Exception as e:
@@ -228,7 +235,6 @@ class AuraMainWindow(ctk.CTk):
     def _insert_formatted_message(self, message, base_tag):
         """Parses message for code blocks and inserts with syntax highlighting."""
         parts = self.code_block_regex.split(message)
-        is_code = False
 
         for i, part in enumerate(parts):
             if not part:

@@ -23,3 +23,7 @@ pytest
 
 # For syntax highlighting
 Pygments
+
+# For Vector DB / RAG
+chromadb
+sentence-transformers

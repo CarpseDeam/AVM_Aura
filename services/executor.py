@@ -5,9 +5,11 @@ from typing import Callable, Optional
 
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation, PauseExecutionForUserInput
-from foundry.foundry_manager import FoundryManager
+from foundry import FoundryManager
 from foundry.blueprints import RawCodeInstruction, UserInputRequest
-from services.context_manager import ContextManager
+# --- THIS IS THE FIX: Use relative imports for sibling modules ---
+from .context_manager import ContextManager
+from .vector_context_service import VectorContextService
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +20,13 @@ class ExecutorService:
             event_bus: EventBus,
             context_manager: ContextManager,
             foundry_manager: FoundryManager,
+            vector_context_service: VectorContextService,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         self.event_bus = event_bus
         self.context_manager = context_manager
         self.foundry_manager = foundry_manager
+        self.vector_context_service = vector_context_service
         self.display_callback = display_callback
         self.ast_root = ast.Module(body=[], type_ignores=[])
         logger.info("ExecutorService initialized with a blank AST root.")
@@ -51,13 +55,15 @@ class ExecutorService:
 
         if not action_function:
             self._display(
-                f"Error: Action function '{action_function_name}' not found in Foundry for blueprint '{action_id}'.",
+                f"Error: Action function '{action_function_name}' not found for blueprint '{action_id}'.",
                 "avm_error")
             return
 
         try:
             if action_id == "get_generated_code":
                 result = action_function(code_ast=self.ast_root)
+            elif action_id == "index_project_context":
+                result = action_function(vector_context_service=self.vector_context_service, **action_params)
             else:
                 result = action_function(**action_params)
 

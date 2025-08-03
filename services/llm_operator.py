@@ -14,9 +14,11 @@ from proto.marshal.collections.maps import MapComposite
 
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation, UserPromptEntered
-from foundry.foundry_manager import FoundryManager
-from providers.base import LLMProvider
-from services.context_manager import ContextManager
+from foundry import FoundryManager
+from providers import LLMProvider
+# --- THIS IS THE FIX: Use relative imports for sibling modules ---
+from .context_manager import ContextManager
+from .vector_context_service import VectorContextService
 
 logger = logging.getLogger(__name__)
 
@@ -25,47 +27,34 @@ class LLMOperator:
     """
     Orchestrates LLM interactions by managing context, tools, and responses.
 
-    This class receives user prompts, retrieves the current working memory context,
-    fetches available tool definitions, and passes all this information to the
-    configured LLM provider. It then parses the provider's response, validating
-    it and converting it into an executable action if a tool is invoked.
+    This class now implements a RAG (Retrieval-Augmented Generation) flow by
+    querying a vector database for relevant code context before calling the LLM.
     """
 
     def __init__(
-        self,
-        console: Console,
-        provider: LLMProvider,
-        event_bus: EventBus,
-        foundry_manager: FoundryManager,
-        context_manager: ContextManager,
-        display_callback: Optional[Callable[[str, str], None]] = None,
+            self,
+            console: Console,
+            provider: LLMProvider,
+            event_bus: EventBus,
+            foundry_manager: FoundryManager,
+            context_manager: ContextManager,
+            vector_context_service: VectorContextService,
+            display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         """
         Initializes the LLMOperator.
-
-        Args:
-            console (Console): The Rich console for output.
-            provider (LLMProvider): The concrete LLM provider to use for responses.
-            event_bus (EventBus): The central event bus for communication.
-            foundry_manager (FoundryManager): The manager for available tools.
-            context_manager (ContextManager): The service for managing AVM context.
-            display_callback (Optional[Callable[[str, str], None]]): A function
-                to call to display output to the user.
         """
         self.console = console
         self.provider = provider
         self.event_bus = event_bus
         self.foundry_manager = foundry_manager
         self.context_manager = context_manager
+        self.vector_context_service = vector_context_service
         self.display_callback = display_callback
 
     def _display(self, message: str, tag: str) -> None:
         """
         Sends a message to the display callback, if one is configured.
-
-        Args:
-            message (str): The message to display.
-            tag (str): A tag for classifying the message (e.g., 'system_message').
         """
         if self.display_callback:
             self.display_callback(message, tag)
@@ -84,21 +73,10 @@ class LLMOperator:
         return data
 
     def _parse_and_validate_llm_response(
-        self, llm_response: Union[str, Dict[str, Any]]
+            self, llm_response: Union[str, Dict[str, Any]]
     ) -> Optional[BlueprintInvocation]:
         """
         Parses and validates the response from the LLM provider.
-
-        If the response is a valid tool call, it's converted into a
-        BlueprintInvocation. Otherwise, it's treated as a text response.
-
-        Args:
-            llm_response: The raw response from the LLM provider, which can be
-                          a JSON string, a dictionary, or a plain text string.
-
-        Returns:
-            An Optional[BlueprintInvocation] if a valid tool call is found,
-            otherwise None.
         """
         if isinstance(llm_response, str):
             try:
@@ -134,7 +112,6 @@ class LLMOperator:
             )
             return None
 
-        # Sanitize the arguments from Gemini's special types to standard Python types
         sanitized_arguments = self._deep_convert_proto_maps(arguments)
 
         if not isinstance(sanitized_arguments, dict):
@@ -145,22 +122,46 @@ class LLMOperator:
 
     def handle(self, event: UserPromptEntered) -> None:
         """
-        Handles a UserPromptEntered event.
-
-        This method retrieves the current context, gets tool definitions, calls
-        the LLM provider, and then processes the response. If the response is a
-        valid tool invocation, it publishes an ActionReadyForExecution event.
-
-        Args:
-            event (UserPromptEntered): The event containing the user's prompt.
+        Handles a UserPromptEntered event, now with RAG.
         """
         self._display("🧠 Thinking...", "system_message")
         try:
             tool_definitions = self.foundry_manager.get_llm_tool_definitions()
+
+            logger.info("Querying vector database for relevant context...")
+            relevant_docs = self.vector_context_service.query(event.prompt_text)
+
+            context_parts = []
+
+            if relevant_docs:
+                context_parts.append("--- CONTEXT FROM RELEVANT CODE (RAG) ---")
+                for doc in relevant_docs:
+                    metadata = doc.get('metadata', {})
+                    file_path = metadata.get('file_path', 'N/A')
+                    node_name = metadata.get('node_name', 'N/A')
+                    context_parts.append(f"# From file '{file_path}', node '{node_name}':")
+                    context_parts.append(f"```python\n{doc['document']}\n```")
+                context_parts.append("--- END RAG CONTEXT ---")
+
             current_context = self.context_manager.get_context()
+            if current_context:
+                context_parts.append("--- CONTEXT FROM OPEN FILES ---")
+                for key, content in current_context.items():
+                    context_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
+                context_parts.append("--- END OPEN FILES CONTEXT ---")
+
+            if context_parts:
+                context_str = "\n\n".join(context_parts)
+                final_prompt = f"{context_str}\n\nUser Prompt: {event.prompt_text}"
+                logger.info("Injecting RAG and/or file context into the prompt.")
+            else:
+                final_prompt = event.prompt_text
+                logger.debug("No context to inject into prompt.")
 
             response = self.provider.get_response(
-                event.prompt_text, context=current_context, tools=tool_definitions
+                prompt=final_prompt,
+                context=None,
+                tools=tool_definitions
             )
 
             instruction = self._parse_and_validate_llm_response(response)
