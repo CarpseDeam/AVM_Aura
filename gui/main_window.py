@@ -49,7 +49,8 @@ class AuraMainWindow(ctk.CTk):
 
         try:
             if os.path.exists(ICON_PATH): self.iconbitmap(ICON_PATH)
-        except Exception as e: logger.warning(f"Could not set window icon: {e}")
+        except Exception as e:
+            logger.warning(f"Could not set window icon: {e}")
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -58,14 +59,17 @@ class AuraMainWindow(ctk.CTk):
             if os.path.exists(FONT_PATH):
                 ctk.FontManager.load_font(FONT_PATH)
                 self.mono_font = ctk.CTkFont(family="JetBrains Mono", size=14)
-            else: self.mono_font = ctk.CTkFont(family="Consolas", size=14)
-        except Exception as e: self.mono_font = ctk.CTkFont(family="Consolas", size=14)
+            else:
+                self.mono_font = ctk.CTkFont(family="Consolas", size=14)
+        except Exception as e:
+            self.mono_font = ctk.CTkFont(family="Consolas", size=14)
 
         self.backend_ready = threading.Event()
         self.highlighter = SyntaxHighlighter(style_name='monokai')
         self.code_block_regex = re.compile(r"```python\n(.*?)\n```", re.DOTALL)
 
         self.event_bus = EventBus()
+        # --- THIS IS THE FIX: Widgets MUST be created before the controller ---
         self._setup_widgets()
         self.controller = GUIController(self, self.event_bus)
 
@@ -92,16 +96,20 @@ class AuraMainWindow(ctk.CTk):
         self.output_text.tag_config("avm_error", foreground="#EF9A9A")
         self.output_text.tag_config("avm_output", foreground="#80CBC4")
         self.output_text.tag_config("avm_info", foreground="#B0BEC5")
-        self.output_text.tag_config("plan_display", foreground="#C39BD3", font=ctk.CTkFont(family="JetBrains Mono", size=14, slant="italic"))
+        self.output_text.tag_config("plan_display", foreground="#C39BD3", underline=True)
         self._setup_highlighting_tags()
 
         self.approval_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         self.approval_frame.grid(row=1, column=0, pady=5, sticky="ew")
         self.approval_frame.grid_columnconfigure((0, 2), weight=1)
-        self.approve_button = ctk.CTkButton(self.approval_frame, text="✅ Approve Plan", command=lambda: self.controller.approve_plan())
-        self.approve_button.grid(row=0, column=0, sticky="e", padx=(0,5))
-        self.deny_button = ctk.CTkButton(self.approval_frame, text="❌ Deny Plan", command=lambda: self.controller.deny_plan(), fg_color="#E57373", hover_color="#EF5350")
-        self.deny_button.grid(row=0, column=2, sticky="w", padx=(5,0))
+        # Note: We can't assign controller methods here directly if controller doesn't exist yet.
+        # So we create the widgets and assign commands later or use lambdas.
+        # The current fixed __init__ order makes direct assignment safe.
+        self.approve_button = ctk.CTkButton(self.approval_frame, text="✅ Approve Plan")
+        self.approve_button.grid(row=0, column=0, sticky="e", padx=(0, 5))
+        self.deny_button = ctk.CTkButton(self.approval_frame, text="❌ Deny Plan", fg_color="#E57373",
+                                         hover_color="#EF5350")
+        self.deny_button.grid(row=0, column=2, sticky="w", padx=(5, 0))
         self.approval_frame.grid_remove()
 
         self.input_frame = ctk.CTkFrame(main_frame)
@@ -109,12 +117,12 @@ class AuraMainWindow(ctk.CTk):
         self.input_frame.grid_columnconfigure(0, weight=1)
         self.prompt_entry = ctk.CTkTextbox(self.input_frame, font=self.mono_font, height=100)
         self.prompt_entry.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
-        self.prompt_entry.bind("<Control-Return>", self.controller.submit_prompt)
+
         self.shortcut_label = ctk.CTkLabel(self.input_frame, text="Ctrl+Enter to Send", font=ctk.CTkFont(size=10))
         self.shortcut_label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.auto_approve_switch = ctk.CTkSwitch(self.input_frame, text="Auto-Approve Plan", font=ctk.CTkFont(size=12))
         self.auto_approve_switch.grid(row=1, column=1, sticky="e", padx=10, pady=5)
-        self.submit_button = ctk.CTkButton(self.input_frame, text="Send", command=self.controller.submit_prompt, width=80)
+        self.submit_button = ctk.CTkButton(self.input_frame, text="Send", width=80)
         self.submit_button.grid(row=1, column=2, sticky="e", padx=10, pady=5)
         self.input_frame.grid_columnconfigure(1, weight=1)
 
@@ -122,6 +130,13 @@ class AuraMainWindow(ctk.CTk):
         self.prompt_entry.bind("<FocusIn>", self._clear_placeholder)
         self.prompt_entry.bind("<FocusOut>", self._set_placeholder)
         self.prompt_entry.focus_set()
+
+    def _setup_widget_commands(self):
+        """Assigns commands to widgets that require the controller."""
+        self.approve_button.configure(command=self.controller.approve_plan)
+        self.deny_button.configure(command=self.controller.deny_plan)
+        self.submit_button.configure(command=self.controller.submit_prompt)
+        self.prompt_entry.bind("<Control-Return>", self.controller.submit_prompt)
 
     def _setup_highlighting_tags(self):
         for tag in self.highlighter.token_map.values():
@@ -139,6 +154,8 @@ class AuraMainWindow(ctk.CTk):
             self.prompt_entry.delete("1.0", "end")
 
     def _start_backend_setup(self):
+        # We need to assign commands after the controller is created.
+        self._setup_widget_commands()
         self.controller.display_message("System: Initializing backend services...", "system_message")
         backend_thread = threading.Thread(target=self._setup_backend, daemon=True)
         backend_thread.start()
@@ -169,16 +186,12 @@ class AuraMainWindow(ctk.CTk):
                 console, provider, self.event_bus, foundry_manager,
                 context_manager, vector_context_service, self.controller.display_message,
             )
-            # The executor is also a listener and is instantiated here
             ExecutorService(
                 self.event_bus, context_manager, foundry_manager,
                 vector_context_service, self.controller.display_message,
             )
 
-            # Subscribe services to events they care about
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
-
-            # Subscribe the controller to events that affect the GUI
             self.event_bus.subscribe(PauseExecutionForUserInput, self.controller.handle_pause_for_input)
             self.event_bus.subscribe(PlanReadyForApproval, self.controller.handle_plan_for_approval)
             self.event_bus.subscribe(PlanDenied, self.controller.handle_plan_denied)
