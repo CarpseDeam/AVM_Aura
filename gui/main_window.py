@@ -105,7 +105,9 @@ class AuraMainWindow(QMainWindow):
             foundry_manager = FoundryManager()
             context_manager = ContextManager()
             vector_context_service = VectorContextService()
-            project_manager = ProjectManager() # <-- NEW!
+            project_manager = ProjectManager()
+            self.controller.set_project_manager(project_manager) # <-- PASS THE INSTANCE
+
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
             provider = None
@@ -126,12 +128,12 @@ class AuraMainWindow(QMainWindow):
             command_handler = CommandHandler(
                 foundry_manager=foundry_manager,
                 event_bus=self.event_bus,
-                project_manager=project_manager, # <-- Pass to CommandHandler
+                project_manager=project_manager,
                 display_callback=display_callback
             )
 
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
-                            vector_context_service=vector_context_service, project_manager=project_manager, # <-- Pass to Executor
+                            vector_context_service=vector_context_service, project_manager=project_manager,
                             display_callback=display_callback)
 
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)

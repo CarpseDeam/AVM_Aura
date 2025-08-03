@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Optional, List
 
 from event_bus import EventBus
-from events import ActionReadyForExecution, BlueprintInvocation, PauseExecutionForUserInput, PlanApproved
+from events import ActionReadyForExecution, BlueprintInvocation, PauseExecutionForUserInput, PlanApproved, ProjectCreated
 from foundry import FoundryManager
 from foundry.blueprints import RawCodeInstruction, UserInputRequest
 from .context_manager import ContextManager
@@ -33,7 +33,6 @@ class ExecutorService:
         self.display_callback = display_callback
         self.ast_root = ast.Module(body=[], type_ignores=[])
 
-        # Define which actions and parameters need project-aware path resolution
         self.PATH_PARAM_KEYS = {
             'write_file': ['path'], 'read_file': ['path'], 'list_files': ['path'],
             'delete_file': ['path'], 'lint_file': ['path'], 'add_import': ['path'],
@@ -59,7 +58,6 @@ class ExecutorService:
         resolved_params = action_params.copy()
         path_keys = self.PATH_PARAM_KEYS.get(action_id, [])
 
-        # Handle optional `path` parameter that defaults to '.'
         if 'path' in path_keys and 'path' not in resolved_params:
             resolved_params['path'] = '.'
 
@@ -70,7 +68,6 @@ class ExecutorService:
         return resolved_params
 
     def _execute_plan(self, plan: List[BlueprintInvocation]) -> None:
-        """A dedicated, reusable method to execute a list of blueprint invocations."""
         self._display(f"▶️ Executing {len(plan)}-step plan...", "avm_executing")
         for i, step in enumerate(plan):
             self._display(f"--- Step {i + 1}/{len(plan)} ---", "avm_executing")
@@ -92,10 +89,8 @@ class ExecutorService:
             return
 
         try:
-            # Resolve paths and prepare parameters
             resolved_params = self._resolve_action_paths(action_id, invocation.parameters)
 
-            # Inject services for specific actions
             if action_id == "get_generated_code":
                 result = action_function(code_ast=self.ast_root)
             elif action_id == "index_project_context":
@@ -104,6 +99,12 @@ class ExecutorService:
                 result = action_function(project_manager=self.project_manager, **resolved_params)
             else:
                 result = action_function(**resolved_params)
+
+            # --- Post-Execution Event Publishing ---
+            if action_id == "create_project" and "Successfully created" in result:
+                project_name = resolved_params['project_name']
+                project_path = str(self.project_manager.active_project_path)
+                self.event_bus.publish(ProjectCreated(project_name=project_name, project_path=project_path))
 
             if isinstance(result, str):
                 self._display(f"✅ Result from {action_id}:\n{result}", "avm_output")

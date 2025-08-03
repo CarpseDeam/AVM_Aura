@@ -98,3 +98,12 @@ class DisplayFileInEditor(Event):
     """
     file_path: str
     file_content: str
+
+
+@dataclass
+class ProjectCreated(Event):
+    """
+    Published by the ExecutorService after a project is successfully created.
+    """
+    project_name: str
+    project_path: str
