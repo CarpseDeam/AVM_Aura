@@ -4,6 +4,7 @@ from foundry import FoundryManager
 from .view_formatter import format_as_box
 from events import DisplayFileInEditor
 from event_bus import EventBus
+from .project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -14,17 +15,20 @@ class CommandHandler:
     deterministic path for actions that don't require LLM reasoning.
     """
 
-    def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus, display_callback):
+    def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
+                 project_manager: ProjectManager, display_callback):
         """
         Initializes the CommandHandler.
 
         Args:
             foundry_manager: An instance of FoundryManager to access tools.
             event_bus: The central event bus for publishing events.
+            project_manager: The service for managing project contexts.
             display_callback: A thread-safe function to send output to the GUI.
         """
         self.foundry = foundry_manager
         self.event_bus = event_bus
+        self.project_manager = project_manager
         self.display = display_callback
         logger.info("CommandHandler initialized and ready.")
 
@@ -56,9 +60,15 @@ class CommandHandler:
     def _handle_list_files(self, args: list):
         """Handler for the /list_files command."""
         list_files_action = self.foundry.get_action("list_files")
-        path = args[0] if args else "."
-        result = list_files_action(path=path)
-        formatted_output = format_as_box(f"Directory Listing: {path}", result)
+        relative_path = args[0] if args else "."
+        resolved_path = self.project_manager.resolve_path(relative_path)
+        result = list_files_action(path=str(resolved_path))
+
+        display_path = self.project_manager.get_active_project_name() or "Current Directory"
+        if relative_path != ".":
+            display_path = f"{display_path}/{relative_path}"
+
+        formatted_output = format_as_box(f"Directory Listing: {display_path}", result)
         self.display(formatted_output, "avm_output")
 
     def _handle_read_file(self, args: list):
@@ -71,18 +81,17 @@ class CommandHandler:
             return
 
         read_file_action = self.foundry.get_action("read_file")
-        path = args[0]
-        content = read_file_action(path=path)
+        relative_path = args[0]
+        resolved_path = self.project_manager.resolve_path(relative_path)
+        content = read_file_action(path=str(resolved_path))
 
-        if "Error: File not found" in content or "Error: Path" in content:
+        if content.strip().startswith("Error:"):
             self.display(format_as_box(f"Error reading file", content), "avm_error")
             return
 
-        # Instead of displaying, publish an event with the file data.
-        logger.info(f"Publishing DisplayFileInEditor event for path: {path}")
-        self.event_bus.publish(DisplayFileInEditor(file_path=path, file_content=content))
-        # Provide simple feedback to the chat log
-        self.display(f"Opened `{path}` in Code Viewer.", "system_message")
+        logger.info(f"Publishing DisplayFileInEditor event for path: {resolved_path}")
+        self.event_bus.publish(DisplayFileInEditor(file_path=str(resolved_path), file_content=content))
+        self.display(f"Opened `{relative_path}` in Code Viewer.", "system_message")
 
     def _handle_lint(self, args: list):
         """Handler for the /lint command."""
@@ -92,9 +101,10 @@ class CommandHandler:
             return
 
         lint_action = self.foundry.get_action("lint_file")
-        path = args[0]
-        result = lint_action(path=path)
-        formatted_output = format_as_box(f"Lint Report: {path}", result)
+        relative_path = args[0]
+        resolved_path = self.project_manager.resolve_path(relative_path)
+        result = lint_action(path=str(resolved_path))
+        formatted_output = format_as_box(f"Lint Report: {relative_path}", result)
         self.display(formatted_output, "avm_output")
 
     def _handle_help(self):
@@ -102,8 +112,8 @@ class CommandHandler:
         help_text = (
             "Aura Direct Commands:\n\n"
             "/help                 - Shows this help message.\n"
-            "/list_files [path]    - Lists files in the specified directory.\n"
-            "/read <path>          - Reads a file and opens it in the Code Viewer.\n"
-            "/lint <path>          - Lints a Python file for style errors."
+            "/list_files [path]    - Lists files in the active project.\n"
+            "/read <path>          - Reads a file from the active project into the Code Viewer.\n"
+            "/lint <path>          - Lints a Python file in the active project."
         )
         self.display(format_as_box("Aura Help", help_text), "system_message")
