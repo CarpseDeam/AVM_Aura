@@ -3,6 +3,7 @@
 Contains actions related to direct file system manipulation.
 """
 import logging
+import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -76,5 +77,31 @@ def create_directory(path: str) -> str:
         return error_message
     except Exception as e:
         error_message = f"An unexpected error occurred while creating directory {path}: {e}"
+        logger.exception(error_message)
+        return error_message
+
+def delete_directory(path: str) -> str:
+    """
+    Recursively deletes a directory and all its contents.
+    """
+    try:
+        logger.info(f"Attempting to recursively delete directory: {path}")
+        path_obj = Path(path)
+
+        if not path_obj.exists():
+            error_message = f"Error: Cannot delete. Directory not found at '{path}'."
+            logger.warning(error_message)
+            return error_message
+        if not path_obj.is_dir():
+            error_message = f"Error: Path '{path}' is a file, not a directory. Use 'delete_file' instead."
+            logger.warning(error_message)
+            return error_message
+
+        shutil.rmtree(path_obj)
+        success_message = f"Successfully deleted directory: {path}"
+        logger.info(success_message)
+        return success_message
+    except Exception as e:
+        error_message = f"An unexpected error occurred while deleting directory {path}: {e}"
         logger.exception(error_message)
         return error_message

@@ -2,6 +2,8 @@
 import logging
 import threading
 import shlex
+from typing import Optional
+
 from PySide6.QtCore import QObject, Signal, Slot
 
 from event_bus import EventBus
@@ -51,7 +53,6 @@ class GUIController:
         self.event_bus.subscribe(ProjectCreated, lambda event: self.on_project_created(event))
 
     def set_project_manager(self, pm: ProjectManager):
-        """Receives the project manager instance from the backend setup."""
         self.project_manager = pm
         logger.info("GUIController has received the ProjectManager instance.")
 
@@ -103,12 +104,9 @@ class GUIController:
 
     @Slot(ProjectCreated)
     def on_project_created(self, event: ProjectCreated):
-        """When a project is created, tell the code viewer to load its file tree."""
         logger.info(f"Controller received ProjectCreated event for '{event.project_name}'")
         self.toggle_code_viewer()
         if self.code_viewer_window:
-            # This needs to be thread-safe, let's assume direct call is fine for now
-            # as Qt signals are queued across threads. But a dedicated signal might be better.
             self.code_viewer_window.load_project(event.project_path)
 
     def toggle_node_viewer(self):
@@ -127,7 +125,10 @@ class GUIController:
 
         if self.code_viewer_window is None or not self.code_viewer_window.isVisible():
             logger.info("Launching REAL Code Viewer window...")
-            self.code_viewer_window = CodeViewerWindow(project_manager=self.project_manager)
+            self.code_viewer_window = CodeViewerWindow(
+                project_manager=self.project_manager,
+                event_bus=self.event_bus
+            )
             self.code_viewer_window.show()
         else:
             logger.info("Focusing existing Code Viewer window.")

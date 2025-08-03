@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton
 )
 from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon  # <-- NEW IMPORT!
 
 from .controller import GUIController
 from event_bus import EventBus
@@ -30,6 +31,14 @@ class AuraMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Aura - Command Deck")
         self.setGeometry(100, 100, 1100, 800)
+
+        # --- NEW: SET THE WINDOW ICON ---
+        icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'Ava_icon.ico')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            logger.info(f"Successfully set window icon from {icon_path}")
+        else:
+            logger.warning(f"Window icon not found at {icon_path}")
 
         self.event_bus = EventBus()
         self._setup_ui()
@@ -106,7 +115,7 @@ class AuraMainWindow(QMainWindow):
             context_manager = ContextManager()
             vector_context_service = VectorContextService()
             project_manager = ProjectManager()
-            self.controller.set_project_manager(project_manager) # <-- PASS THE INSTANCE
+            self.controller.set_project_manager(project_manager)
 
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")

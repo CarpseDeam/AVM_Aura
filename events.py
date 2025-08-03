@@ -58,6 +58,25 @@ class ActionReadyForExecution(Event):
 
 
 @dataclass
+class DirectToolInvocationRequest(Event):
+    """
+    Published by a GUI component to execute a specific tool directly,
+    bypassing the LLM.
+    """
+    tool_id: str
+    params: Dict[str, Any]
+
+
+@dataclass
+class RefreshFileTreeRequest(Event):
+    """
+    Published by a service (like the Executor) to request that the
+    GUI's file tree re-scans the disk.
+    """
+    pass
+
+
+@dataclass
 class PauseExecutionForUserInput(Event):
     """
 

@@ -1,77 +1,66 @@
 # gui/syntax_highlighter.py
 import logging
+from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from pygments import lex
 from pygments.lexers import PythonLexer
 from pygments.style import Style
 from pygments.styles import get_style_by_name
-from pygments.token import Token, Comment, String, Number, Keyword, Operator, Name, Text
+from pygments.token import Token
 
 logger = logging.getLogger(__name__)
 
 
-class SyntaxHighlighter:
+class PygmentsFormatter:
     """
-    A service that uses Pygments to generate styled tokens for syntax highlighting.
+    A custom Pygments formatter that converts style information from a theme
+    into Qt's QTextCharFormat for use with QSyntaxHighlighter.
     """
 
     def __init__(self, style_name: str = 'monokai'):
-        self.style_name = style_name
+        super().__init__()
+        self.styles: dict[Token, QTextCharFormat] = {}
         try:
-            self.style: Style = get_style_by_name(self.style_name)
+            # Use a theme that looks good on a dark background. 'monokai' is a classic.
+            style: Style = get_style_by_name(style_name)
         except Exception:
             logger.warning(f"Pygments style '{style_name}' not found. Falling back to 'default'.")
-            self.style: Style = get_style_by_name('default')
+            style: Style = get_style_by_name('default')
 
-        # Create a mapping from Pygments Token types to our simple tag names
-        self.token_map = {
-            Token: "token_text",
-            Comment: "token_comment",
-            String: "token_string",
-            Number: "token_number",
-            Keyword: "token_keyword",
-            Operator: "token_operator",
-            Name.Function: "token_function",
-            Name.Class: "token_class",
-            Name.Namespace: "token_keyword",  # Treat 'import' and 'from' as keywords
-        }
+        # Create a QTextCharFormat for each token type in the theme
+        for token, style_def in style:
+            char_format = QTextCharFormat()
+            if style_def['color']:
+                char_format.setForeground(QColor(f"#{style_def['color']}"))
+            if style_def['bgcolor']:
+                char_format.setBackground(QColor(f"#{style_def['bgcolor']}"))
+            if style_def['bold']:
+                char_format.setFontWeight(QFont.Weight.Bold)
+            if style_def['italic']:
+                char_format.setFontItalic(True)
+            if style_def['underline']:
+                char_format.setFontUnderline(True)
+            self.styles[token] = char_format
 
-    def get_style_for_tag(self, tag_name: str) -> dict:
-        """Gets the hex color for a simplified tag name from the Pygments style."""
-        # This is a simplified mapping; a real-world app might be more complex.
-        # We find the Pygments Token that corresponds to our tag.
-        token_type = Text
-        if tag_name == "token_comment":
-            token_type = Comment
-        elif tag_name == "token_string":
-            token_type = String
-        elif tag_name == "token_number":
-            token_type = Number
-        elif tag_name == "token_keyword":
-            token_type = Keyword
-        elif tag_name == "token_operator":
-            token_type = Operator
-        elif tag_name == "token_function":
-            token_type = Name.Function
-        elif tag_name == "token_class":
-            token_type = Name.Class
 
-        style_for_token = self.style.style_for_token(token_type)
-        color = style_for_token.get('color')
-        if color:
-            return {'foreground': f'#{color}'}
-        return {}  # Return empty dict if no color is defined
+class AuraSyntaxHighlighter(QSyntaxHighlighter):
+    """
+    A syntax highlighter that uses Pygments to colorize Python code.
+    """
 
-    def get_tokens(self, code: str):
-        """
-        Lexes the given code and yields tuples of (text, tag_name).
-        """
-        python_lexer = PythonLexer()
-        tokens = lex(code, python_lexer)
+    def __init__(self, parent_document):
+        super().__init__(parent_document)
+        self.lexer = PythonLexer()
+        self.formatter = PygmentsFormatter(style_name='monokai')
 
-        for token_type, text in tokens:
-            # Find the most specific tag for the token type
-            tag = "token_text"  # Default
-            for t_type, t_name in self.token_map.items():
-                if token_type in t_type:
-                    tag = t_name
-            yield text, tag
+    def highlightBlock(self, text: str):
+        """This virtual method is called by Qt for each block of text to highlight."""
+        if not text:
+            return
+
+        # Use pygments to break the text into tokens
+        tokens = self.lexer.get_tokens_unprocessed(text)
+
+        # Apply the corresponding format for each token
+        for index, token_type, token_text in tokens:
+            if token_type in self.formatter.styles:
+                self.setFormat(index, len(token_text), self.formatter.styles[token_type])

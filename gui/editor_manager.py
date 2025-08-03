@@ -16,7 +16,6 @@ class EditorManager:
 
     def __init__(self, tab_widget: QTabWidget):
         self.tab_widget = tab_widget
-        # Maps a normalized file path string to its AuraCodeEditor instance
         self.editors: Dict[str, AuraCodeEditor] = {}
         self._setup_initial_state()
 
@@ -28,39 +27,57 @@ class EditorManager:
         welcome_label.setStyleSheet("color: #888888; font-size: 18px;")
         self.tab_widget.addTab(welcome_label, "Welcome")
 
+    def reset_to_welcome_screen(self):
+        """Public method to safely reset the editor view."""
+        self._setup_initial_state()
+
     def create_or_focus_tab(self, path_str: str, content: str):
         """
-        Creates a new editor tab for the given file path and content,
+        Creates a new editor tab and starts the animation,
         or focuses the tab if it already exists.
         """
-        # Normalize the path for consistent dictionary keys
         norm_path = str(Path(path_str).resolve())
 
         if norm_path in self.editors:
-            # Tab already exists, just focus it
             editor = self.editors[norm_path]
+            # If content is different, start animation. Otherwise, just focus.
+            if editor.toPlainText() != content:
+                editor.animate_set_content(content)
             for i in range(self.tab_widget.count()):
                 if self.tab_widget.widget(i) == editor:
                     self.tab_widget.setCurrentIndex(i)
                     return
         else:
-            # If this is the first real tab, remove the welcome message
             if self.tab_widget.count() == 1 and isinstance(self.tab_widget.widget(0), QLabel):
                 self.tab_widget.removeTab(0)
 
-            # Create a new editor and tab
             editor = AuraCodeEditor()
-            editor.setPlainText(content)
             self.editors[norm_path] = editor
+
+            # Connect signals for dirty status
+            editor.content_changed.connect(lambda: self._update_tab_title(norm_path))
 
             tab_name = Path(norm_path).name
             tab_index = self.tab_widget.addTab(editor, tab_name)
             self.tab_widget.setTabToolTip(tab_index, norm_path)
             self.tab_widget.setCurrentIndex(tab_index)
+
+            # Start the animation
+            editor.animate_set_content(content)
             logger.info(f"Created new editor tab for: {norm_path}")
 
+    def _update_tab_title(self, norm_path_str: str):
+        """Updates the tab title to show an asterisk for dirty files."""
+        if norm_path_str not in self.editors: return
+        editor = self.editors[norm_path_str]
+        base_name = Path(norm_path_str).name
+        title = f"*{base_name}" if editor._is_dirty else base_name
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabToolTip(i) == norm_path_str:
+                self.tab_widget.setTabText(i, title)
+                break
+
     def clear_all_tabs(self):
-        """Removes all tabs and clears the editor cache."""
         while self.tab_widget.count() > 0:
             widget_to_remove = self.tab_widget.widget(0)
             self.tab_widget.removeTab(0)
