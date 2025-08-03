@@ -73,3 +73,12 @@ class ActionReadyForExecution(Event):
     """
 
     instruction: Union[BlueprintInvocation, RawCodeInstruction]
+
+
+@dataclass
+class PauseExecutionForUserInput(Event):
+    """
+    Published by the Executor when an action requires user input.
+    The GUI should handle this by displaying the question and enabling input.
+    """
+    question: str

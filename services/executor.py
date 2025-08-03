@@ -4,9 +4,9 @@ import ast
 from typing import Callable, Optional
 
 from event_bus import EventBus
-from events import ActionReadyForExecution, BlueprintInvocation
+from events import ActionReadyForExecution, BlueprintInvocation, PauseExecutionForUserInput
 from foundry.foundry_manager import FoundryManager
-from foundry.blueprints import RawCodeInstruction
+from foundry.blueprints import RawCodeInstruction, UserInputRequest
 from services.context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,6 @@ class ExecutorService:
             if action_id == "get_generated_code":
                 result = action_function(code_ast=self.ast_root)
             else:
-                # Standard execution for all blueprints, including create_new_tool.
-                # The **kwargs in the action function handles parameter unpacking.
                 result = action_function(**action_params)
 
             if isinstance(result, str):
@@ -79,6 +77,10 @@ class ExecutorService:
                 success_msg = f"✅ Success: Added '{node_type}' node to the code tree for blueprint '{action_id}'."
                 self._display(success_msg, "avm_info")
                 logger.info(success_msg)
+
+            elif isinstance(result, UserInputRequest):
+                logger.info(f"Pausing execution to ask user: {result.question}")
+                self.event_bus.publish(PauseExecutionForUserInput(question=result.question))
 
             else:
                 self._display(f"Blueprint '{action_id}' returned an unexpected type: {type(result)}", "avm_error")

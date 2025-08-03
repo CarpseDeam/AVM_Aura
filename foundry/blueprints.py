@@ -29,3 +29,9 @@ class RawCodeInstruction:
     """
     code: str
     language: str = "python"
+
+
+@dataclass
+class UserInputRequest:
+    """A special object returned by an action to signal a pause for user input."""
+    question: str
