@@ -20,3 +20,6 @@ pycodestyle
 
 # For running automated tests
 pytest
+
+# For syntax highlighting
+Pygments

@@ -15,7 +15,8 @@ def get_generated_code(code_ast: ast.Module) -> str:
     logger.info("Unparsing the current AST to generate code string.")
     try:
         ast.fix_missing_locations(code_ast)
-        return ast.unparse(code_ast)
+        # --- FIX --- Ensure this tool also returns a markdown block
+        return f"Generated Code:\n```python\n{ast.unparse(code_ast)}\n```"
     except Exception as e:
         return f"An unexpected error occurred while unparsing the AST: {e}"
 
@@ -93,6 +94,7 @@ def get_code_for(path: str, function_name: str) -> str:
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == function_name:
                 source_code = ast.unparse(node)
                 logger.info(f"Successfully extracted source code for '{function_name}'.")
+                # --- FIX --- Wrap the output in a markdown code block
                 return f"Source code for '{function_name}' from '{path}':\n```python\n{source_code}\n```"
 
         not_found_msg = f"Error: Node '{function_name}' not found as a top-level function or class in '{path}'."
