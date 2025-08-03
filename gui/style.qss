@@ -1,8 +1,8 @@
 /* gui/style.qss */
 
 QWidget {
-    background-color: #1a1a1a; /* Very dark grey */
-    color: #00FF41; /* Classic green */
+    background-color: #1a1a1a;
+    color: #FFB74D; /* Retro Amber/Orange */
     font-family: "JetBrains Mono", "Consolas", monospace;
     font-size: 14px;
 }
@@ -11,39 +11,51 @@ QMainWindow {
     background-color: #1a1a1a;
 }
 
-/* The main output log */
 #OutputLog {
-    background-color: #0d0d0d; /* Even darker, like a monitor screen */
-    border: 1px solid #333333;
-    border-radius: 4px;
-    padding: 5px;
+    background-color: #0d0d0d;
+    border: none;
 }
 
-/* The command input line */
 #CommandInput {
     background-color: #2a2a2a;
     border: 1px solid #444444;
     border-radius: 4px;
-    padding: 8px;
-    font-size: 16px;
+    padding: 5px;
+    font-size: 15px;
 }
 
-#CommandInput:focus {
-    border: 1px solid #00FF41; /* Green glow on focus */
+/* --- NEW: Style for the Send Button --- */
+#SendButton {
+    background-color: #FFB74D;
+    color: #0d0d0d;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 10px;
 }
 
-/* The right-hand docking station */
-#Dock {
-    background-color: #222222;
+#SendButton:hover {
+    background-color: #FFA726;
+}
+
+/* --- UPDATED: Styling for the tab bar and buttons --- */
+#SideBar {
+    background-color: #1a1a1a; /* Match window background */
     border-left: 1px solid #333333;
 }
 
-QToolBar QToolButton {
-    padding: 10px;
+#SideTabButton {
+    background-color: #2a2a2a;
     color: #cccccc;
+    border: 1px solid #333333;
+    border-right: none;
+    text-align: left;
+    padding: 15px 5px;
+    margin-right: -1px; /* Overlap the border to feel connected */
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
 }
 
-QToolBar QToolButton:hover {
-    background-color: #333333;
+#SideTabButton:hover {
+    background-color: #383838;
     color: #ffffff;
 }
