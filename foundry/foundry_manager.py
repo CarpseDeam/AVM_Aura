@@ -1,4 +1,5 @@
 # foundry/foundry_manager.py
+import copy
 import importlib
 import inspect
 import logging
@@ -10,6 +11,26 @@ from foundry.blueprints import Blueprint
 logger = logging.getLogger(__name__)
 
 
+def _uppercase_schema_types(schema: Any) -> Any:
+    """
+    Recursively traverses a JSON schema dict and uppercases 'type' values.
+    This is a specific workaround for the Google Gemini API's SDK, which
+    expects enum-style uppercase strings (e.g., 'OBJECT') instead of
+    standard JSON schema lowercase strings (e.g., 'object').
+    """
+    if isinstance(schema, dict):
+        new_dict = {}
+        for key, value in schema.items():
+            if key == 'type' and isinstance(value, str):
+                new_dict[key] = value.upper()
+            else:
+                new_dict[key] = _uppercase_schema_types(value)
+        return new_dict
+    elif isinstance(schema, list):
+        return [_uppercase_schema_types(item) for item in schema]
+    return schema
+
+
 class FoundryManager:
     """
     Manages Blueprints and Actions by dynamically discovering them from the filesystem.
@@ -17,35 +38,35 @@ class FoundryManager:
 
     def __init__(self) -> None:
         self._blueprints: Dict[str, Blueprint] = {}
-        # --- NEW: A registry for our dynamically loaded action functions ---
         self._actions: Dict[str, Callable[..., Any]] = {}
 
-        self._discover_and_load_blueprints()
-        # --- NEW: Call the action loader ---
         self._discover_and_load_actions()
+        self._discover_and_load_blueprints()
 
         logger.info(
             f"FoundryManager initialized with {len(self._blueprints)} blueprints and {len(self._actions)} actions.")
 
     def _add_blueprint(self, blueprint: Blueprint) -> None:
+        if blueprint.action_function_name not in self._actions:
+            logger.error(
+                f"Blueprint '{blueprint.id}' references an action function "
+                f"'{blueprint.action_function_name}' that was not found. "
+                "This blueprint will be disabled."
+            )
+            return
+
         if blueprint.id in self._blueprints:
             logger.warning("Blueprint with id '%s' is being overwritten.", blueprint.id)
+
         self._blueprints[blueprint.id] = blueprint
         logger.debug("Registered blueprint: %s", blueprint.id)
 
     def _discover_and_load_blueprints(self) -> None:
-        """
-        Scans the 'blueprints' package, imports each module, and registers the
-        Blueprint instance named 'blueprint' found within.
-        """
         try:
             blueprints_dir = Path(__file__).parent.parent / "blueprints"
             package_name = "blueprints"
-
             for file_path in blueprints_dir.glob("*.py"):
-                if file_path.name.startswith("__"):
-                    continue
-
+                if file_path.name.startswith("__"): continue
                 module_name = f"{package_name}.{file_path.stem}"
                 try:
                     module = importlib.import_module(module_name)
@@ -55,52 +76,58 @@ class FoundryManager:
                     else:
                         logger.warning("File %s does not contain a valid 'blueprint' instance.", file_path.name)
                 except Exception as e:
-                    logger.error("Failed to load blueprint from %s: %s", file_path.name, e)
+                    logger.error(f"Failed to load blueprint from %s: %s", file_path.name, e, exc_info=True)
         except Exception as e:
-            logger.critical("A critical error occurred during blueprint discovery: %s", e)
+            logger.critical("A critical error occurred during blueprint discovery: %s", e, exc_info=True)
 
     def _discover_and_load_actions(self) -> None:
-        """
-        Scans the 'foundry.actions' package, imports each module, and registers
-        all functions found within into the action registry.
-        """
         try:
-            # --- The path to our new actions package ---
             actions_dir = Path(__file__).parent / "actions"
-            # --- The importable name of the package ---
             package_name = "foundry.actions"
-
+            if not actions_dir.is_dir() or not (actions_dir / "__init__.py").exists():
+                logger.error(
+                    f"Action discovery failed: The directory 'foundry/actions/' or its '__init__.py' file is missing.")
+                return
             for file_path in actions_dir.glob("*.py"):
-                if file_path.name.startswith("__"):
-                    continue
-
+                if file_path.name.startswith("__"): continue
                 module_name = f"{package_name}.{file_path.stem}"
                 try:
                     module = importlib.import_module(module_name)
-                    # Use inspect to find all function objects in the module
                     for name, func in inspect.getmembers(module, inspect.isfunction):
                         if name in self._actions:
                             logger.warning(f"Action function '{name}' is being overwritten by module '{module_name}'.")
                         self._actions[name] = func
                         logger.debug(f"Registered action function: {name} from {file_path.name}")
+                except ImportError as e:
+                    logger.error(f"Failed to import action module {module_name}: {e}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"Failed to load actions from {file_path.name}: {e}")
+                    logger.error(f"Failed to load actions from {file_path.name}: {e}", exc_info=True)
         except Exception as e:
-            logger.critical(f"A critical error occurred during action discovery: {e}")
+            logger.critical(f"A critical error occurred during action discovery: {e}", exc_info=True)
 
     def get_blueprint(self, name: str) -> Optional[Blueprint]:
         return self._blueprints.get(name)
 
     def get_action(self, name: str) -> Optional[Callable[..., Any]]:
-        """Retrieves a loaded action function from the registry by its name."""
         return self._actions.get(name)
 
     def get_llm_tool_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Gets the list of tool definitions, processing them for provider-specific quirks.
+        """
         definitions: List[Dict[str, Any]] = []
         for bp in self._blueprints.values():
+            # Create a deep copy to avoid modifying the original blueprint's schema in memory
+            params_copy = copy.deepcopy(bp.parameters)
+
+            # ** THIS IS THE FIX **
+            # Recursively uppercase the 'type' fields for Gemini compatibility
+            processed_params = _uppercase_schema_types(params_copy)
+
             tool_def = {
-                "type": "function",
-                "function": {"name": bp.id, "description": bp.description, "parameters": bp.parameters},
+                "name": bp.id,
+                "description": bp.description,
+                "parameters": processed_params  # Use the processed version
             }
             definitions.append(tool_def)
         return definitions

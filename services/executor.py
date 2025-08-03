@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation
-from foundry.foundry_manager import FoundryManager  # <-- Import FoundryManager
+from foundry.foundry_manager import FoundryManager
 from foundry.blueprints import RawCodeInstruction
 from services.context_manager import ContextManager
 
@@ -17,12 +17,12 @@ class ExecutorService:
             self,
             event_bus: EventBus,
             context_manager: ContextManager,
-            foundry_manager: FoundryManager,  # <-- MODIFIED: Inject the FoundryManager
+            foundry_manager: FoundryManager,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         self.event_bus = event_bus
         self.context_manager = context_manager
-        self.foundry_manager = foundry_manager  # <-- MODIFIED: Store the FoundryManager
+        self.foundry_manager = foundry_manager
         self.display_callback = display_callback
         self.ast_root = ast.Module(body=[], type_ignores=[])
         logger.info("ExecutorService initialized with a blank AST root.")
@@ -46,10 +46,7 @@ class ExecutorService:
         display_message = f"▶️ Executing Blueprint: {action_id}"
         self._display(display_message, "avm_executing")
 
-        # --- MODIFIED: The core logic change ---
-        # 1. Get the action function NAME from the blueprint
         action_function_name = blueprint.action_function_name
-        # 2. Get the actual function OBJECT from the FoundryManager's registry
         action_function = self.foundry_manager.get_action(action_function_name)
 
         if not action_function:
@@ -62,6 +59,8 @@ class ExecutorService:
             if action_id == "get_generated_code":
                 result = action_function(code_ast=self.ast_root)
             else:
+                # Standard execution for all blueprints, including create_new_tool.
+                # The **kwargs in the action function handles parameter unpacking.
                 result = action_function(**action_params)
 
             if isinstance(result, str):

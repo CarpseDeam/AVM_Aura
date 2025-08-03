@@ -25,7 +25,7 @@ class AvmGui(ctk.CTk):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.title("AVM")
+        self.title("Aura") # Renamed for our new project!
         self.geometry("1200x800")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -62,7 +62,7 @@ class AvmGui(ctk.CTk):
         self.prompt_entry = ctk.CTkEntry(
             input_frame,
             font=self.mono_font,
-            placeholder_text="Enter your prompt for the AVM...",
+            placeholder_text="Enter your prompt for Aura...", # Renamed for our new project!
         )
         self.prompt_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=5)
         self.prompt_entry.bind("<Return>", self._submit_prompt)
@@ -113,6 +113,7 @@ class AvmGui(ctk.CTk):
                 display_callback=self._display_message,
             )
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
+            # --- MODIFIED: Pass the foundry_manager instance into the ExecutorService ---
             ExecutorService(
                 event_bus=self.event_bus,
                 context_manager=context_manager,
@@ -158,9 +159,9 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler("avm_gui.log"), logging.StreamHandler()],
+        handlers=[logging.FileHandler("aura_gui.log"), logging.StreamHandler()], # Renamed log file
     )
-    logger.info("Starting AVM GUI application...")
+    logger.info("Starting Aura GUI application...")
     app = AvmGui()
     app.mainloop()
-    logger.info("AVM GUI application closed.")
+    logger.info("Aura GUI application closed.")

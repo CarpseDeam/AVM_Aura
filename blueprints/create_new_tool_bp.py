@@ -1,32 +1,42 @@
 # blueprints/create_new_tool_bp.py
 from foundry.blueprints import Blueprint
 
+# This schema tells the LLM to provide a 'tool_parameters' list.
 params = {
     "type": "object",
     "properties": {
         "tool_name": {
             "type": "string",
-            "description": "The unique ID for the new tool (e.g., 'rename_file'). Must be a valid Python identifier in snake_case.",
+            "description": "The unique ID for the new tool (e.g., 'rename_file').",
         },
         "description": {
             "type": "string",
             "description": "A clear, user-facing description of what the new tool does.",
         },
-        "parameters_json": {
-            "type": "string",
-            "description": "A string containing the entire JSON schema object for the new tool's parameters. Must be valid JSON. Example: '{\"type\": \"object\", \"properties\": {\"old_path\": {\"type\": \"string\"}}, \"required\": [\"old_path\"]}'",
+        "tool_parameters": {
+            "type": "array",
+            "description": "A list of parameter objects for the new tool. Each object should have 'name', 'type', and 'description' keys.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The parameter name."},
+                    "type": {"type": "string", "description": "The JSON schema type (e.g., 'string', 'integer')."},
+                    "description": {"type": "string", "description": "The parameter description."}
+                },
+                "required": ["name", "type", "description"]
+            }
         },
-        "action_function_name": {
+        "action_code": {
             "type": "string",
-            "description": "The name of the Python function in foundry/actions/ that will execute the tool's logic. This should match the tool_name.",
-        },
+            "description": "A string containing the complete Python code for the action function, including necessary imports."
+        }
     },
-    "required": ["tool_name", "description", "parameters_json", "action_function_name"],
+    "required": ["tool_name", "description", "tool_parameters", "action_code"],
 }
 
 blueprint = Blueprint(
     id="create_new_tool",
-    description="Meta-Tool: Creates a new blueprint .py file, defining a new tool for the AVM. The corresponding Python action function must be added to foundry/actions/ manually by the user, and the application must be restarted.",
+    description="Meta-Tool: Creates a new, fully functional tool for Aura by generating BOTH a blueprint file and its corresponding action file. The application must be restarted to load the new tool.",
     parameters=params,
     action_function_name="create_new_tool"
 )

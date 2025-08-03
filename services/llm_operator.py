@@ -10,6 +10,7 @@ import logging
 from typing import Any, Callable, Dict, Optional, Union
 
 from rich.console import Console
+from proto.marshal.collections.maps import MapComposite
 
 from event_bus import EventBus
 from events import ActionReadyForExecution, BlueprintInvocation, UserPromptEntered
@@ -69,6 +70,19 @@ class LLMOperator:
         if self.display_callback:
             self.display_callback(message, tag)
 
+    def _deep_convert_proto_maps(self, data: Any) -> Any:
+        """
+        Recursively converts Gemini's special MapComposite objects (and other
+        mappables) into standard Python dicts and lists.
+        """
+        if isinstance(data, MapComposite):
+            return {k: self._deep_convert_proto_maps(v) for k, v in data.items()}
+        if isinstance(data, dict):
+            return {k: self._deep_convert_proto_maps(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._deep_convert_proto_maps(item) for item in data]
+        return data
+
     def _parse_and_validate_llm_response(
         self, llm_response: Union[str, Dict[str, Any]]
     ) -> Optional[BlueprintInvocation]:
@@ -109,8 +123,8 @@ class LLMOperator:
             return None
 
         arguments = data.get("arguments")
-        if not isinstance(arguments, dict):
-            self._display("Error: LLM output missing 'arguments'.", "avm_error")
+        if arguments is None:
+            self._display("Error: LLM output missing 'arguments' block.", "avm_error")
             return None
 
         blueprint = self.foundry_manager.get_blueprint(tool_name)
@@ -120,7 +134,14 @@ class LLMOperator:
             )
             return None
 
-        return BlueprintInvocation(blueprint=blueprint, parameters=arguments)
+        # Sanitize the arguments from Gemini's special types to standard Python types
+        sanitized_arguments = self._deep_convert_proto_maps(arguments)
+
+        if not isinstance(sanitized_arguments, dict):
+            self._display(f"Error: Tool '{tool_name}' arguments could not be converted to a dictionary.", "avm_error")
+            return None
+
+        return BlueprintInvocation(blueprint=blueprint, parameters=sanitized_arguments)
 
     def handle(self, event: UserPromptEntered) -> None:
         """

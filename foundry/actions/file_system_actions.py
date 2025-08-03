@@ -43,7 +43,7 @@ def list_files(path: str = ".") -> str:
     """Lists files and directories at a given path."""
     try:
         if not path:
-            path = "."
+            path = ""
         logger.info(f"Listing contents of directory: {path}")
         path_obj = Path(path)
         if not path_obj.exists():
