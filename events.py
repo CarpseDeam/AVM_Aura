@@ -8,7 +8,7 @@ and subscribed to within the application, facilitating a decoupled architecture.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Union
 
 # The architect has specified that these types are available for import.
@@ -29,6 +29,8 @@ class UserPromptEntered(Event):
     """Event published when a user enters a standard prompt."""
 
     prompt_text: str
+    # --- NEW: Flag to indicate if the user wants to auto-approve plans ---
+    auto_approve_plan: bool = False
 
 
 @dataclass
@@ -43,15 +45,7 @@ class UserCommandEntered(Event):
 class BlueprintInvocation:
     """
     Represents a specific invocation of a tool based on a Blueprint.
-
-    This is a strongly-typed container that bundles a tool's definition (the
-    Blueprint) with the specific arguments for a single call.
-
-    Attributes:
-        blueprint: The Blueprint defining the tool to be executed.
-        parameters: A dictionary of arguments for this specific tool invocation.
     """
-
     blueprint: Blueprint
     parameters: Dict[str, Any]
 
@@ -60,25 +54,43 @@ class BlueprintInvocation:
 class ActionReadyForExecution(Event):
     """
     Event published when a structured action is parsed and ready for execution.
-
-    This event is typically created by the LLMOperator after successfully parsing
-    a response from the language model. It is consumed by the ExecutorService,
-    which performs the specified action.
-
-    Attributes:
-        instruction: A strongly-typed object representing the action to be
-                     executed. This can be either a BlueprintInvocation (for
-                     a predefined tool) or a RawCodeInstruction (for ad-hoc
-                     code execution).
+    This is used for single actions or for plans that have been auto-approved.
     """
-
-    instruction: Union[BlueprintInvocation, RawCodeInstruction]
+    instruction: Union[BlueprintInvocation, RawCodeInstruction, List[BlueprintInvocation]]
 
 
 @dataclass
 class PauseExecutionForUserInput(Event):
     """
     Published by the Executor when an action requires user input.
-    The GUI should handle this by displaying the question and enabling input.
     """
     question: str
+
+
+# --- NEW: Events for the interactive plan approval workflow ---
+
+@dataclass
+class PlanReadyForApproval(Event):
+    """
+    Published by the LLMOperator when a plan is generated in interactive mode.
+    The GUI should listen for this, display the plan, and await user action.
+    """
+    plan: List[BlueprintInvocation] = field(default_factory=list)
+
+
+@dataclass
+class PlanApproved(Event):
+    """
+    Published by the GUI when the user clicks 'Approve' on a plan.
+    The ExecutorService listens for this to proceed with execution.
+    """
+    plan: List[BlueprintInvocation] = field(default_factory=list)
+
+
+@dataclass
+class PlanDenied(Event):
+    """
+    Published by the GUI when the user clicks 'Deny' on a plan.
+    This can be used to inform the user the action was cancelled.
+    """
+    pass

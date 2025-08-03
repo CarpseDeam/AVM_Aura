@@ -4,13 +4,21 @@ import queue
 import threading
 import os
 import re
-from typing import Optional
+from typing import Optional, List
 
 import customtkinter as ctk
 from rich.console import Console
 
 from event_bus import EventBus
-from events import UserPromptEntered, PauseExecutionForUserInput
+# --- MODIFIED: Import all the new events for the approval workflow ---
+from events import (
+    UserPromptEntered,
+    PauseExecutionForUserInput,
+    PlanReadyForApproval,
+    PlanApproved,
+    PlanDenied,
+    BlueprintInvocation
+)
 from foundry import FoundryManager
 from providers import LLMProvider, GeminiProvider, OllamaProvider
 from services import (
@@ -21,7 +29,6 @@ from services import (
     VectorContextService
 )
 from .syntax_highlighter import SyntaxHighlighter
-# --- NEW: Import the banner function ---
 from .utils import get_aura_banner
 
 logger = logging.getLogger(__name__)
@@ -65,6 +72,9 @@ class AuraMainWindow(ctk.CTk):
         self.backend_ready = threading.Event()
 
         self.paused_question: Optional[str] = None
+        # --- NEW: Attribute to hold a plan while waiting for user approval ---
+        self.plan_for_approval: Optional[List[BlueprintInvocation]] = None
+
         self.highlighter = SyntaxHighlighter(style_name='monokai')
         self.code_block_regex = re.compile(r"```python\n(.*?)\n```", re.DOTALL)
 
@@ -78,14 +88,14 @@ class AuraMainWindow(ctk.CTk):
         main_frame = ctk.CTkFrame(self)
         main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_rowconfigure(1, weight=0)
+        # --- MODIFIED: Adjusted grid rows for the new approval frame ---
+        main_frame.grid_rowconfigure(0, weight=1)  # Output text
+        main_frame.grid_rowconfigure(1, weight=0)  # Approval frame
+        main_frame.grid_rowconfigure(2, weight=0)  # Input frame
 
-        self.output_text = ctk.CTkTextbox(
-            main_frame, wrap="word", state="disabled", font=self.mono_font
-        )
+        # Output Text Box
+        self.output_text = ctk.CTkTextbox(main_frame, wrap="word", state="disabled", font=self.mono_font)
         self.output_text.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
-
         self.output_text.tag_config("system_message", foreground="#FFAB00")
         self.output_text.tag_config("user_prompt", foreground="#A5D6A7")
         self.output_text.tag_config("aura_question", foreground="#FFD700")
@@ -93,35 +103,40 @@ class AuraMainWindow(ctk.CTk):
         self.output_text.tag_config("avm_error", foreground="#EF9A9A")
         self.output_text.tag_config("avm_output", foreground="#80CBC4")
         self.output_text.tag_config("avm_info", foreground="#B0BEC5")
-
+        # --- NEW: A tag for displaying the plan to the user ---
+        self.output_text.tag_config("plan_display", foreground="#C39BD3",
+                                    font=ctk.CTkFont(family="JetBrains Mono", size=14, slant="italic"))
         self._setup_highlighting_tags()
 
-        input_frame = ctk.CTkFrame(main_frame)
-        input_frame.grid(row=1, column=0, sticky="ew")
-        input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(1, weight=0)
+        # --- NEW: Approval Frame ---
+        self.approval_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.approval_frame.grid(row=1, column=0, pady=5, sticky="ew")
+        self.approval_frame.grid_columnconfigure((0, 2), weight=1)
+        self.approve_button = ctk.CTkButton(self.approval_frame, text="✅ Approve Plan", command=self._approve_plan)
+        self.approve_button.grid(row=0, column=0, sticky="e", padx=(0, 5))
+        self.deny_button = ctk.CTkButton(self.approval_frame, text="❌ Deny Plan", command=self._deny_plan,
+                                         fg_color="#E57373", hover_color="#EF5350")
+        self.deny_button.grid(row=0, column=2, sticky="w", padx=(5, 0))
+        self.approval_frame.grid_remove()  # Hidden by default
 
-        self.prompt_entry = ctk.CTkTextbox(
-            input_frame,
-            font=self.mono_font,
-            height=100
-        )
-        self.prompt_entry.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
+        # Input Frame
+        self.input_frame = ctk.CTkFrame(main_frame)
+        self.input_frame.grid(row=2, column=0, sticky="ew")
+        self.input_frame.grid_columnconfigure(0, weight=1)
+        self.prompt_entry = ctk.CTkTextbox(self.input_frame, font=self.mono_font, height=100)
+        self.prompt_entry.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
         self.prompt_entry.bind("<Control-Return>", self._submit_prompt)
-
-        self.shortcut_label = ctk.CTkLabel(input_frame, text="Ctrl+Enter to Send", font=ctk.CTkFont(size=10))
-        self.shortcut_label.grid(row=0, column=1, sticky="ne", padx=(0, 10), pady=(5, 2))
-
-        self.submit_button = ctk.CTkButton(
-            input_frame, text="Send", command=self._submit_prompt, width=80
-        )
-        self.submit_button.grid(row=1, column=1, sticky="e", padx=(0, 10), pady=(2, 5))
+        self.shortcut_label = ctk.CTkLabel(self.input_frame, text="Ctrl+Enter to Send", font=ctk.CTkFont(size=10))
+        self.shortcut_label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.auto_approve_switch = ctk.CTkSwitch(self.input_frame, text="Auto-Approve Plan", font=ctk.CTkFont(size=12))
+        self.auto_approve_switch.grid(row=1, column=1, sticky="e", padx=10, pady=5)
+        self.submit_button = ctk.CTkButton(self.input_frame, text="Send", command=self._submit_prompt, width=80)
+        self.submit_button.grid(row=1, column=2, sticky="e", padx=10, pady=5)
+        self.input_frame.grid_columnconfigure(1, weight=1)
 
         self._set_placeholder()
         self.prompt_entry.bind("<FocusIn>", self._clear_placeholder)
         self.prompt_entry.bind("<FocusOut>", self._set_placeholder)
-
         self.prompt_entry.focus_set()
 
     def _setup_highlighting_tags(self):
@@ -183,6 +198,9 @@ class AuraMainWindow(ctk.CTk):
             )
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
             self.event_bus.subscribe(PauseExecutionForUserInput, self._handle_pause_for_input)
+            # --- NEW: Subscribe to the events for the approval workflow ---
+            self.event_bus.subscribe(PlanReadyForApproval, self._handle_plan_for_approval)
+            self.event_bus.subscribe(PlanDenied, self._handle_plan_denied)
 
             ExecutorService(
                 event_bus=self.event_bus,
@@ -193,7 +211,6 @@ class AuraMainWindow(ctk.CTk):
             )
             logger.info("Backend services initialized successfully.")
 
-            # --- DISPLAY BANNER IN GUI ---
             self._display_message(get_aura_banner(), "system_message")
             self._display_message("System: Backend ready. Please enter a prompt.", "system_message")
             self.backend_ready.set()
@@ -207,6 +224,13 @@ class AuraMainWindow(ctk.CTk):
     def _handle_pause_for_input(self, event: PauseExecutionForUserInput):
         logger.info(f"GUI received pause event. Question: {event.question}")
         self.ui_queue.put(('PAUSE', event.question))
+
+    def _handle_plan_for_approval(self, event: PlanReadyForApproval):
+        logger.info(f"GUI received a plan with {len(event.plan)} steps for approval.")
+        self.ui_queue.put(('APPROVAL', event.plan))
+
+    def _handle_plan_denied(self, event: PlanDenied):
+        self._display_message("Plan denied by user.", "system_message")
 
     def _process_queue(self):
         try:
@@ -226,6 +250,20 @@ class AuraMainWindow(ctk.CTk):
                     self.submit_button.configure(state="normal")
                     self._set_placeholder()
                     self.prompt_entry.focus_set()
+
+                # --- NEW: Logic to display the plan and show approval buttons ---
+                elif task_type == 'APPROVAL':
+                    plan, = data
+                    self.plan_for_approval = plan
+                    self.input_frame.grid_remove()  # Hide the normal input
+
+                    plan_text = "Aura's Plan requires your approval:\n"
+                    for i, invocation in enumerate(plan):
+                        params = ", ".join(f"{k}='{v}'" for k, v in invocation.parameters.items())
+                        plan_text += f"  {i + 1}. {invocation.blueprint.id}({params})\n"
+
+                    self.output_text.insert("end", plan_text, ("plan_display",))
+                    self.approval_frame.grid()  # Show the Approve/Deny buttons
 
                 self.output_text.configure(state="disabled")
                 self.output_text.see("end")
@@ -262,6 +300,9 @@ class AuraMainWindow(ctk.CTk):
         self.prompt_entry.configure(state="disabled")
         self.submit_button.configure(state="disabled")
 
+        is_auto_approved = self.auto_approve_switch.get() == 1
+        logger.info(f"Submitting prompt with auto_approve_plan = {is_auto_approved}")
+
         if self.paused_question:
             self._display_message(f"👤 You (Answer):\n{prompt_text}", "user_prompt")
             final_prompt = (
@@ -275,10 +316,33 @@ class AuraMainWindow(ctk.CTk):
             final_prompt = prompt_text
 
         self._set_placeholder()
-        threading.Thread(target=self._publish_prompt_event, args=(final_prompt,), daemon=True).start()
+        threading.Thread(target=self._publish_prompt_event, args=(final_prompt, is_auto_approved), daemon=True).start()
 
-    def _publish_prompt_event(self, prompt_text: str):
+    def _publish_prompt_event(self, prompt_text: str, auto_approve: bool):
         if self.event_bus:
-            self.event_bus.publish(UserPromptEntered(prompt_text=prompt_text))
+            self.event_bus.publish(UserPromptEntered(prompt_text=prompt_text, auto_approve_plan=auto_approve))
         else:
             self._display_message("ERROR: Event bus not available.", "avm_error")
+
+    def _cleanup_approval_ui(self):
+        """Hides approval buttons and re-enables the main prompt."""
+        self.approval_frame.grid_remove()
+        self.input_frame.grid()
+        self.plan_for_approval = None
+        self.prompt_entry.focus_set()
+
+    def _approve_plan(self):
+        """Publishes the PlanApproved event when the user clicks approve."""
+        if not self.plan_for_approval:
+            return
+        logger.info("User approved the plan.")
+        self.event_bus.publish(PlanApproved(plan=self.plan_for_approval))
+        self._cleanup_approval_ui()
+
+    def _deny_plan(self):
+        """Publishes the PlanDenied event and cleans up the UI."""
+        if not self.plan_for_approval:
+            return
+        logger.info("User denied the plan.")
+        self.event_bus.publish(PlanDenied())
+        self._cleanup_approval_ui()

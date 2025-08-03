@@ -12,16 +12,17 @@ logger = logging.getLogger(__name__)
 
 CONFIG_FILE_PATH = "config.yaml"
 
-# --- MODIFIED: Added default model names directly into the default config ---
+# --- MODIFIED: Added execution_mode to the default config ---
 DEFAULT_CONFIG = {
     'llm_provider': 'gemini',
     'temperature': 0.1,
+    'execution_mode': 'interactive',  # 'interactive' or 'auto_approve'
     'ollama': {
-        'model': 'Qwen3-coder',  # <-- Centralized default for Ollama
+        'model': 'Qwen3-coder',
         'host': 'http://localhost:11434'
     },
     'gemini': {
-        'model': 'gemini-2.5-pro'  # <-- Centralized default for Gemini
+        'model': 'gemini-2.5-pro'
         # The API key should NOT be stored here.
         # It will be read from the GOOGLE_API_KEY environment variable.
     }
@@ -60,7 +61,6 @@ class ConfigManager:
                 logger.info(f"Configuration loaded successfully from '{self.config_path}'.")
         except (IOError, yaml.YAMLError) as e:
             logger.error(f"Error loading or parsing config file '{self.config_path}': {e}")
-            # --- MODIFIED: Load default config in case of error to ensure app can run ---
             self.config = DEFAULT_CONFIG
             logger.warning("Falling back to default configuration due to load error.")
 
@@ -72,7 +72,6 @@ class ConfigManager:
                 value = value[k]
             return value
         except (KeyError, TypeError):
-            # Now, if a key is not found in the file, we check the default config
             default_value = DEFAULT_CONFIG
             try:
                 for k in keys:

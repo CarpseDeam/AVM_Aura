@@ -51,18 +51,19 @@ class OllamaProvider(LLMProvider):
         if tools:
             tool_definitions = json.dumps(tools, indent=2)
 
-            # --- NEW HYPER-RESTRICTIVE SYSTEM PROMPT ---
+            # --- MODIFIED: Updated system prompt to include multi-step planning ---
             tool_prompt = (
                 "You are the OPERATOR of a deterministic virtual machine. You are a component in a deterministic program. "
                 "Your SOLE PURPOSE is to translate user requests into JSON tool calls. "
-                "The `name` field in the function definition is the EXACT string you must use in the `tool_name` field of your response. "
-                "You MUST respond with ONLY a single, valid JSON object that conforms to the schema of one of the available tools. "
-                "Do NOT provide any commentary, conversational text, code examples, or explanations. Your entire response must be ONLY the JSON tool call.\n"
-                "If the user's request is ambiguous or you cannot fulfill it with the available tools, you must respond with a JSON object containing an 'error' key and a 'message' explaining the issue.\n\n"
+                "You MUST respond with ONLY a single, valid JSON object. "
+                "For simple, single-step tasks, this will be a tool call object. "
+                "For complex requests that require multiple steps, you MUST respond with a single JSON object containing a 'plan' key. The value of 'plan' must be a list of tool call objects, to be executed in order. "
+                "Do NOT provide any commentary, conversational text, code examples, or explanations. Your entire response must be ONLY the JSON object.\n"
+                "If you cannot fulfill the request, respond with: {\"tool_name\": \"error\", \"arguments\": {\"message\": \"Request cannot be fulfilled.\"}}\n\n"
                 "Here are the available tools:\n"
                 f"{tool_definitions}"
             )
-            # --- END NEW PROMPT ---
+            # --- END MODIFIED PROMPT ---
             prompt_parts.append(tool_prompt)
 
         return "\n\n".join(prompt_parts)
@@ -108,25 +109,19 @@ class OllamaProvider(LLMProvider):
                 logger.warning("Ollama response was empty.")
                 return "Error: Received an empty response from Ollama."
 
-            # If we requested JSON for tool-calling, attempt to parse it.
-            # We are now much more confident the response WILL be JSON.
             if tools:
                 try:
-                    # The response from Ollama with format=json is already a parsed dict
-                    # if the library handles it, but often it's a string needing parsing.
                     if isinstance(text_response, str):
                         parsed_json = json.loads(text_response)
                     else:
                         parsed_json = text_response
 
-                    if isinstance(parsed_json, dict) and "tool_name" in parsed_json:
-                        logger.info(f"Ollama simulated a tool call: {parsed_json.get('tool_name')}")
-                        if "arguments" not in parsed_json:
-                            parsed_json["arguments"] = {}
+                    if isinstance(parsed_json, dict) and ("tool_name" in parsed_json or "plan" in parsed_json):
+                        logger.info(f"Ollama simulated a tool call or plan.")
                         return parsed_json
                     else:
                         logger.info("Ollama returned valid JSON, but it was not a tool call. Treating as text.")
-                        return json.dumps(parsed_json, indent=2)  # Return as formatted string
+                        return json.dumps(parsed_json, indent=2)
                 except json.JSONDecodeError:
                     logger.warning("Ollama did not return valid JSON for a tool call. Returning as plain text.")
                     return text_response

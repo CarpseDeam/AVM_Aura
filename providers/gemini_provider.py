@@ -26,16 +26,21 @@ class GeminiProvider(LLMProvider):
         try:
             genai.configure(api_key=api_key)
 
-            # --- NEW HYPER-RESTRICTIVE SYSTEM PROMPT ---
+            # --- MODIFIED: Updated system prompt to include multi-step planning ---
             system_instruction = (
                 "You are the Operator of a deterministic virtual machine. You are a component in a deterministic program. "
-                "Your ONLY function is to translate user requests into a single, valid tool call from the provided list. "
+                "Your ONLY function is to translate user requests into a single, valid tool call from the provided list or a multi-step plan. "
                 "The `name` field in the function definition is the EXACT string you must use in the `tool_name` field of your response. "
                 "You MUST select one of the provided tools. DO NOT invent tools. DO NOT deviate from the provided tool schemas. "
-                "Your entire response MUST be a single, valid JSON object representing the tool call, and nothing else. "
-                "If the user's request cannot be fulfilled by any of the available tools, you MUST respond with a JSON object containing an error: {\"tool_name\": \"error\", \"arguments\": {\"message\": \"Request cannot be fulfilled with available tools.\"}}"
+                "For simple, single-step tasks, your entire response MUST be a single, valid JSON object representing the tool call. "
+                "For complex requests that require multiple steps, you MUST respond with a single JSON object containing a 'plan' key. The value of 'plan' must be a list of tool call objects, which will be executed in order. "
+                "If the user's request cannot be fulfilled, you MUST respond with: {\"tool_name\": \"error\", \"arguments\": {\"message\": \"Request cannot be fulfilled with available tools.\"}}\n\n"
+                "Example single tool call:\n"
+                "{\"tool_name\": \"read_file\", \"arguments\": {\"path\": \"main.py\"}}\n\n"
+                "Example multi-step plan:\n"
+                "{\"plan\": [{\"tool_name\": \"write_file\", \"arguments\": {\"path\": \"utils.py\", \"content\": \"\"}}, {\"tool_name\": \"define_function\", \"arguments\": {\"name\": \"add\", \"args\": [\"a\", \"b\"]}}]}"
             )
-            # --- END NEW PROMPT ---
+            # --- END MODIFIED PROMPT ---
 
             # <-- NEW: Create a generation config with the specified temperature
             generation_config = genai.GenerationConfig(temperature=temperature)
@@ -46,7 +51,8 @@ class GeminiProvider(LLMProvider):
                 # <-- MODIFIED: Apply the generation config to the model
                 generation_config=generation_config
             )
-            logger.info(f"GeminiProvider initialized for model: {model_name} with temperature {temperature} and HYPER-RESTRICTIVE system instructions.")
+            logger.info(
+                f"GeminiProvider initialized for model: {model_name} with temperature {temperature} and HYPER-RESTRICTIVE system instructions.")
         except Exception as e:
             logger.error(f"Failed to configure Gemini or initialize model: {e}", exc_info=True)
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e
@@ -86,6 +92,11 @@ class GeminiProvider(LLMProvider):
                 if tool_call and tool_call.name:
                     arguments = dict(tool_call.args)
                     logger.info(f"Gemini model invoked tool: '{tool_call.name}' with args: {arguments}")
+                    # --- THIS IS THE FIX --- Check if the tool call is a plan
+                    if tool_call.name == 'plan':
+                        # The plan itself is expected to be in the arguments
+                        return arguments
+
                     return {
                         "tool_name": tool_call.name,
                         "arguments": arguments,
