@@ -156,3 +156,5 @@ class AgentTaskCompleted(Event):
     has finished executing.
     """
     task_id: int
+    result: Optional[Any] = None
+    file_paths: Dict[str, str] = field(default_factory=dict)

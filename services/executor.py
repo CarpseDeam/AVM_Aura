@@ -2,7 +2,7 @@
 import logging
 import ast
 from pathlib import Path
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Any, Dict
 
 from event_bus import EventBus
 from events import (
@@ -47,7 +47,8 @@ class ExecutorService:
             'add_import': ['path'], 'add_method_to_class': ['path'], 'get_code_for': ['path'],
             'list_functions_in_file': ['path'], 'index_project_context': ['path'],
             'copy_file': ['source_path', 'destination_path'],
-            'move_file': ['source_path', 'destination_path']
+            'move_file': ['source_path', 'destination_path'],
+            'run_tests': ['path'],
         }
         self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory',
                                      'copy_file'}
@@ -78,33 +79,53 @@ class ExecutorService:
 
     def _execute_plan(self, plan: List[BlueprintInvocation]) -> None:
         self._display(f"▶️ Executing {len(plan)}-step plan...", "avm_executing")
+        # --- MODIFIED: Capture results for agentic tasks ---
+        plan_results: Dict[str, Any] = {"run_tests": None, "file_paths": {}}
+
         for i, step in enumerate(plan):
             self._display(f"--- Step {i + 1}/{len(plan)} ---", "avm_executing")
             if isinstance(step, BlueprintInvocation):
-                self._execute_blueprint(step)
+                result = self._execute_blueprint(step)
+
+                # If this is part of an agentic mission, capture key results
+                if self.active_agent_task_id is not None:
+                    if step.blueprint.id == 'run_tests':
+                        plan_results['run_tests'] = result
+                    elif step.blueprint.id == 'write_file':
+                        # Store by simple key 'code' or 'test' for the mission manager
+                        path_str = step.parameters.get('path', '')
+                        key = 'test' if 'test' in path_str else 'code'
+                        plan_results['file_paths'][key] = path_str
+
             else:
                 self._display(f"Error: Plan step {i + 1} is not a valid BlueprintInvocation.", "avm_error")
                 break
+
         self._display("✅ Plan execution complete.", "avm_executing")
 
-        # If this plan was part of an agentic task, signal its completion.
         if self.active_agent_task_id is not None:
-            logger.info(f"Signaling completion for agentic task {self.active_agent_task_id}")
-            self.event_bus.publish(AgentTaskCompleted(task_id=self.active_agent_task_id))
-            self.active_agent_task_id = None  # Reset for the next operation
+            logger.info(f"Signaling completion for agentic task {self.active_agent_task_id} with results.")
+            self.event_bus.publish(AgentTaskCompleted(
+                task_id=self.active_agent_task_id,
+                result=plan_results.get('run_tests'),
+                file_paths=plan_results.get('file_paths', {})
+            ))
+            self.active_agent_task_id = None
 
-    def _execute_blueprint(self, invocation: BlueprintInvocation) -> None:
+    def _execute_blueprint(self, invocation: BlueprintInvocation) -> Optional[Any]:
         blueprint = invocation.blueprint
         action_id = blueprint.id
         self._display(f"▶️ Executing Blueprint: {action_id}", "avm_executing")
 
         action_function = self.foundry_manager.get_action(blueprint.action_function_name)
         if not action_function:
-            self._display(f"Error: Action function '{blueprint.action_function_name}' not found.", "avm_error")
-            return
+            error_msg = f"Error: Action function '{blueprint.action_function_name}' not found."
+            self._display(error_msg, "avm_error")
+            return error_msg
 
         try:
             resolved_params = self._resolve_action_paths(action_id, invocation.parameters)
+            result = None
 
             # --- Service Injection ---
             if action_id == "get_generated_code":
@@ -121,10 +142,8 @@ class ExecutorService:
 
             if isinstance(result, str):
                 self._display(f"✅ Result from {action_id}:\n{result}", "avm_output")
-                is_successful_fs_op = "Successfully" in result and action_id in self.FS_MODIFYING_ACTIONS
-                if is_successful_fs_op:
+                if "Successfully" in result and action_id in self.FS_MODIFYING_ACTIONS:
                     self.event_bus.publish(RefreshFileTreeRequest())
-
                 if action_id == "create_project" and "Successfully created" in result:
                     project_name = resolved_params['project_name']
                     project_path = str(self.project_manager.active_project_path)
@@ -139,7 +158,6 @@ class ExecutorService:
                     if file_path:
                         self.context_manager.add_to_context(key=file_path, content=result)
                         self._display(f"📝 Content of '{Path(file_path).name}' added to context.", "avm_info")
-
             elif isinstance(result, ast.AST):
                 self.ast_root.body.append(result)
             elif isinstance(result, UserInputRequest):
@@ -147,15 +165,18 @@ class ExecutorService:
             else:
                 self._display(f"Blueprint '{action_id}' returned an unexpected type: {type(result)}", "avm_error")
 
+            return result
+
         except Exception as e:
             logger.exception("An exception occurred while executing blueprint '%s'.", action_id)
-            self._display(f"❌ Error executing Blueprint '{action_id}': {e}", "avm_error")
+            error_msg = f"❌ Error executing Blueprint '{action_id}': {e}"
+            self._display(error_msg, "avm_error")
+            return error_msg
 
     def _execute_raw_code(self, instruction: RawCodeInstruction) -> None:
         self._display("▶️ Executing Raw Code... Not yet implemented.", "avm_executing")
 
     def _handle_action_ready(self, event: ActionReadyForExecution) -> None:
-        # If this action is part of an agentic task, keep track of its ID.
         if event.task_id is not None:
             self.active_agent_task_id = event.task_id
             logger.info(f"Executor is now handling agentic task ID: {self.active_agent_task_id}")
@@ -163,7 +184,11 @@ class ExecutorService:
         if isinstance(event.instruction, list):
             self._execute_plan(event.instruction)
         elif isinstance(event.instruction, BlueprintInvocation):
-            self._execute_blueprint(event.instruction)
+            result = self._execute_blueprint(event.instruction)
+            # If it was a single step for an agent, complete it now
+            if self.active_agent_task_id is not None:
+                self.event_bus.publish(AgentTaskCompleted(task_id=self.active_agent_task_id, result=result))
+                self.active_agent_task_id = None
         elif isinstance(event.instruction, RawCodeInstruction):
             self._execute_raw_code(event.instruction)
         else:
@@ -180,26 +205,11 @@ class ExecutorService:
         if not blueprint:
             self._display(f"Error: Could not find tool '{event.tool_id}' for direct invocation.", "avm_error")
             return
-        invocation = BlueprintInvocation(blueprint=blueprint, parameters=event.params)
-        self._execute_blueprint(invocation)
+        self._execute_blueprint(BlueprintInvocation(blueprint=blueprint, parameters=event.params))
 
     def _handle_project_created(self, event: ProjectCreated):
-        """Automatically indexes the codebase of a newly created project."""
         logger.info(f"ProjectCreated event caught. Automatically indexing '{event.project_path}'.")
         self._display(f"🚀 Project '{event.project_name}' created. Starting initial codebase indexing...",
                       "system_message")
-
-        action_function = self.foundry_manager.get_action("index_project_context")
-        if action_function:
-            try:
-                result = action_function(
-                    vector_context_service=self.vector_context_service,
-                    path=event.project_path
-                )
-                self._display(f"✅ {result}", "system_message")
-            except Exception as e:
-                error_msg = f"Automatic indexing failed: {e}"
-                logger.error(error_msg, exc_info=True)
-                self._display(f"❌ {error_msg}", "avm_error")
-        else:
-            logger.error("Could not find 'index_project_context' action for automatic indexing.")
+        self.event_bus.publish(DirectToolInvocationRequest(tool_id='index_project_context', params={
+            'path': str(self.project_manager.active_project_path)}))

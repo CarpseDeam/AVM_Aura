@@ -15,6 +15,7 @@ from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
 from .utils import get_aura_banner
 from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
+from .command_input_widget import CommandInputWidget
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class GUIController(QObject):
         self.mission_log_window = None
         self.thinking_widget: Optional[ThinkingWidget] = None
 
-        self.command_input = None
+        self.command_input: Optional[CommandInputWidget] = None
         self.autocomplete_popup: Optional[QLabel] = None
 
         self.add_user_message_signal.connect(self._add_user_message)
@@ -61,7 +62,8 @@ class GUIController(QObject):
         """Receives the command handler from the backend thread and connects the UI."""
         self.command_handler = handler
         # Connect the textChanged signal only after we have a handler to talk to
-        self.command_input.textChanged.connect(self.on_text_changed)
+        if self.command_input:
+            self.command_input.textChanged.connect(self.on_text_changed)
 
     def set_project_manager(self, pm: ProjectManager):
         self.project_manager = pm
@@ -80,6 +82,7 @@ class GUIController(QObject):
         return callback
 
     def submit_input(self):
+        if not self.command_input: return
         input_text = self.command_input.toPlainText().strip()
         if not input_text: return
 
@@ -164,7 +167,7 @@ class GUIController(QObject):
 
     def on_text_changed(self):
         """Show or hide the autocomplete popup based on the input text."""
-        if not self.command_handler: return
+        if not self.command_handler or not self.command_input: return
 
         text = self.command_input.toPlainText()
         if text == "/":
@@ -180,17 +183,33 @@ class GUIController(QObject):
 
     def reposition_autocomplete_popup(self):
         """Calculates the correct position for the popup and moves it."""
-        if not self.autocomplete_popup or not self.autocomplete_popup.isVisible():
+        if not self.autocomplete_popup or not self.command_input or not self.autocomplete_popup.isVisible():
             return
 
-        control_strip_pos = self.main_window.control_strip.pos()
+        popup_parent = self.autocomplete_popup.parentWidget()
+        if not popup_parent:
+            return
+
+        # 1. Get the cursor rectangle in the command_input's local coordinates
+        cursor_rect = self.command_input.cursorRect()
+
+        # 2. Get the anchor point (top-left of the cursor)
+        anchor_point = cursor_rect.topLeft()
+
+        # 3. Map this anchor point from the input widget's coordinates to global screen coordinates
+        global_anchor_point = self.command_input.mapToGlobal(anchor_point)
+
+        # 4. Map the global point back to the popup's parent's coordinate system
+        local_pos = popup_parent.mapFromGlobal(global_anchor_point)
+
         popup_height = self.autocomplete_popup.sizeHint().height()
 
-        x = control_strip_pos.x() + 10
-        y = control_strip_pos.y() - popup_height - 5
+        # Position the popup's bottom-left corner at our anchor point, with some padding
+        x = local_pos.x()
+        y = local_pos.y() - popup_height - 5  # 5px padding above the text line
 
         self.autocomplete_popup.move(x, y)
-        self.autocomplete_popup.setFixedWidth(self.main_window.control_strip.width() - 20)
+        self.autocomplete_popup.setFixedWidth(400)  # Give it a decent fixed width
 
     # --- Window Toggling Methods ---
     def toggle_node_viewer(self):
