@@ -4,12 +4,12 @@ import threading
 import shlex
 from typing import Optional, Callable
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot, QPoint
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
 
 from event_bus import EventBus
 from events import UserPromptEntered, UserCommandEntered
-from services import ProjectManager, MissionLogService
+from services import ProjectManager, MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 class GUIController(QObject):
     """Manages the UI logic, message display, and backend communication."""
 
-    # Signals for thread-safe UI updates
     add_user_message_signal = Signal(str)
     add_ai_message_signal = Signal(str)
     show_thinking_signal = Signal()
@@ -38,6 +37,7 @@ class GUIController(QObject):
 
         self.project_manager: Optional[ProjectManager] = None
         self.mission_log_service: Optional[MissionLogService] = None
+        self.command_handler: Optional[CommandHandler] = None
 
         self.node_viewer_window = None
         self.code_viewer_window = None
@@ -45,18 +45,23 @@ class GUIController(QObject):
         self.thinking_widget: Optional[ThinkingWidget] = None
 
         self.command_input = None
+        self.autocomplete_popup: Optional[QLabel] = None
 
-        # Connect signals to their corresponding slots
         self.add_user_message_signal.connect(self._add_user_message)
         self.add_ai_message_signal.connect(self._add_ai_message)
         self.show_thinking_signal.connect(self._show_thinking)
         self.hide_thinking_signal.connect(self._hide_thinking)
         self.add_system_message_signal.connect(self._add_system_message)
 
-        # We no longer subscribe to UI events here; they are handled by the llm_operator/factory
-
-    def register_ui_elements(self, command_input):
+    def register_ui_elements(self, command_input, autocomplete_popup):
         self.command_input = command_input
+        self.autocomplete_popup = autocomplete_popup
+
+    def wire_up_command_handler(self, handler: CommandHandler):
+        """Receives the command handler from the backend thread and connects the UI."""
+        self.command_handler = handler
+        # Connect the textChanged signal only after we have a handler to talk to
+        self.command_input.textChanged.connect(self.on_text_changed)
 
     def set_project_manager(self, pm: ProjectManager):
         self.project_manager = pm
@@ -65,15 +70,10 @@ class GUIController(QObject):
         self.mission_log_service = mls
 
     def get_display_callback(self) -> Callable[[str, str], None]:
-        """Provides a thread-safe callback for backend services to send messages to the UI."""
-
         def callback(message: str, tag: str):
-            # This function will be called from backend threads
             if tag == "avm_response":
                 self.add_ai_message_signal.emit(message)
             else:
-                # For simplicity, other tags can be handled as system messages
-                # We can differentiate them later if needed
                 formatted_message = f"[{tag.replace('_', ' ').upper()}] {message}"
                 self.add_system_message_signal.emit(formatted_message)
 
@@ -87,7 +87,7 @@ class GUIController(QObject):
         self.command_input.clear()
 
         if input_text.startswith("/"):
-            self.show_thinking_signal.emit()  # Show thinking for commands too
+            self.show_thinking_signal.emit()
             try:
                 parts = shlex.split(input_text[1:])
                 command, args = parts[0], parts[1:]
@@ -104,28 +104,21 @@ class GUIController(QObject):
                 prompt_text=input_text,
                 auto_approve_plan=is_build_mode
             )
-            # Run the LLM call in a separate thread
             threading.Thread(target=self._process_prompt_async, args=(event,), daemon=True).start()
 
     def _process_prompt_async(self, event: UserPromptEntered):
-        """Worker function to handle LLM interaction without blocking the GUI."""
         try:
             self.event_bus.publish(event)
         finally:
-            # Ensure the thinking indicator is always hidden after the operation
             self.hide_thinking_signal.emit()
 
     def post_welcome_message(self):
-        """Adds the initial welcome message to the chat."""
-        # This is a bit of a hack to show the banner correctly.
-        # A proper WelcomeWidget would be better in the future.
         banner_widget = QLabel(f"<pre>{get_aura_banner()}</pre>System online. Waiting for command...")
         banner_widget.setObjectName("WelcomeBanner")
         self._insert_widget(banner_widget)
 
     @Slot(str)
     def _add_system_message(self, message: str):
-        # A simple QLabel for system messages
         widget = QLabel(message)
         widget.setWordWrap(True)
         widget.setObjectName("SystemMessage")
@@ -143,7 +136,7 @@ class GUIController(QObject):
 
     @Slot()
     def _show_thinking(self):
-        if self.thinking_widget: return  # Already showing
+        if self.thinking_widget: return
         self.thinking_widget = ThinkingWidget()
         self._insert_widget(self.thinking_widget)
         self.thinking_widget.start_animation()
@@ -156,22 +149,50 @@ class GUIController(QObject):
             self.thinking_widget = None
 
     def _insert_widget(self, widget: QWidget):
-        """Inserts a widget at the end of the chat layout."""
-        # The layout has a stretch at the end, so we insert before it.
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
-        # Ensure the scroll area scrolls to the bottom to show the new widget
         self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
 
     def get_full_chat_text(self) -> str:
-        """Retrieves all text from the chat log for the /build command."""
         text_parts = []
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
-            if isinstance(widget, (UserMessageWidget, AIMessageWidget)):
-                text_parts.append(widget.message_label.text())
+            if isinstance(widget, UserMessageWidget):
+                text_parts.append(f"User: {widget.message_label.text()}")
+            elif isinstance(widget, AIMessageWidget):
+                text_parts.append(f"[ Aura ]\n{widget.message_label.text()}")
         return "\n".join(text_parts)
 
-    # --- Window Toggling Methods (no significant changes) ---
+    def on_text_changed(self):
+        """Show or hide the autocomplete popup based on the input text."""
+        if not self.command_handler: return
+
+        text = self.command_input.toPlainText()
+        if text == "/":
+            commands = self.command_handler.get_available_commands()
+            popup_text = "<b>Available Commands:</b><br>"
+            for cmd, desc in commands.items():
+                popup_text += f"<b>/{cmd}</b> - {desc}<br>"
+            self.autocomplete_popup.setText(popup_text)
+            self.reposition_autocomplete_popup()
+            self.autocomplete_popup.show()
+        else:
+            self.autocomplete_popup.hide()
+
+    def reposition_autocomplete_popup(self):
+        """Calculates the correct position for the popup and moves it."""
+        if not self.autocomplete_popup or not self.autocomplete_popup.isVisible():
+            return
+
+        control_strip_pos = self.main_window.control_strip.pos()
+        popup_height = self.autocomplete_popup.sizeHint().height()
+
+        x = control_strip_pos.x() + 10
+        y = control_strip_pos.y() - popup_height - 5
+
+        self.autocomplete_popup.move(x, y)
+        self.autocomplete_popup.setFixedWidth(self.main_window.control_strip.width() - 20)
+
+    # --- Window Toggling Methods ---
     def toggle_node_viewer(self):
         if self.node_viewer_window is None or not self.node_viewer_window.isVisible():
             self.node_viewer_window = NodeViewerWindow()

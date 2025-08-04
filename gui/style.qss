@@ -97,31 +97,23 @@ QTextEdit::placeholderText {
     font-size: 18px;
 }
 
-/* --- NEW: ASCII Box Styling for AI Messages --- */
+/* --- SIMPLIFIED: AI Message Styling --- */
 #AIMessageWidget {
-    background-color: #111111; /* Background for the content area */
-    border: none;
-}
-
-#AIHeader, #AIFooter, #AIContent {
-    background-color: transparent; /* Let the parent widget color show through */
-}
-
-.BoxChar, #HeaderLine {
-    color: #444;
-    padding: 0;
-    margin: 0;
+    /* The widget itself handles its own background and border painting */
+    background-color: transparent;
 }
 
 #AuraAuthorLabel {
     color: #FFB74D;
     font-weight: bold;
-    padding: 0 5px;
+    background-color: #111111; /* Match the painted background color */
+    padding: 0 5px; /* Give it some breathing room */
 }
 
-#AIContent QLabel {
-    padding: 0 10px; /* Give the text inside the box some horizontal padding */
+#AIMessageLabel {
+    color: #d4d4d4; /* Standard text color for the message body */
 }
+
 
 #ThinkingWidget {
     background-color: transparent;

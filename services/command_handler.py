@@ -1,7 +1,7 @@
 # services/command_handler.py
 import logging
 import re
-from typing import Callable
+from typing import Callable, Dict
 from foundry import FoundryManager
 from .view_formatter import format_as_box
 from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
@@ -19,29 +19,39 @@ class CommandHandler:
 
     def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
                  project_manager: ProjectManager, display_callback, output_log_text_fetcher: Callable[[], str]):
-        """
-        Initializes the CommandHandler.
-        """
         self.foundry = foundry_manager
         self.event_bus = event_bus
         self.project_manager = project_manager
         self.display = display_callback
         self.output_log_text_fetcher = output_log_text_fetcher
         self.last_aura_response = ""
+
+        self.commands = {
+            "build": "Sends the last prompt from Plan mode to Build mode.",
+            "help": "Shows the detailed help message.",
+            "index": "Re-indexes the project for the AI.",
+            "list_files": "Lists files in the active project.",
+            "read": "Reads a file into the Code Viewer.",
+            "lint": "Lints a Python file."
+        }
+
         logger.info("CommandHandler initialized and ready.")
+
+    def get_available_commands(self) -> Dict[str, str]:
+        """Returns the dictionary of available commands for the autocomplete popup."""
+        return self.commands
 
     def _update_last_aura_response(self):
         """Scan the log to find the last message from Aura."""
         full_text = self.output_log_text_fetcher()
-        # This regex is simpler now since we control the text format
-        # It looks for the last occurrence of "Aura:" and captures everything after it.
-        matches = list(re.finditer(r'Aura:\n(.*?)$', full_text, re.S | re.M))
+        # PROACTIVE FIX: Updated regex to match the new '[ Aura ]' box format.
+        matches = list(re.finditer(r'\[ Aura \]\n(.*?)$', full_text, re.S | re.M))
         if matches:
             self.last_aura_response = matches[-1].group(1).strip()
             logger.info(f"Captured last Aura response for /build command.")
         else:
             self.last_aura_response = ""
-            logger.warning("Could not find a previous 'Aura:' response to use for /build.")
+            logger.warning("Could not find a previous 'Aura' response to use for /build.")
 
     def handle(self, event):
         self._update_last_aura_response()
@@ -133,13 +143,7 @@ class CommandHandler:
             'path': str(self.project_manager.active_project_path)}))
 
     def _handle_help(self):
-        help_text = (
-            "Aura Direct Commands:\n\n"
-            "/build                - Sends the last generated prompt from Plan mode to Build mode.\n"
-            "/help                 - Shows this help message.\n"
-            "/index                - Manually re-indexes the entire project for the AI.\n"
-            "/list_files [path]    - Lists files in the active project.\n"
-            "/read <path>          - Reads a file from the active project into the Code Viewer.\n"
-            "/lint <path>          - Lints a Python file in the active project."
-        )
+        help_text = "Aura Direct Commands:\n\n"
+        for cmd, desc in self.commands.items():
+            help_text += f"/{cmd.ljust(18)} - {desc}\n"
         self.display(format_as_box("Aura Help", help_text), "avm_output")

@@ -4,10 +4,10 @@ import threading
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QButtonGroup, QFrame, QScrollArea
+    QButtonGroup, QFrame, QScrollArea, QLabel
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QResizeEvent
 
 from .controller import GUIController
 from event_bus import EventBus
@@ -36,14 +36,13 @@ class AuraMainWindow(QMainWindow):
             logger.warning(f"Window icon not found at {icon_path}")
 
         self.event_bus = EventBus()
-        # Controller is now initialized later, after the UI is built
         self.controller = None
 
         self._setup_ui()
-        # Now we can initialize the controller
         self.controller = GUIController(self, self.event_bus, self.chat_layout, self.scroll_area)
 
-        self.controller.register_ui_elements(self.command_input)
+        # Register elements that are ready immediately
+        self.controller.register_ui_elements(self.command_input, self.autocomplete_popup)
         self._start_backend_setup()
 
     def _setup_ui(self):
@@ -56,10 +55,9 @@ class AuraMainWindow(QMainWindow):
         # --- Left Column: Chat and Controls ---
         left_column_widget = QWidget()
         left_column_layout = QVBoxLayout(left_column_widget)
-        left_column_layout.setContentsMargins(0, 0, 0, 0)  # No margins for the column itself
+        left_column_layout.setContentsMargins(0, 0, 0, 0)
         left_column_layout.setSpacing(0)
 
-        # --- NEW: Scrollable Chat Area ---
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setObjectName("ScrollArea")
@@ -69,17 +67,16 @@ class AuraMainWindow(QMainWindow):
         self.chat_layout = QVBoxLayout(chat_container)
         self.chat_layout.setContentsMargins(10, 10, 10, 10)
         self.chat_layout.setSpacing(10)
-        self.chat_layout.addStretch(1)  # Pushes content to the top
+        self.chat_layout.addStretch(1)
 
         self.scroll_area.setWidget(chat_container)
         left_column_layout.addWidget(self.scroll_area)
 
         # --- Bottom Control Strip ---
-        control_strip = QFrame()
-        control_strip.setObjectName("ControlStrip")
-        control_strip.setFixedHeight(100)
-        # ... rest of the control strip UI is the same ...
-        strip_layout = QVBoxLayout(control_strip)
+        self.control_strip = QFrame()
+        self.control_strip.setObjectName("ControlStrip")
+        self.control_strip.setFixedHeight(100)
+        strip_layout = QVBoxLayout(self.control_strip)
         strip_layout.setContentsMargins(10, 5, 10, 10)
         strip_layout.setSpacing(5)
         mode_toggle_layout = QHBoxLayout()
@@ -109,9 +106,9 @@ class AuraMainWindow(QMainWindow):
         self.send_button.clicked.connect(lambda: self.controller.submit_input())
         input_area_layout.addWidget(self.send_button)
         strip_layout.addLayout(input_area_layout)
-        left_column_layout.addWidget(control_strip)
+        left_column_layout.addWidget(self.control_strip)
 
-        # --- Right Column: Tool Bar (no changes) ---
+        # --- Right Column: Tool Bar ---
         right_column_widget = QWidget()
         right_column_widget.setObjectName("ToolBar")
         right_column_widget.setFixedWidth(160)
@@ -136,8 +133,21 @@ class AuraMainWindow(QMainWindow):
         main_layout.addWidget(left_column_widget, 1)
         main_layout.addWidget(right_column_widget)
 
+        # --- Autocomplete Popup ---
+        self.autocomplete_popup = QLabel(left_column_widget)
+        self.autocomplete_popup.setObjectName("AutoCompletePopup")
+        self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
+        self.autocomplete_popup.setWordWrap(True)
+        self.autocomplete_popup.hide()
+
     def is_build_mode(self) -> bool:
         return self.build_button.isChecked()
+
+    def resizeEvent(self, event: QResizeEvent):
+        """Reposition the autocomplete popup when the window is resized."""
+        super().resizeEvent(event)
+        if self.controller:
+            self.controller.reposition_autocomplete_popup()
 
     def _start_backend_setup(self):
         self.controller.post_welcome_message()
@@ -145,7 +155,6 @@ class AuraMainWindow(QMainWindow):
 
     def _setup_backend_services(self):
         try:
-            # Backend setup remains largely the same
             logger.info("Setting up backend services...")
             display_callback = self.controller.get_display_callback()
             config_manager = ConfigManager()
@@ -177,10 +186,12 @@ class AuraMainWindow(QMainWindow):
                                        prompt_engine=prompt_engine, instruction_factory=instruction_factory,
                                        display_callback=display_callback)
 
-            # The output log is no longer passed here, as the controller manages its own widgets
             command_handler = CommandHandler(foundry_manager=foundry_manager, event_bus=self.event_bus,
                                              project_manager=project_manager, display_callback=display_callback,
                                              output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
+
+            # --- THE FIX: Wire up the command handler to the controller AFTER it's created ---
+            self.controller.wire_up_command_handler(command_handler)
 
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
                             vector_context_service=vector_context_service, project_manager=project_manager,

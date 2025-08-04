@@ -1,11 +1,13 @@
 # gui/chat_widgets/ai_message_widget.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QSizePolicy
+from PySide6.QtGui import QPainter, QColor, QPen
+from PySide6.QtCore import Qt
 
 
 class AIMessageWidget(QFrame):
     """
     A custom widget for displaying messages from Aura, styled to look like
-    a retro terminal transmission box using box-drawing characters.
+    a retro terminal transmission box. It handles its own painting to resize correctly.
     """
 
     def __init__(self, text: str, parent=None):
@@ -13,79 +15,63 @@ class AIMessageWidget(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setObjectName("AIMessageWidget")
 
-        # This is crucial for the layout to correctly resize the widget
+        # Crucial for allowing the widget to grow and shrink vertically
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # Main layout holds the content; the box is painted around it
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)  # Padding inside the box
 
-        # --- Header ---
-        header = QFrame(self)
-        header.setObjectName("AIHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-
-        corner_tl = QLabel("┌─")
-        corner_tl.setObjectName("BoxChar")
-
-        author_label = QLabel("[ AURA ]")
+        # --- Author Label ---
+        author_label = QLabel("[ Aura ]")
         author_label.setObjectName("AuraAuthorLabel")
+        author_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
-        line_label = QLabel()
-        line_label.setObjectName("HeaderLine")
-        line_label.setText("─" * 200)  # Long line to be clipped
-
-        corner_tr = QLabel("─┐")
-        corner_tr.setObjectName("BoxChar")
-
-        header_layout.addWidget(corner_tl)
-        header_layout.addWidget(author_label)
-        header_layout.addWidget(line_label, 1)
-        header_layout.addWidget(corner_tr)
-
-        # --- Content ---
-        content = QFrame(self)
-        content.setObjectName("AIContent")
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-
-        border_left = QLabel("│")
-        border_left.setObjectName("BoxChar")
-
+        # --- Message Label ---
         self.message_label = QLabel(text)
+        self.message_label.setObjectName("AIMessageLabel")
         self.message_label.setWordWrap(True)
+        # This tells the label to grow vertically as needed
         self.message_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.message_label.setMinimumHeight(self.message_label.sizeHint().height())
 
-        border_right = QLabel("│")
-        border_right.setObjectName("BoxChar")
+        layout.addWidget(author_label)
+        layout.addWidget(self.message_label)
 
-        content_layout.addWidget(border_left)
-        content_layout.addWidget(self.message_label, 1)
-        content_layout.addWidget(border_right)
+    def paintEvent(self, event):
+        """Override the paint event to draw a custom, resizable ASCII-style box."""
+        # This paint event is called *before* the child widgets are painted.
+        # We first draw the background, then the border.
+        super().paintEvent(event)
 
-        # --- Footer ---
-        footer = QFrame(self)
-        footer.setObjectName("AIFooter")
-        footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(0, 0, 0, 0)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        corner_bl = QLabel("└")
-        corner_bl.setObjectName("BoxChar")
+        # Get the current geometry
+        rect = self.rect()
+        width = rect.width()
+        height = rect.height()
 
-        line_bottom = QLabel()
-        line_bottom.setObjectName("HeaderLine")
-        line_bottom.setText("─" * 200)
+        # Define colors and pen
+        bg_color = QColor("#111111")
+        border_color = QColor("#444")
+        pen = QPen(border_color)
+        pen.setWidth(1)
+        painter.setPen(pen)
 
-        corner_br = QLabel("┘")
-        corner_br.setObjectName("BoxChar")
+        # Draw the main background rectangle
+        painter.fillRect(rect, bg_color)
 
-        footer_layout.addWidget(corner_bl)
-        footer_layout.addWidget(line_bottom, 1)
-        footer_layout.addWidget(corner_br)
+        # --- Draw the box-drawing characters programmatically ---
+        # Top line
+        painter.drawText(0, 10, "┌")
+        painter.drawText(10, 10, "─" * (width - 20))  # Stretch the line
+        painter.drawText(width - 10, 10, "┐")
 
-        # Add components to main layout
-        main_layout.addWidget(header)
-        main_layout.addWidget(content)
-        main_layout.addWidget(footer)
+        # Side lines
+        painter.drawLine(0, 10, 0, height - 10)  # Left
+        painter.drawLine(width - 1, 10, width - 1, height - 10)  # Right
+
+        # Bottom line
+        painter.drawText(0, height - 1, "└")
+        painter.drawText(10, height - 1, "─" * (width - 20))
+        painter.drawText(width - 10, height - 1, "┘")
