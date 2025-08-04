@@ -15,10 +15,10 @@ class ProjectManager:
 
     def __init__(self):
         """Initializes the ProjectManager and ensures the root projects directory exists."""
-        self.root_path = Path(PROJECTS_ROOT_DIR)
+        self.root_path = Path(PROJECTS_ROOT_DIR).resolve() # Ensure root is absolute
         self.root_path.mkdir(exist_ok=True)
         self.active_project_path: Optional[Path] = None
-        logger.info(f"ProjectManager initialized. Workspace is at './{PROJECTS_ROOT_DIR}/'")
+        logger.info(f"ProjectManager initialized. Workspace is at '{self.root_path}'")
 
     def is_project_active(self) -> bool:
         """Checks if a project is currently active."""
@@ -39,11 +39,11 @@ class ProjectManager:
             if new_project_path.exists():
                 message = f"Project '{project_name}' already exists. Setting it as active project."
                 logger.warning(message)
-                self.active_project_path = new_project_path
+                self.active_project_path = new_project_path.resolve() # THE FIX!
                 return True, message
 
             new_project_path.mkdir(parents=True, exist_ok=True)
-            self.active_project_path = new_project_path
+            self.active_project_path = new_project_path.resolve() # THE FIX!
             message = f"Successfully created and activated project: {project_name}"
             logger.info(message)
             return True, message

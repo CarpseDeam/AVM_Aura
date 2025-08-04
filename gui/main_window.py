@@ -4,7 +4,7 @@ import threading
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QButtonGroup, QFrame, QScrollArea, QLabel
+    QButtonGroup, QFrame, QScrollArea, QLabel, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QResizeEvent
@@ -76,7 +76,7 @@ class AuraMainWindow(QMainWindow):
         # --- Bottom Control Strip ---
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
-        self.control_strip.setFixedHeight(100)
+        self.control_strip.setFixedHeight(150)
         strip_layout = QVBoxLayout(self.control_strip)
         strip_layout.setContentsMargins(10, 5, 10, 10)
         strip_layout.setSpacing(5)
@@ -96,18 +96,21 @@ class AuraMainWindow(QMainWindow):
         mode_toggle_layout.addWidget(self.build_button)
         mode_toggle_layout.addStretch(1)
         strip_layout.addLayout(mode_toggle_layout)
+
         input_area_layout = QHBoxLayout()
         self.command_input = CommandInputWidget()
         self.command_input.setObjectName("CommandInput")
         self.command_input.setPlaceholderText("Describe what you want to build...")
         input_area_layout.addWidget(self.command_input)
+
         self.send_button = QPushButton("Send")
         self.send_button.setObjectName("SendButton")
         self.send_button.setFixedSize(QSize(80, 50))
         self.send_button.clicked.connect(lambda: self.controller.submit_input())
         self.command_input.send_message_requested.connect(lambda: self.controller.submit_input())
         input_area_layout.addWidget(self.send_button)
-        strip_layout.addLayout(input_area_layout)
+
+        strip_layout.addLayout(input_area_layout, 1)
         left_column_layout.addWidget(self.control_strip)
 
         # --- Right Column: Tool Bar ---
@@ -117,26 +120,36 @@ class AuraMainWindow(QMainWindow):
         right_column_layout = QVBoxLayout(right_column_widget)
         right_column_layout.setContentsMargins(10, 10, 10, 10)
         right_column_layout.setSpacing(10)
+
+        project_button = QPushButton("New Project")
+        project_button.setObjectName("ToolButton")
+        project_button.clicked.connect(lambda: self.controller.handle_new_project_request())
+        right_column_layout.addWidget(project_button)
+
         right_column_layout.addStretch(1)
+
         node_viewer_btn = QPushButton("Node Viewer")
         node_viewer_btn.setObjectName("ToolButton")
         node_viewer_btn.clicked.connect(lambda: self.controller.toggle_node_viewer())
         right_column_layout.addWidget(node_viewer_btn)
+
         code_viewer_btn = QPushButton("Code Viewer")
         code_viewer_btn.setObjectName("ToolButton")
         code_viewer_btn.clicked.connect(lambda: self.controller.toggle_code_viewer())
         right_column_layout.addWidget(code_viewer_btn)
+
         mission_log_btn = QPushButton("Mission Log")
         mission_log_btn.setObjectName("ToolButton")
         mission_log_btn.clicked.connect(lambda: self.controller.toggle_mission_log())
         right_column_layout.addWidget(mission_log_btn)
+
         right_column_layout.addStretch(1)
 
         main_layout.addWidget(left_column_widget, 1)
         main_layout.addWidget(right_column_widget)
 
         # --- Autocomplete Popup ---
-        self.autocomplete_popup = QLabel(left_column_widget)
+        self.autocomplete_popup = QLabel(self.command_input)  # Child of the input now!
         self.autocomplete_popup.setObjectName("AutoCompletePopup")
         self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
         self.autocomplete_popup.setWordWrap(True)

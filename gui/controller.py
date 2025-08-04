@@ -5,10 +5,10 @@ import shlex
 from typing import Optional, Callable
 
 from PySide6.QtCore import QObject, Signal, Slot, QPoint
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputDialog
 
 from event_bus import EventBus
-from events import UserPromptEntered, UserCommandEntered
+from events import UserPromptEntered, UserCommandEntered, DirectToolInvocationRequest
 from services import ProjectManager, MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
@@ -170,7 +170,7 @@ class GUIController(QObject):
         if not self.command_handler or not self.command_input: return
 
         text = self.command_input.toPlainText()
-        if text == "/":
+        if text.strip() == "/":
             commands = self.command_handler.get_available_commands()
             popup_text = "<b>Available Commands:</b><br>"
             for cmd, desc in commands.items():
@@ -186,30 +186,29 @@ class GUIController(QObject):
         if not self.autocomplete_popup or not self.command_input or not self.autocomplete_popup.isVisible():
             return
 
-        popup_parent = self.autocomplete_popup.parentWidget()
-        if not popup_parent:
-            return
-
-        # 1. Get the cursor rectangle in the command_input's local coordinates
         cursor_rect = self.command_input.cursorRect()
-
-        # 2. Get the anchor point (top-left of the cursor)
-        anchor_point = cursor_rect.topLeft()
-
-        # 3. Map this anchor point from the input widget's coordinates to global screen coordinates
-        global_anchor_point = self.command_input.mapToGlobal(anchor_point)
-
-        # 4. Map the global point back to the popup's parent's coordinate system
-        local_pos = popup_parent.mapFromGlobal(global_anchor_point)
-
         popup_height = self.autocomplete_popup.sizeHint().height()
 
-        # Position the popup's bottom-left corner at our anchor point, with some padding
-        x = local_pos.x()
-        y = local_pos.y() - popup_height - 5  # 5px padding above the text line
+        # Position the popup's bottom-left corner right above the cursor line
+        x = cursor_rect.left()
+        y = cursor_rect.top() - popup_height
 
         self.autocomplete_popup.move(x, y)
-        self.autocomplete_popup.setFixedWidth(400)  # Give it a decent fixed width
+        self.autocomplete_popup.setFixedWidth(400)
+
+    def handle_new_project_request(self):
+        """Shows a dialog to get a project name and publishes an event."""
+        project_name, ok = QInputDialog.getText(
+            self.main_window,
+            "Create New Project",
+            "Enter project name (use filesystem-friendly characters):"
+        )
+        if ok and project_name:
+            logger.info(f"User requested to create a new project: '{project_name}'")
+            self.event_bus.publish(DirectToolInvocationRequest(
+                tool_id='create_project',
+                params={'project_name': project_name}
+            ))
 
     # --- Window Toggling Methods ---
     def toggle_node_viewer(self):
