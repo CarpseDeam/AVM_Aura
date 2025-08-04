@@ -1,5 +1,4 @@
 # providers/gemini_provider.py
-
 """
 Implement the LLMProvider interface for Google's Gemini models,
 encapsulating all API-specific logic, including native tool-calling.
@@ -9,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import google.generativeai as genai
 from .base import LLMProvider
+from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -24,44 +24,31 @@ class GeminiProvider(LLMProvider):
 
         try:
             genai.configure(api_key=api_key)
-
-            # --- MODIFIED: More aggressive system prompt ---
-            system_instruction = (
-                "You are an expert-level, deterministic computer program."
-                "Your SOLE purpose is to translate user requests into JSON tool calls."
-                "You MUST respond with ONLY a single, valid JSON object, and NOTHING ELSE."
-                "For simple, single-step tasks, this will be a tool call object."
-                "For complex requests that require multiple steps, you MUST respond with a single JSON object containing a 'plan' key. The value of 'plan' must be a list of tool call objects, to be executed in order."
-                "Do NOT provide any commentary, conversational text, code examples, or explanations. Your entire response MUST be ONLY the JSON object."
-                "If you cannot fulfill the request, respond with: {\"tool_name\": \"error\", \"arguments\": {\"message\": \"Request cannot be fulfilled.\"}}\n\n"
-                "Example single tool call:\n"
-                "{\"tool_name\": \"read_file\", \"arguments\": {\"path\": \"main.py\"}}\n\n"
-                "Example multi-step plan:\n"
-                "{\"plan\": [{\"tool_name\": \"add_task_to_mission_log\", \"arguments\": {\"description\": \"First step\"}}, {\"tool_name\": \"add_task_to_mission_log\", \"arguments\": {\"description\": \"Second step\"}}]}"
-            )
-
-            generation_config = genai.GenerationConfig(temperature=temperature)
-
-            self.model = genai.GenerativeModel(
-                model_name,
-                system_instruction=system_instruction,
-                generation_config=generation_config
-            )
+            self.model_name = model_name
+            self.temperature = temperature
             logger.info(
-                f"GeminiProvider initialized for model: {model_name} with temperature {temperature} and AGGRESSIVE system instructions.")
+                f"GeminiProvider initialized for model: {self.model_name} with temperature {self.temperature}.")
         except Exception as e:
-            logger.error(f"Failed to configure Gemini or initialize model: {e}", exc_info=True)
+            logger.error(f"Failed to configure Gemini: {e}", exc_info=True)
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e
 
     def get_response(
             self,
             prompt: str,
+            mode: str,
             context: Optional[Dict[str, str]] = None,
             tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
         Sends the prompt to the Gemini API and returns the response.
         """
+        if mode == 'plan':
+            system_instruction = ARCHITECT_SYSTEM_PROMPT
+        elif mode == 'build':
+            system_instruction = OPERATOR_SYSTEM_PROMPT
+        else:
+            raise ValueError(f"Unknown mode '{mode}' provided to GeminiProvider.")
+
         final_prompt = prompt
         if context:
             context_parts = ["--- CONTEXT ---"]
@@ -74,10 +61,17 @@ class GeminiProvider(LLMProvider):
         else:
             logger.debug("No context provided for Gemini prompt.")
 
-        logger.debug(f"Sending prompt to Gemini model: '{final_prompt[:200]}...'")
+        logger.debug(f"Sending prompt to Gemini model in '{mode}' mode: '{final_prompt[:200]}...'")
 
         try:
-            response = self.model.generate_content(final_prompt, tools=tools)
+            generation_config = genai.GenerationConfig(temperature=self.temperature)
+            model = genai.GenerativeModel(
+                self.model_name,
+                system_instruction=system_instruction,
+                generation_config=generation_config
+            )
+
+            response = model.generate_content(final_prompt, tools=tools)
 
             if (
                     response.candidates
@@ -97,7 +91,10 @@ class GeminiProvider(LLMProvider):
                     }
 
             if hasattr(response, "text"):
-                logger.warning("Gemini returned a text response despite strict tool-use instructions.")
+                # In 'plan' mode, a text response is acceptable.
+                if mode == 'plan':
+                    return response.text
+                logger.warning("Gemini returned a text response despite strict tool-use instructions in 'build' mode.")
                 return response.text
 
             if response.prompt_feedback and response.prompt_feedback.block_reason:

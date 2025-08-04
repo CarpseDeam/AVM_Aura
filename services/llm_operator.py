@@ -65,7 +65,7 @@ class LLMOperator:
             try:
                 data: Dict[str, Any] = json.loads(llm_response)
             except json.JSONDecodeError:
-                self._display(f"💬 LLM Response:\n{llm_response}", "avm_response")
+                self._display(f"💬 Aura:\n{llm_response}", "avm_response")
                 return None
         elif isinstance(llm_response, dict):
             data = llm_response
@@ -90,7 +90,8 @@ class LLMOperator:
 
         tool_name = data.get("tool_name")
         if not tool_name:
-            self._display("Error: LLM output missing 'tool_name' or 'plan'.", "avm_error")
+            pretty_json = json.dumps(data, indent=2)
+            self._display(f"💬 Aura (JSON Response):\n{pretty_json}", "avm_response")
             return None
         arguments = data.get("arguments", {})
         blueprint = self.foundry_manager.get_blueprint(tool_name)
@@ -101,7 +102,8 @@ class LLMOperator:
         return BlueprintInvocation(blueprint=blueprint, parameters=sanitized_arguments)
 
     def handle(self, event: UserPromptEntered) -> None:
-        self._display("🧠 Thinking...", "system_message")
+        mode = 'build' if event.auto_approve_plan else 'plan'
+        self._display(f"🧠 Thinking ({mode} mode)...", "system_message")
         try:
             tool_definitions = self.foundry_manager.get_llm_tool_definitions()
             relevant_docs = self.vector_context_service.query(event.prompt_text)
@@ -121,13 +123,16 @@ class LLMOperator:
                 context_parts.append("--- END OPEN FILES CONTEXT ---")
             final_prompt = f"{'\n\n'.join(context_parts)}\n\nUser Prompt: {event.prompt_text}" if context_parts else event.prompt_text
 
-            response = self.provider.get_response(prompt=final_prompt, tools=tool_definitions)
+            response = self.provider.get_response(
+                prompt=final_prompt,
+                mode=mode,
+                tools=tool_definitions
+            )
             instruction = self._parse_and_validate_llm_response(response)
 
             if not instruction:
                 return
 
-            # --- NEW: Logic to handle auto-approval vs. interactive approval ---
             if isinstance(instruction, list):  # It's a plan
                 if event.auto_approve_plan:
                     logger.info("Auto-approving plan and publishing for execution.")

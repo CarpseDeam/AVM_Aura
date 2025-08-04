@@ -1,3 +1,4 @@
+# providers/base.py
 """
 Define the abstract contract (interface) that all LLM providers must adhere to,
 ensuring architectural consistency.
@@ -20,6 +21,7 @@ class LLMProvider(ABC):
     def get_response(
         self,
         prompt: str,
+        mode: str,
         context: Optional[Dict[str, str]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, Dict[str, Any]]:
@@ -29,6 +31,8 @@ class LLMProvider(ABC):
 
         Args:
             prompt: The user's input prompt.
+            mode: The interaction mode ('plan' or 'build'), which determines
+                  the AI's personality and response format.
             context: An optional dictionary containing contextual information,
                      such as the content of previously read files. This allows
                      for stateful conversations.
