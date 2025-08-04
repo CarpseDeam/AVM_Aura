@@ -100,14 +100,14 @@ QTextEdit::placeholderText {
 }
 
 #AIMessageWidget {
-    background-color: transparent; /* The paint event handles the bg color now */
+    background-color: #0d0d0d; /* Match the main scroll area background */
     border: none;
 }
 
 #AuraAuthorLabel {
     color: #FFB74D;
     font-weight: bold;
-    background-color: #111111;
+    background-color: #0d0d0d; /* Match widget background for the 'cutout' effect */
     padding: 0 5px;
 }
 

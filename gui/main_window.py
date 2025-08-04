@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QResizeEvent
 
+from .command_input_widget import CommandInputWidget
 from .controller import GUIController
 from event_bus import EventBus
 from services import (
@@ -96,7 +97,7 @@ class AuraMainWindow(QMainWindow):
         mode_toggle_layout.addStretch(1)
         strip_layout.addLayout(mode_toggle_layout)
         input_area_layout = QHBoxLayout()
-        self.command_input = QTextEdit()
+        self.command_input = CommandInputWidget()
         self.command_input.setObjectName("CommandInput")
         self.command_input.setPlaceholderText("Describe what you want to build...")
         input_area_layout.addWidget(self.command_input)
@@ -104,6 +105,7 @@ class AuraMainWindow(QMainWindow):
         self.send_button.setObjectName("SendButton")
         self.send_button.setFixedSize(QSize(80, 50))
         self.send_button.clicked.connect(lambda: self.controller.submit_input())
+        self.command_input.send_message_requested.connect(lambda: self.controller.submit_input())
         input_area_layout.addWidget(self.send_button)
         strip_layout.addLayout(input_area_layout)
         left_column_layout.addWidget(self.control_strip)

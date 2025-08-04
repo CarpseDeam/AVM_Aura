@@ -1,7 +1,7 @@
 # gui/chat_widgets/ai_message_widget.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QSizePolicy
-from PySide6.QtGui import QPainter, QColor, QPen
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
+from PySide6.QtCore import Qt, QPoint
 
 
 class AIMessageWidget(QFrame):
@@ -20,12 +20,16 @@ class AIMessageWidget(QFrame):
 
         # Main layout holds the content; the box is painted around it
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)  # Padding inside the box
+        # We give the layout some margin so the text content doesn't touch the painted border
+        layout.setContentsMargins(15, 10, 15, 15)
+        layout.setSpacing(5)
 
-        # --- Author Label ---
-        author_label = QLabel("[ Aura ]")
-        author_label.setObjectName("AuraAuthorLabel")
-        author_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        # Make author label a member to get its geometry in the paintEvent
+        self.author_label = QLabel("[ Aura ]")
+        self.author_label.setObjectName("AuraAuthorLabel")
+        self.author_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        # This is needed to ensure the label has a size for the first paint event
+        self.author_label.adjustSize()
 
         # --- Message Label ---
         self.message_label = QLabel(text)
@@ -34,44 +38,62 @@ class AIMessageWidget(QFrame):
         # This tells the label to grow vertically as needed
         self.message_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        layout.addWidget(author_label)
+        layout.addWidget(self.author_label, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.message_label)
 
     def paintEvent(self, event):
-        """Override the paint event to draw a custom, resizable ASCII-style box."""
-        # This paint event is called *before* the child widgets are painted.
-        # We first draw the background, then the border.
-        super().paintEvent(event)
-
+        # We paint the border first, then call super() to draw the child widgets on top.
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Get the current geometry
-        rect = self.rect()
-        width = rect.width()
-        height = rect.height()
+        # If the label hasn't been placed by the layout manager, we can't draw the border yet.
+        label_geom = self.author_label.geometry()
+        if label_geom.width() == 0 or not self.author_label.isVisible():
+            painter.fillRect(self.rect(), QColor("#0d0d0d")) # Just draw background
+            super().paintEvent(event)
+            return
 
-        # Define colors and pen
-        bg_color = QColor("#111111")
-        border_color = QColor("#444")
+        # Define our "stylish" colors
+        border_color = QColor("#FFB74D")
+        bg_color = QColor("#0d0d0d")
+
+        # Fill the background first
+        painter.fillRect(self.rect(), bg_color)
+
+        # --- Prepare for drawing the border ---
         pen = QPen(border_color)
         pen.setWidth(1)
         painter.setPen(pen)
 
-        # Draw the main background rectangle
-        painter.fillRect(rect, bg_color)
+        # We need a monospaced font to draw the ASCII corners correctly
+        font = self.font()
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        char_h_offset = fm.ascent() / 2 - 2 # Fine-tune vertical alignment of corners
 
-        # --- Draw the box-drawing characters programmatically ---
-        # Top line
-        painter.drawText(0, 10, "┌")
-        painter.drawText(10, 10, "─" * (width - 20))  # Stretch the line
-        painter.drawText(width - 10, 10, "┐")
+        # --- Calculations ---
+        rect = self.rect().adjusted(2, 2, -2, -2) # Inset for crispness
+        top_line_y = label_geom.center().y()
+        gap_start_x = label_geom.x() - 5
+        gap_end_x = label_geom.right() + 5
 
-        # Side lines
-        painter.drawLine(0, 10, 0, height - 10)  # Left
-        painter.drawLine(width - 1, 10, width - 1, height - 10)  # Right
-
+        # --- Draw the border components ---
+        # Top-left line
+        painter.drawLine(rect.left(), top_line_y, gap_start_x, top_line_y)
+        # Top-right line
+        painter.drawLine(gap_end_x, top_line_y, rect.right(), top_line_y)
+        # Left vertical line
+        painter.drawLine(rect.left(), top_line_y, rect.left(), rect.bottom())
+        # Right vertical line
+        painter.drawLine(rect.right(), top_line_y, rect.right(), rect.bottom())
         # Bottom line
-        painter.drawText(0, height - 1, "└")
-        painter.drawText(10, height - 1, "─" * (width - 20))
-        painter.drawText(width - 10, height - 1, "┘")
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+
+        # Draw the ASCII corners on top of the line ends
+        painter.drawText(QPoint(rect.left() - 1, top_line_y + char_h_offset), "┌")
+        painter.drawText(QPoint(rect.right() - 2, top_line_y + char_h_offset), "┐")
+        painter.drawText(QPoint(rect.left() - 1, rect.bottom() + char_h_offset), "└")
+        painter.drawText(QPoint(rect.right() - 2, rect.bottom() + char_h_offset), "┘")
+
+        # Let the default implementation draw the child widgets (our labels)
+        super().paintEvent(event)
