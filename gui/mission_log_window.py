@@ -1,5 +1,6 @@
 # gui/mission_log_window.py
 import logging
+import os
 from typing import List, Dict, Any
 
 from PySide6.QtWidgets import (
@@ -7,6 +8,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QSize, Slot
+from PySide6.QtGui import QIcon
 
 from event_bus import EventBus
 from events import MissionLogUpdated, DirectToolInvocationRequest
@@ -27,7 +29,9 @@ class MissionLogWindow(QMainWindow):
         self.setGeometry(200, 200, 400, 600)
         self.setMinimumSize(350, 400)
 
-        self.task_widgets: List[TaskWidget] = []
+        icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'Ava_icon.ico')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self._init_ui()
         self.event_bus.subscribe(MissionLogUpdated, self.update_tasks)
@@ -52,7 +56,6 @@ class MissionLogWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(10)
 
-        # --- Task List Area ---
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; }")
@@ -65,7 +68,6 @@ class MissionLogWindow(QMainWindow):
 
         main_layout.addWidget(scroll_area, 1)
 
-        # --- Input Area ---
         input_frame = QFrame()
         input_layout = QVBoxLayout(input_frame)
         input_layout.setContentsMargins(0, 0, 0, 0)
@@ -80,23 +82,22 @@ class MissionLogWindow(QMainWindow):
     @Slot(MissionLogUpdated)
     def update_tasks(self, event: MissionLogUpdated):
         """Clears and redraws the list of tasks from the event data."""
-        # Clear existing widgets
-        for widget in self.task_widgets:
-            widget.deleteLater()
-        self.task_widgets.clear()
+        # --- FIX: More robustly clear all existing widgets from the layout ---
+        while self.task_list_layout.count():
+            item = self.task_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
 
-        # Add new widgets
+        # Add new widgets for the updated task list
         for task_data in event.tasks:
             task_widget = TaskWidget(
                 task_id=task_data['id'],
                 description=task_data['description'],
                 is_done=task_data['done']
             )
-            # Connect the signal to a handler
             task_widget.task_state_changed.connect(self._on_task_state_changed)
-
             self.task_list_layout.addWidget(task_widget)
-            self.task_widgets.append(task_widget)
 
     def _on_add_task(self):
         """Handles when the user presses Enter in the input field."""
@@ -116,7 +117,8 @@ class MissionLogWindow(QMainWindow):
                 params={'task_id': task_id}
             ))
         else:
-            # We might add a "mark as not done" tool later if needed
+            # We can implement 'un-doing' a task later if we want.
+            # For now, we'll need a new tool for that.
             logger.warning(f"Task {task_id} unchecked. No action is currently configured for this.")
 
     def show_window(self):

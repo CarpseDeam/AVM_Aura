@@ -37,12 +37,8 @@ class AuraMainWindow(QMainWindow):
         self.event_bus = EventBus()
         self.controller = GUIController(self, self.event_bus)
 
-        # --- THE FIX: This is the correct initialization order ---
-        # 1. Create UI elements
         self._setup_ui()
-        # 2. Give the UI elements to the controller
         self.controller.register_ui_elements(self.output_log, self.command_input)
-        # --- END FIX ---
 
         self._start_backend_setup()
 
@@ -70,9 +66,10 @@ class AuraMainWindow(QMainWindow):
         self.command_input.setFixedHeight(80)
         input_area_layout.addWidget(self.command_input, 1)
 
-        self.send_button = QPushButton("Build")
+        self.send_button = QPushButton("Send")
         self.send_button.setObjectName("SendButton")
-        self.send_button.setFixedSize(QSize(100, 80))
+        # --- FIX: Set a fixed size that matches the input box height ---
+        self.send_button.setFixedSize(QSize(80, 80))
         self.send_button.clicked.connect(self.controller.submit_input)
         input_area_layout.addWidget(self.send_button)
         chat_layout.addLayout(input_area_layout)
