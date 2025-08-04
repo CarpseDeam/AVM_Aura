@@ -4,11 +4,11 @@ import os
 from typing import List, Dict, Any
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QLineEdit, QPushButton,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QSize, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QFont
 
 from event_bus import EventBus
 from events import MissionLogUpdated, DirectToolInvocationRequest, MissionDispatchRequest
@@ -33,8 +33,10 @@ class MissionLogWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+        self.task_widgets: Dict[int, TaskWidget] = {}
         self._init_ui()
         self.event_bus.subscribe(MissionLogUpdated, self.update_tasks)
+        # self.event_bus.subscribe(MissionTaskProgressUpdate, self.on_task_progress_update) # Temporarily commented out
 
     def _init_ui(self):
         """Builds the user interface."""
@@ -51,32 +53,61 @@ class MissionLogWindow(QMainWindow):
                 color: #FFB74D;
                 font-size: 14px;
             }
+            #AddTaskButton {
+                background-color: #2a2a2a; color: #FFB74D; font-weight: bold;
+                border: 1px solid #444; border-radius: 4px; padding: 8px;
+            }
+            #AddTaskButton:hover { background-color: #3a3a3a; border-color: #FFB74D; }
             #DispatchButton {
-                background-color: #FFB74D;
-                color: #0d0d0d;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 10px;
-                font-size: 15px;
-                margin-top: 5px;
+                background-color: #FFB74D; color: #0d0d0d; font-weight: bold;
+                border-radius: 4px; padding: 10px; font-size: 15px; margin-top: 5px;
             }
-            #DispatchButton:hover {
-                background-color: #FFA726;
+            #DispatchButton:hover { background-color: #FFA726; }
+            #ToggleCompletedButton {
+                background-color: transparent; border: 1px solid #333; color: #888;
+                text-align: left; padding: 5px; margin-top: 10px; border-radius: 3px;
             }
+            #SeparatorLine { color: #333; }
         """)
 
+        # --- Main Layout ---
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(10)
 
+        # --- Scroll Area Setup ---
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        scroll_content_widget = QWidget()
+        scroll_area.setWidget(scroll_content_widget)
+        self.scroll_content_layout = QVBoxLayout(scroll_content_widget)
+        self.scroll_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.task_list_container = QWidget()
-        self.task_list_layout = QVBoxLayout(self.task_list_container)
-        self.task_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.task_list_layout.setSpacing(5)
-        scroll_area.setWidget(self.task_list_container)
+        # --- Pending Tasks Layout ---
+        self.pending_tasks_layout = QVBoxLayout()
+        self.pending_tasks_layout.setSpacing(5)
+        self.scroll_content_layout.addLayout(self.pending_tasks_layout)
+        self.scroll_content_layout.addStretch(1) # Pushes completed section down
+
+        # --- Completed Section ---
+        self.separator = QFrame()
+        self.separator.setFrameShape(QFrame.Shape.HLine)
+        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator.setObjectName("SeparatorLine")
+        self.scroll_content_layout.addWidget(self.separator)
+
+        self.toggle_completed_button = QPushButton("Completed (0)")
+        self.toggle_completed_button.setObjectName("ToggleCompletedButton")
+        self.toggle_completed_button.setCheckable(True)
+        self.toggle_completed_button.clicked.connect(self._on_toggle_completed)
+        font = self.toggle_completed_button.font(); font.setBold(True); self.toggle_completed_button.setFont(font)
+        self.scroll_content_layout.addWidget(self.toggle_completed_button)
+
+        self.completed_tasks_container = QWidget()
+        self.completed_tasks_layout = QVBoxLayout(self.completed_tasks_container)
+        self.completed_tasks_layout.setContentsMargins(0, 0, 0, 0)
+        self.completed_tasks_layout.setSpacing(5)
+        self.scroll_content_layout.addWidget(self.completed_tasks_container)
 
         main_layout.addWidget(scroll_area, 1)
 
@@ -85,40 +116,66 @@ class MissionLogWindow(QMainWindow):
         bottom_layout = QVBoxLayout(bottom_frame)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(5)
-
+        input_layout = QHBoxLayout()
         self.add_task_input = QLineEdit()
         self.add_task_input.setPlaceholderText("Add a new task...")
         self.add_task_input.returnPressed.connect(self._on_add_task)
-        bottom_layout.addWidget(self.add_task_input)
-
+        input_layout.addWidget(self.add_task_input)
+        add_task_button = QPushButton("Add Task")
+        add_task_button.setObjectName("AddTaskButton")
+        add_task_button.clicked.connect(self._on_add_task)
+        input_layout.addWidget(add_task_button)
+        bottom_layout.addLayout(input_layout)
         self.dispatch_button = QPushButton("Dispatch Aura")
         self.dispatch_button.setObjectName("DispatchButton")
         self.dispatch_button.clicked.connect(self._on_dispatch)
         bottom_layout.addWidget(self.dispatch_button)
-
         main_layout.addWidget(bottom_frame)
+
+        # Set initial visibility
+        self.completed_tasks_container.hide()
+        self.separator.hide()
+        self.toggle_completed_button.hide()
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
     @Slot(MissionLogUpdated)
     def update_tasks(self, event: MissionLogUpdated):
-        """Clears and redraws the list of tasks from the event data."""
-        while self.task_list_layout.count():
-            item = self.task_list_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        """Clears and redraws both task lists from the event data."""
+        self._clear_layout(self.pending_tasks_layout)
+        self._clear_layout(self.completed_tasks_layout)
+        self.task_widgets.clear()
 
-        # Add new widgets for the updated task list
-        for task_data in event.tasks:
-            task_widget = TaskWidget(
-                task_id=task_data['id'],
-                description=task_data['description'],
-                is_done=task_data['done']
-            )
-            task_widget.task_state_changed.connect(self._on_task_state_changed)
-            self.task_list_layout.addWidget(task_widget)
+        completed_tasks = [task for task in event.tasks if task.get('done')]
+        pending_tasks = [task for task in event.tasks if not task.get('done')]
+
+        for task_data in pending_tasks:
+            self._create_and_add_task_widget(task_data, self.pending_tasks_layout)
+
+        for task_data in completed_tasks:
+            self._create_and_add_task_widget(task_data, self.completed_tasks_layout)
+
+        completed_count = len(completed_tasks)
+        self.toggle_completed_button.setText(f"Completed ({completed_count}) ▼")
+        self.toggle_completed_button.setVisible(completed_count > 0)
+        self.separator.setVisible(completed_count > 0)
+
+    def _create_and_add_task_widget(self, task_data, layout):
+        task_widget = TaskWidget(
+            task_id=task_data['id'],
+            description=task_data['description'],
+            is_done=task_data['done']
+        )
+        task_widget.task_state_changed.connect(self._on_task_state_changed)
+        layout.addWidget(task_widget)
+        self.task_widgets[task_data['id']] = task_widget
 
     def _on_add_task(self):
-        """Handles when the user presses Enter in the input field."""
         description = self.add_task_input.text().strip()
         if description:
             self.event_bus.publish(DirectToolInvocationRequest(
@@ -128,12 +185,10 @@ class MissionLogWindow(QMainWindow):
             self.add_task_input.clear()
 
     def _on_dispatch(self):
-        """Handles when the user clicks the 'Dispatch Aura' button."""
         logger.info("Dispatch Aura button clicked. Publishing MissionDispatchRequest.")
         self.event_bus.publish(MissionDispatchRequest())
 
     def _on_task_state_changed(self, task_id: int, is_done: bool):
-        """Handles when a task's checkbox is toggled."""
         if is_done:
             self.event_bus.publish(DirectToolInvocationRequest(
                 tool_id='mark_task_as_done',
@@ -142,8 +197,13 @@ class MissionLogWindow(QMainWindow):
         else:
             logger.warning(f"Task {task_id} unchecked. No action is currently configured for this.")
 
+    def _on_toggle_completed(self, checked):
+        self.completed_tasks_container.setVisible(checked)
+        arrow = "▲" if checked else "▼"
+        count = self.completed_tasks_layout.count()
+        self.toggle_completed_button.setText(f"Completed ({count}) {arrow}")
+
     def show_window(self):
-        """Shows the mission log window, bringing it to the front."""
         if not self.isVisible():
             self.show()
         self.activateWindow()

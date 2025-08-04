@@ -170,7 +170,7 @@ class AuraMainWindow(QMainWindow):
             prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
             instruction_factory = InstructionFactory(foundry_manager=foundry_manager, display_callback=display_callback)
             MissionManager(event_bus=self.event_bus, mission_log_service=mission_log_service,
-                           display_callback=display_callback)
+                           project_manager=project_manager, display_callback=display_callback)
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
             provider = None

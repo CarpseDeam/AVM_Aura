@@ -7,6 +7,7 @@ from typing import Callable, Optional, Dict, Any
 from event_bus import EventBus
 from events import MissionDispatchRequest, UserPromptEntered, AgentTaskCompleted, DirectToolInvocationRequest
 from .mission_log_service import MissionLogService
+from .project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,11 @@ class MissionManager:
     Manages the autonomous execution of tasks from the Mission Log using a TDD loop.
     """
 
-    def __init__(self, event_bus: EventBus, mission_log_service: MissionLogService, display_callback: Callable):
+    def __init__(self, event_bus: EventBus, mission_log_service: MissionLogService,
+                 project_manager: ProjectManager, display_callback: Callable):
         self.event_bus = event_bus
         self.mission_log_service = mission_log_service
+        self.project_manager = project_manager
         self.display_callback = display_callback
 
         self._is_mission_active = False
@@ -35,6 +38,11 @@ class MissionManager:
         if self._is_mission_active:
             self.display_callback("Mission is already in progress.", "avm_error")
             return
+
+        if not self.project_manager.is_project_active():
+            self.display_callback("❌ Cannot dispatch mission. No active project. Please create one first.", "avm_error")
+            return
+
         self._is_mission_active = True
         self.display_callback("🚀 Mission dispatch acknowledged. Beginning autonomous execution...", "system_message")
         self._mission_thread = threading.Thread(target=self._run_mission, daemon=True)

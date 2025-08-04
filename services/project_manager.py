@@ -20,6 +20,10 @@ class ProjectManager:
         self.active_project_path: Optional[Path] = None
         logger.info(f"ProjectManager initialized. Workspace is at './{PROJECTS_ROOT_DIR}/'")
 
+    def is_project_active(self) -> bool:
+        """Checks if a project is currently active."""
+        return self.active_project_path is not None
+
     def create_project(self, project_name: str) -> tuple[bool, str]:
         """
         Creates a new directory for a project and sets it as the active project.
