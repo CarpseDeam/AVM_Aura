@@ -3,7 +3,8 @@ import logging
 import threading
 import os
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
+    QButtonGroup
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
@@ -49,6 +50,7 @@ class AuraMainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Main content area (chat, toggles, input)
         chat_widget = QWidget()
         chat_layout = QVBoxLayout(chat_widget)
         chat_layout.setContentsMargins(10, 10, 10, 10)
@@ -59,46 +61,77 @@ class AuraMainWindow(QMainWindow):
         self.output_log.setObjectName("OutputLog")
         chat_layout.addWidget(self.output_log, 1)
 
+        # Mode Toggle (Plan/Build)
+        mode_toggle_widget = QWidget()
+        mode_toggle_widget.setObjectName("ModeToggleWidget")
+        mode_toggle_layout = QHBoxLayout(mode_toggle_widget)
+        mode_toggle_layout.setContentsMargins(0, 5, 0, 5) # Add vertical spacing
+        mode_toggle_layout.setSpacing(5)
+
+        self.plan_button = QPushButton("Plan")
+        self.plan_button.setObjectName("ModeButton")
+        self.plan_button.setCheckable(True)
+        self.plan_button.setChecked(True)  # Plan is the default mode
+
+        self.build_button = QPushButton("Build")
+        self.build_button.setObjectName("ModeButton")
+        self.build_button.setCheckable(True)
+
+        self.mode_toggle_group = QButtonGroup(self)
+        self.mode_toggle_group.setExclusive(True)
+        self.mode_toggle_group.addButton(self.plan_button)
+        self.mode_toggle_group.addButton(self.build_button)
+
+        mode_toggle_layout.addWidget(self.plan_button)
+        mode_toggle_layout.addWidget(self.build_button)
+        mode_toggle_layout.addStretch(1)  # Push buttons to the left
+        chat_layout.addWidget(mode_toggle_widget)
+
+        # Input Area
         input_area_layout = QHBoxLayout()
         self.command_input = QTextEdit()
         self.command_input.setObjectName("CommandInput")
-        self.command_input.setPlaceholderText("Describe the new application you want to build...")
+        self.command_input.setPlaceholderText("Describe what you want to do...")
         self.command_input.setFixedHeight(80)
         input_area_layout.addWidget(self.command_input, 1)
 
         self.send_button = QPushButton("Send")
         self.send_button.setObjectName("SendButton")
-        # --- FIX: Set a fixed size that matches the input box height ---
         self.send_button.setFixedSize(QSize(80, 80))
         self.send_button.clicked.connect(self.controller.submit_input)
         input_area_layout.addWidget(self.send_button)
         chat_layout.addLayout(input_area_layout)
 
-        self.tab_bar = QWidget()
-        self.tab_bar.setObjectName("SideBar")
-        self.tab_bar.setFixedWidth(120)
-        tab_bar_layout = QVBoxLayout(self.tab_bar)
-        tab_bar_layout.setContentsMargins(0, 20, 0, 0)
-        tab_bar_layout.setSpacing(5)
-        tab_bar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Right-side "Code Book" style Tool Tab Bar
+        self.tool_tab_bar = QWidget()
+        self.tool_tab_bar.setObjectName("ToolTabBar")
+        self.tool_tab_bar.setFixedWidth(120)
+        tool_tab_bar_layout = QVBoxLayout(self.tool_tab_bar)
+        tool_tab_bar_layout.setContentsMargins(0, 20, 0, 0)
+        tool_tab_bar_layout.setSpacing(5)
+        tool_tab_bar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         node_viewer_tab = QPushButton("Node Viewer")
-        node_viewer_tab.setObjectName("SideTabButton")
+        node_viewer_tab.setObjectName("ToolTabButton")
         node_viewer_tab.clicked.connect(self.controller.toggle_node_viewer)
-        tab_bar_layout.addWidget(node_viewer_tab)
+        tool_tab_bar_layout.addWidget(node_viewer_tab)
 
         code_viewer_tab = QPushButton("Code Viewer")
-        code_viewer_tab.setObjectName("SideTabButton")
+        code_viewer_tab.setObjectName("ToolTabButton")
         code_viewer_tab.clicked.connect(self.controller.toggle_code_viewer)
-        tab_bar_layout.addWidget(code_viewer_tab)
+        tool_tab_bar_layout.addWidget(code_viewer_tab)
 
         mission_log_tab = QPushButton("Mission Log")
-        mission_log_tab.setObjectName("SideTabButton")
+        mission_log_tab.setObjectName("ToolTabButton")
         mission_log_tab.clicked.connect(self.controller.toggle_mission_log)
-        tab_bar_layout.addWidget(mission_log_tab)
+        tool_tab_bar_layout.addWidget(mission_log_tab)
 
         main_layout.addWidget(chat_widget, 1)
-        main_layout.addWidget(self.tab_bar)
+        main_layout.addWidget(self.tool_tab_bar)
+
+    def is_build_mode(self) -> bool:
+        """Checks if the Build mode toggle is active."""
+        return self.build_button.isChecked()
 
     def _start_backend_setup(self):
         self.controller.post_welcome_message()

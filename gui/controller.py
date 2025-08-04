@@ -79,7 +79,17 @@ class GUIController:
             except Exception as e:
                 self.get_display_callback()(f"Error parsing command: {e}", "avm_error")
         else:
-            threading.Thread(target=self.event_bus.publish, args=(UserPromptEntered(prompt_text=input_text),),
+            is_build_mode = self.main_window.is_build_mode()
+            if is_build_mode:
+                logger.info("Input submitted in 'Build' mode (auto-approve plan).")
+            else:
+                logger.info("Input submitted in 'Plan' mode (interactive plan approval).")
+
+            event = UserPromptEntered(
+                prompt_text=input_text,
+                auto_approve_plan=is_build_mode
+            )
+            threading.Thread(target=self.event_bus.publish, args=(event,),
                              daemon=True).start()
 
     def post_welcome_message(self):

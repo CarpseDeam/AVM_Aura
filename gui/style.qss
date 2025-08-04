@@ -22,40 +22,74 @@ QMainWindow {
     border-radius: 4px;
     padding: 5px;
     font-size: 15px;
+    color: #d4d4d4; /* Lighter text for input */
 }
 
-/* --- NEW: Style for the Send Button --- */
+QTextEdit::placeholderText {
+    color: #777777;
+}
+
 #SendButton {
     background-color: #FFB74D;
     color: #0d0d0d;
     font-weight: bold;
     border-radius: 4px;
-    padding: 10px;
+    padding: 0px;
+    min-width: 80px;
+    max-width: 80px;
+    min-height: 80px;
+    max-height: 80px;
 }
 
 #SendButton:hover {
     background-color: #FFA726;
 }
 
-/* --- UPDATED: Styling for the tab bar and buttons --- */
-#SideBar {
-    background-color: #1a1a1a; /* Match window background */
+/* --- NEW: Styling for the Plan/Build mode toggle --- */
+#ModeToggleWidget {
+    background-color: transparent;
+}
+
+#ModeButton {
+    background-color: #2a2a2a;
+    color: #cccccc;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 5px 15px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+#ModeButton:hover {
+    border-color: #FFB74D;
+}
+
+#ModeButton:checked {
+    background-color: #FFB74D;
+    color: #0d0d0d;
+    border-color: #FFB74D;
+}
+
+/* --- NEW: Styling for the right-side tool tabs ("Code Book" style) --- */
+#ToolTabBar {
+    background-color: #0d0d0d; /* Darker to look like it's behind */
     border-left: 1px solid #333333;
 }
 
-#SideTabButton {
+#ToolTabButton {
     background-color: #2a2a2a;
     color: #cccccc;
     border: 1px solid #333333;
     border-right: none;
-    text-align: left;
+    text-align: center;
     padding: 15px 5px;
-    margin-right: -1px; /* Overlap the border to feel connected */
-    border-top-left-radius: 5px;
-    border-bottom-left-radius: 5px;
+    margin-right: -2px; /* Overlap the border to feel connected */
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+    font-weight: bold;
 }
 
-#SideTabButton:hover {
-    background-color: #383838;
-    color: #ffffff;
+#ToolTabButton:hover {
+    background-color: #3a3a3a;
+    color: #FFB74D;
 }
