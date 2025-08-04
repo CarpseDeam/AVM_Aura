@@ -4,7 +4,7 @@ import threading
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QButtonGroup
+    QButtonGroup, QFrame
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
@@ -27,7 +27,7 @@ class AuraMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Aura - Command Deck")
-        self.setGeometry(100, 100, 1100, 800)
+        self.setGeometry(100, 100, 1200, 800)  # Increased default width
 
         icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'Ava_icon.ico')
         if os.path.exists(icon_path):
@@ -50,28 +50,31 @@ class AuraMainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Main content area (chat, toggles, input)
-        chat_widget = QWidget()
-        chat_layout = QVBoxLayout(chat_widget)
-        chat_layout.setContentsMargins(10, 10, 10, 10)
-        chat_layout.setSpacing(5)
+        # --- Left Column: Chat and Controls ---
+        left_column_widget = QWidget()
+        left_column_layout = QVBoxLayout(left_column_widget)
+        left_column_layout.setContentsMargins(10, 10, 10, 10)
+        left_column_layout.setSpacing(5)
 
         self.output_log = QTextEdit()
         self.output_log.setReadOnly(True)
         self.output_log.setObjectName("OutputLog")
-        chat_layout.addWidget(self.output_log, 1)
+        left_column_layout.addWidget(self.output_log, 1)  # Takes up expanding space
 
-        # Mode Toggle (Plan/Build)
-        mode_toggle_widget = QWidget()
-        mode_toggle_widget.setObjectName("ModeToggleWidget")
-        mode_toggle_layout = QHBoxLayout(mode_toggle_widget)
-        mode_toggle_layout.setContentsMargins(0, 5, 0, 5) # Add vertical spacing
-        mode_toggle_layout.setSpacing(5)
+        # --- Bottom Control Strip ---
+        control_strip = QFrame()
+        control_strip.setObjectName("ControlStrip")
+        control_strip.setFixedHeight(100)
+        strip_layout = QVBoxLayout(control_strip)
+        strip_layout.setContentsMargins(0, 5, 0, 0)
+        strip_layout.setSpacing(5)
 
+        # Top part of the strip: Toggles
+        mode_toggle_layout = QHBoxLayout()
         self.plan_button = QPushButton("Plan")
         self.plan_button.setObjectName("ModeButton")
         self.plan_button.setCheckable(True)
-        self.plan_button.setChecked(True)  # Plan is the default mode
+        self.plan_button.setChecked(True)
 
         self.build_button = QPushButton("Build")
         self.build_button.setObjectName("ModeButton")
@@ -84,50 +87,56 @@ class AuraMainWindow(QMainWindow):
 
         mode_toggle_layout.addWidget(self.plan_button)
         mode_toggle_layout.addWidget(self.build_button)
-        mode_toggle_layout.addStretch(1)  # Push buttons to the left
-        chat_layout.addWidget(mode_toggle_widget)
+        mode_toggle_layout.addStretch(1)
+        strip_layout.addLayout(mode_toggle_layout)
 
-        # Input Area
+        # Bottom part of the strip: Input
         input_area_layout = QHBoxLayout()
         self.command_input = QTextEdit()
         self.command_input.setObjectName("CommandInput")
-        self.command_input.setPlaceholderText("Describe what you want to do...")
-        self.command_input.setFixedHeight(80)
-        input_area_layout.addWidget(self.command_input, 1)
+        self.command_input.setPlaceholderText("Describe what you want to build...")
+        input_area_layout.addWidget(self.command_input)
 
         self.send_button = QPushButton("Send")
         self.send_button.setObjectName("SendButton")
-        self.send_button.setFixedSize(QSize(80, 80))
+        self.send_button.setFixedSize(QSize(80, 50))  # Adjusted size
         self.send_button.clicked.connect(self.controller.submit_input)
         input_area_layout.addWidget(self.send_button)
-        chat_layout.addLayout(input_area_layout)
+        strip_layout.addLayout(input_area_layout)
 
-        # Right-side "Code Book" style Tool Tab Bar
-        self.tool_tab_bar = QWidget()
-        self.tool_tab_bar.setObjectName("ToolTabBar")
-        self.tool_tab_bar.setFixedWidth(120)
-        tool_tab_bar_layout = QVBoxLayout(self.tool_tab_bar)
-        tool_tab_bar_layout.setContentsMargins(0, 20, 0, 0)
-        tool_tab_bar_layout.setSpacing(5)
-        tool_tab_bar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left_column_layout.addWidget(control_strip)
 
-        node_viewer_tab = QPushButton("Node Viewer")
-        node_viewer_tab.setObjectName("ToolTabButton")
-        node_viewer_tab.clicked.connect(self.controller.toggle_node_viewer)
-        tool_tab_bar_layout.addWidget(node_viewer_tab)
+        # --- Right Column: Tool Bar ---
+        right_column_widget = QWidget()
+        right_column_widget.setObjectName("ToolBar")
+        right_column_widget.setFixedWidth(160)
+        right_column_layout = QVBoxLayout(right_column_widget)
+        right_column_layout.setContentsMargins(10, 10, 10, 10)
+        right_column_layout.setSpacing(10)
 
-        code_viewer_tab = QPushButton("Code Viewer")
-        code_viewer_tab.setObjectName("ToolTabButton")
-        code_viewer_tab.clicked.connect(self.controller.toggle_code_viewer)
-        tool_tab_bar_layout.addWidget(code_viewer_tab)
+        # Spacers to center the buttons
+        right_column_layout.addStretch(1)
 
-        mission_log_tab = QPushButton("Mission Log")
-        mission_log_tab.setObjectName("ToolTabButton")
-        mission_log_tab.clicked.connect(self.controller.toggle_mission_log)
-        tool_tab_bar_layout.addWidget(mission_log_tab)
+        node_viewer_btn = QPushButton("Node Viewer")
+        node_viewer_btn.setObjectName("ToolButton")
+        node_viewer_btn.clicked.connect(self.controller.toggle_node_viewer)
+        right_column_layout.addWidget(node_viewer_btn)
 
-        main_layout.addWidget(chat_widget, 1)
-        main_layout.addWidget(self.tool_tab_bar)
+        code_viewer_btn = QPushButton("Code Viewer")
+        code_viewer_btn.setObjectName("ToolButton")
+        code_viewer_btn.clicked.connect(self.controller.toggle_code_viewer)
+        right_column_layout.addWidget(code_viewer_btn)
+
+        mission_log_btn = QPushButton("Mission Log")
+        mission_log_btn.setObjectName("ToolButton")
+        mission_log_btn.clicked.connect(self.controller.toggle_mission_log)
+        right_column_layout.addWidget(mission_log_btn)
+
+        right_column_layout.addStretch(1)
+
+        # --- Add columns to main layout ---
+        main_layout.addWidget(left_column_widget, 1)  # Takes up expanding space
+        main_layout.addWidget(right_column_widget)
 
     def is_build_mode(self) -> bool:
         """Checks if the Build mode toggle is active."""
