@@ -48,7 +48,8 @@ class ExecutorService:
             'copy_file': ['source_path', 'destination_path'],
             'move_file': ['source_path', 'destination_path']
         }
-        self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory', 'copy_file'}
+        self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory',
+                                     'copy_file'}
 
         logger.info("ExecutorService initialized with a blank AST root and project awareness.")
         self._register_handlers()
@@ -57,6 +58,7 @@ class ExecutorService:
         self.event_bus.subscribe(ActionReadyForExecution, self._handle_action_ready)
         self.event_bus.subscribe(PlanApproved, self._handle_plan_approved)
         self.event_bus.subscribe(DirectToolInvocationRequest, self._handle_direct_tool_invocation)
+        self.event_bus.subscribe(ProjectCreated, self._handle_project_created)  # <-- NEW: Subscribe to event
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
@@ -70,7 +72,7 @@ class ExecutorService:
         for key in path_keys:
             if key in resolved_params and isinstance(resolved_params.get(key), str):
                 if not Path(resolved_params[key]).is_absolute():
-                     resolved_params[key] = str(self.project_manager.resolve_path(resolved_params[key]))
+                    resolved_params[key] = str(self.project_manager.resolve_path(resolved_params[key]))
         return resolved_params
 
     def _execute_plan(self, plan: List[BlueprintInvocation]) -> None:
@@ -104,7 +106,8 @@ class ExecutorService:
                 result = action_function(vector_context_service=self.vector_context_service, **resolved_params)
             elif action_id == "create_project":
                 result = action_function(project_manager=self.project_manager, **resolved_params)
-            elif action_id.startswith("add_task") or action_id.startswith("mark_task") or action_id.startswith("get_mission"):
+            elif action_id.startswith("add_task") or action_id.startswith("mark_task") or action_id.startswith(
+                    "get_mission"):
                 result = action_function(mission_log_service=self.mission_log_service, **resolved_params)
             else:
                 result = action_function(**resolved_params)
@@ -167,3 +170,25 @@ class ExecutorService:
             return
         invocation = BlueprintInvocation(blueprint=blueprint, parameters=event.params)
         self._execute_blueprint(invocation)
+
+    def _handle_project_created(self, event: ProjectCreated):
+        """Automatically indexes the codebase of a newly created project."""
+        logger.info(f"ProjectCreated event caught. Automatically indexing '{event.project_path}'.")
+        self._display(f"🚀 Project '{event.project_name}' created. Starting initial codebase indexing...",
+                      "system_message")
+
+        # We can directly invoke the action since we have the services we need.
+        action_function = self.foundry_manager.get_action("index_project_context")
+        if action_function:
+            try:
+                result = action_function(
+                    vector_context_service=self.vector_context_service,
+                    path=event.project_path
+                )
+                self._display(f"✅ {result}", "system_message")
+            except Exception as e:
+                error_msg = f"Automatic indexing failed: {e}"
+                logger.error(error_msg, exc_info=True)
+                self._display(f"❌ {error_msg}", "avm_error")
+        else:
+            logger.error("Could not find 'index_project_context' action for automatic indexing.")

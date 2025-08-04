@@ -12,3 +12,5 @@ from .command_handler import CommandHandler
 from .view_formatter import format_as_box
 from .project_manager import ProjectManager
 from .mission_log_service import MissionLogService
+from .prompt_engine import PromptEngine
+from .instruction_factory import InstructionFactory

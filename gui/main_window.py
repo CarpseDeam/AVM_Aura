@@ -14,7 +14,7 @@ from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService
+    MissionLogService, PromptEngine, InstructionFactory
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -160,6 +160,16 @@ class AuraMainWindow(QMainWindow):
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
 
+            # --- NEW: Instantiate the new services ---
+            prompt_engine = PromptEngine(
+                vector_context_service=vector_context_service,
+                context_manager=context_manager
+            )
+            instruction_factory = InstructionFactory(
+                foundry_manager=foundry_manager,
+                display_callback=display_callback
+            )
+
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
             provider = None
@@ -173,9 +183,16 @@ class AuraMainWindow(QMainWindow):
                 provider = GeminiProvider(api_key=api_key, model_name=model, temperature=temperature)
             else:
                 raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
-            llm_operator = LLMOperator(console=None, provider=provider, event_bus=self.event_bus,
-                                       foundry_manager=foundry_manager, context_manager=context_manager,
-                                       vector_context_service=vector_context_service, display_callback=display_callback)
+
+            # --- MODIFIED: LLMOperator now has fewer dependencies ---
+            llm_operator = LLMOperator(
+                provider=provider,
+                event_bus=self.event_bus,
+                foundry_manager=foundry_manager,
+                prompt_engine=prompt_engine,
+                instruction_factory=instruction_factory,
+                display_callback=display_callback
+            )
 
             command_handler = CommandHandler(
                 foundry_manager=foundry_manager, event_bus=self.event_bus,

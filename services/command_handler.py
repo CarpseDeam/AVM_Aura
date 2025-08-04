@@ -2,7 +2,7 @@
 import logging
 from foundry import FoundryManager
 from .view_formatter import format_as_box
-from events import DisplayFileInEditor
+from events import DisplayFileInEditor, DirectToolInvocationRequest
 from event_bus import EventBus
 from .project_manager import ProjectManager
 
@@ -47,6 +47,8 @@ class CommandHandler:
                 self._handle_read_file(args)
             elif command == "lint":
                 self._handle_lint(args)
+            elif command == "index":
+                self._handle_index()
             elif command == "help":
                 self._handle_help()
             else:
@@ -107,11 +109,24 @@ class CommandHandler:
         formatted_output = format_as_box(f"Lint Report: {relative_path}", result)
         self.display(formatted_output, "avm_output")
 
+    def _handle_index(self):
+        """Handler for the /index command to manually trigger project indexing."""
+        if not self.project_manager.active_project_path:
+            self.display(format_as_box("Error", "No active project. Please create or load a project first."), "avm_error")
+            return
+
+        self.display("Starting project re-indexing...", "system_message")
+        self.event_bus.publish(DirectToolInvocationRequest(
+            tool_id='index_project_context',
+            params={'path': str(self.project_manager.active_project_path)}
+        ))
+
     def _handle_help(self):
         """Displays a help message with available commands."""
         help_text = (
             "Aura Direct Commands:\n\n"
             "/help                 - Shows this help message.\n"
+            "/index                - Manually re-indexes the entire project for the AI.\n"
             "/list_files [path]    - Lists files in the active project.\n"
             "/read <path>          - Reads a file from the active project into the Code Viewer.\n"
             "/lint <path>          - Lints a Python file in the active project."

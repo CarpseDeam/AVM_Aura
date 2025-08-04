@@ -1,138 +1,69 @@
 # services/llm_operator.py
-"""
-This module defines the LLMOperator, which is responsible for orchestrating the
-interaction between user prompts, the context memory, the available tools (from
-the Foundry), and the underlying LLM provider.
-"""
-
-import json
 import logging
-from typing import Any, Callable, Dict, Optional, Union, List
-
-from rich.console import Console
-from proto.marshal.collections.maps import MapComposite
+from typing import Callable, Optional
 
 from event_bus import EventBus
-from events import ActionReadyForExecution, BlueprintInvocation, PlanReadyForApproval, UserPromptEntered
-from foundry import FoundryManager
+from events import ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered
 from providers import LLMProvider
-from .context_manager import ContextManager
-from .vector_context_service import VectorContextService
+from .prompt_engine import PromptEngine
+from .instruction_factory import InstructionFactory
+from foundry import FoundryManager
 
 logger = logging.getLogger(__name__)
 
 
 class LLMOperator:
     """
-    Orchestrates LLM interactions by managing context, tools, and responses.
+    Orchestrates LLM interactions by coordinating the prompt engine, LLM provider,
+    and instruction factory.
     """
 
     def __init__(
             self,
-            console: Console,
             provider: LLMProvider,
             event_bus: EventBus,
             foundry_manager: FoundryManager,
-            context_manager: ContextManager,
-            vector_context_service: VectorContextService,
+            prompt_engine: PromptEngine,
+            instruction_factory: InstructionFactory,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
-        self.console = console
         self.provider = provider
         self.event_bus = event_bus
         self.foundry_manager = foundry_manager
-        self.context_manager = context_manager
-        self.vector_context_service = vector_context_service
+        self.prompt_engine = prompt_engine
+        self.instruction_factory = instruction_factory
         self.display_callback = display_callback
+        logger.info("LLMOperator initialized.")
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
             self.display_callback(message, tag)
 
-    def _deep_convert_proto_maps(self, data: Any) -> Any:
-        if isinstance(data, MapComposite):
-            return {k: self._deep_convert_proto_maps(v) for k, v in data.items()}
-        if isinstance(data, dict):
-            return {k: self._deep_convert_proto_maps(v) for k, v in data.items()}
-        if isinstance(data, list):
-            return [self._deep_convert_proto_maps(item) for item in data]
-        return data
-
-    def _parse_and_validate_llm_response(
-            self, llm_response: Union[str, Dict[str, Any]]
-    ) -> Optional[Union[BlueprintInvocation, List[BlueprintInvocation]]]:
-        if isinstance(llm_response, str):
-            try:
-                data: Dict[str, Any] = json.loads(llm_response)
-            except json.JSONDecodeError:
-                self._display(f"💬 Aura:\n{llm_response}", "avm_response")
-                return None
-        elif isinstance(llm_response, dict):
-            data = llm_response
-        else:
-            self._display(f"Error: Unexpected response type from provider: {type(llm_response).__name__}", "avm_error")
-            return None
-
-        if "plan" in data and isinstance(data["plan"], list):
-            plan_invocations: List[BlueprintInvocation] = []
-            self._display(f"📋 LLM has proposed a {len(data['plan'])}-step plan. Validating...", "system_message")
-            for i, step in enumerate(data["plan"]):
-                tool_name = step.get("tool_name")
-                arguments = step.get("arguments", {})
-                blueprint = self.foundry_manager.get_blueprint(tool_name)
-                if not blueprint:
-                    self._display(f"Error in Plan Step {i+1}: Unknown tool '{tool_name}'.", "avm_error")
-                    return None
-                sanitized_arguments = self._deep_convert_proto_maps(arguments)
-                plan_invocations.append(BlueprintInvocation(blueprint=blueprint, parameters=sanitized_arguments))
-            self._display("✅ Plan validated successfully.", "system_message")
-            return plan_invocations
-
-        tool_name = data.get("tool_name")
-        if not tool_name:
-            pretty_json = json.dumps(data, indent=2)
-            self._display(f"💬 Aura (JSON Response):\n{pretty_json}", "avm_response")
-            return None
-        arguments = data.get("arguments", {})
-        blueprint = self.foundry_manager.get_blueprint(tool_name)
-        if not blueprint:
-            self._display(f"Error: LLM requested unknown tool '{tool_name}'.", "avm_error")
-            return None
-        sanitized_arguments = self._deep_convert_proto_maps(arguments)
-        return BlueprintInvocation(blueprint=blueprint, parameters=sanitized_arguments)
-
     def handle(self, event: UserPromptEntered) -> None:
         mode = 'build' if event.auto_approve_plan else 'plan'
         self._display(f"🧠 Thinking ({mode} mode)...", "system_message")
-        try:
-            tool_definitions = self.foundry_manager.get_llm_tool_definitions()
-            relevant_docs = self.vector_context_service.query(event.prompt_text)
-            context_parts = []
-            if relevant_docs:
-                context_parts.append("--- CONTEXT FROM RELEVANT CODE (RAG) ---")
-                for doc in relevant_docs:
-                    metadata = doc.get('metadata', {})
-                    context_parts.append(f"# From file '{metadata.get('file_path', 'N/A')}', node '{metadata.get('node_name', 'N/A')}':")
-                    context_parts.append(f"```python\n{doc['document']}\n```")
-                context_parts.append("--- END RAG CONTEXT ---")
-            current_context = self.context_manager.get_context()
-            if current_context:
-                context_parts.append("--- CONTEXT FROM OPEN FILES ---")
-                for key, content in current_context.items():
-                    context_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
-                context_parts.append("--- END OPEN FILES CONTEXT ---")
-            final_prompt = f"{'\n\n'.join(context_parts)}\n\nUser Prompt: {event.prompt_text}" if context_parts else event.prompt_text
 
+        try:
+            # 1. Create a context-rich prompt
+            final_prompt = self.prompt_engine.create_prompt(event.prompt_text)
+
+            # 2. Get a response from the LLM provider
+            tool_definitions = self.foundry_manager.get_llm_tool_definitions()
             response = self.provider.get_response(
                 prompt=final_prompt,
                 mode=mode,
                 tools=tool_definitions
             )
-            instruction = self._parse_and_validate_llm_response(response)
+
+            # 3. Parse and validate the response into an instruction
+            instruction = self.instruction_factory.create_instruction(response)
 
             if not instruction:
+                # If instruction is None, it means the response was conversational
+                # or an error, which the factory has already displayed.
                 return
 
+            # 4. Publish the appropriate event based on the instruction type
             if isinstance(instruction, list):  # It's a plan
                 if event.auto_approve_plan:
                     logger.info("Auto-approving plan and publishing for execution.")
@@ -146,5 +77,5 @@ class LLMOperator:
                 self.event_bus.publish(ActionReadyForExecution(instruction=instruction))
 
         except Exception as e:
-            logger.error(f"Error processing prompt: {e}", exc_info=True)
-            self._display(f"Error getting response from provider: {e}", "avm_error")
+            logger.error(f"Error processing prompt in LLMOperator: {e}", exc_info=True)
+            self._display(f"An unexpected error occurred: {e}", "avm_error")
