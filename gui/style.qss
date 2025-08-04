@@ -11,16 +11,14 @@ QMainWindow {
     background-color: #1a1a1a;
 }
 
-#OutputLog {
+#ScrollArea {
     background-color: #0d0d0d;
     border: none;
-    color: #FFB74D; /* AMBER IS BACK! */
-    padding-left: 5px;
 }
 
 /* --- The solid bottom control panel --- */
 #ControlStrip {
-    background-color: transparent;
+    background-color: #1a1a1a;
     border-top: 1px solid #333333;
 }
 
@@ -87,4 +85,67 @@ QTextEdit::placeholderText {
     background-color: #3a3a3a;
     color: #FFB74D;
     border-color: #FFB74D;
+}
+
+/* --- Chat Widget Styling --- */
+#UserMessageWidget {
+    background-color: transparent;
+}
+
+#UserPromptLabel {
+    color: #FFB74D;
+    font-size: 18px;
+}
+
+/* --- NEW: ASCII Box Styling for AI Messages --- */
+#AIMessageWidget {
+    background-color: #111111; /* Background for the content area */
+    border: none;
+}
+
+#AIHeader, #AIFooter, #AIContent {
+    background-color: transparent; /* Let the parent widget color show through */
+}
+
+.BoxChar, #HeaderLine {
+    color: #444;
+    padding: 0;
+    margin: 0;
+}
+
+#AuraAuthorLabel {
+    color: #FFB74D;
+    font-weight: bold;
+    padding: 0 5px;
+}
+
+#AIContent QLabel {
+    padding: 0 10px; /* Give the text inside the box some horizontal padding */
+}
+
+#ThinkingWidget {
+    background-color: transparent;
+}
+
+#ThinkingLabel {
+    color: #888888;
+}
+
+#ThinkingBar {
+    color: #FFB74D;
+    font-family: "Courier New", monospace;
+}
+
+#SystemMessage {
+    color: #888888;
+    font-style: italic;
+    padding: 5px 10px;
+}
+
+#WelcomeBanner {
+    color: #FFB74D;
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.0;
+    padding-bottom: 10px;
 }

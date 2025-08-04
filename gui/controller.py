@@ -2,82 +2,61 @@
 import logging
 import threading
 import shlex
-from typing import Optional
+from typing import Optional, Callable
 
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QTextEdit, QWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
 
 from event_bus import EventBus
-from events import (
-    UserPromptEntered, UserCommandEntered, DisplayFileInEditor,
-    ProjectCreated, PlanReadyForApproval, PlanApproved, PlanDenied
-)
+from events import UserPromptEntered, UserCommandEntered
 from services import ProjectManager, MissionLogService
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
-from .plan_approval_widget import PlanApprovalWidget
 from .utils import get_aura_banner
+from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
 
 logger = logging.getLogger(__name__)
 
 
-class DisplayBridge(QObject):
-    message_received = Signal(str, str)
-    widget_received = Signal(QWidget)
+class GUIController(QObject):
+    """Manages the UI logic, message display, and backend communication."""
 
-    def __init__(self, output_log_widget: QTextEdit):
+    # Signals for thread-safe UI updates
+    add_user_message_signal = Signal(str)
+    add_ai_message_signal = Signal(str)
+    show_thinking_signal = Signal()
+    hide_thinking_signal = Signal()
+    add_system_message_signal = Signal(str)
+
+    def __init__(self, main_window, event_bus: EventBus, chat_layout: QVBoxLayout, scroll_area: QScrollArea):
         super().__init__()
-        self.output_log = output_log_widget
-        self.message_received.connect(self.append_message)
-        self.widget_received.connect(self.append_widget)
-
-    @Slot(str, str)
-    def append_message(self, message, tag):
-        # We can add more advanced formatting based on tag here later
-        self.output_log.append(message)
-        self.output_log.ensureCursorVisible()
-
-    @Slot(QWidget)
-    def append_widget(self, widget: QWidget):
-        """Embeds a custom widget into the QTextEdit log."""
-        cursor = self.output_log.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        self.output_log.setTextCursor(cursor)
-        # Add a newline for spacing before the widget
-        self.output_log.insertHtml("<br>")
-        self.output_log.document().addTextLayout(widget.layout())
-        widget.setParent(self.output_log)
-        widget.show()
-        self.output_log.insertHtml("<br>")
-        self.output_log.ensureCursorVisible()
-
-
-class GUIController:
-    def __init__(self, main_window, event_bus: EventBus):
         self.main_window = main_window
         self.event_bus = event_bus
+        self.chat_layout = chat_layout
+        self.scroll_area = scroll_area
+
         self.project_manager: Optional[ProjectManager] = None
         self.mission_log_service: Optional[MissionLogService] = None
 
         self.node_viewer_window = None
         self.code_viewer_window = None
         self.mission_log_window = None
+        self.thinking_widget: Optional[ThinkingWidget] = None
 
-        # UI elements will be registered after they are created
-        self.output_log: Optional[QTextEdit] = None
         self.command_input = None
-        self.display_bridge = None
 
-        self.event_bus.subscribe(DisplayFileInEditor, self.handle_display_file)
-        self.event_bus.subscribe(ProjectCreated, self.on_project_created)
-        self.event_bus.subscribe(PlanReadyForApproval, self.handle_plan_ready_for_approval)
+        # Connect signals to their corresponding slots
+        self.add_user_message_signal.connect(self._add_user_message)
+        self.add_ai_message_signal.connect(self._add_ai_message)
+        self.show_thinking_signal.connect(self._show_thinking)
+        self.hide_thinking_signal.connect(self._hide_thinking)
+        self.add_system_message_signal.connect(self._add_system_message)
 
-    def register_ui_elements(self, output_log, command_input):
-        """Connects the controller to the main window's widgets after they exist."""
-        self.output_log = output_log
+        # We no longer subscribe to UI events here; they are handled by the llm_operator/factory
+
+    def register_ui_elements(self, command_input):
         self.command_input = command_input
-        self.display_bridge = DisplayBridge(self.output_log)
 
     def set_project_manager(self, pm: ProjectManager):
         self.project_manager = pm
@@ -85,76 +64,114 @@ class GUIController:
     def set_mission_log_service(self, mls: MissionLogService):
         self.mission_log_service = mls
 
-    def get_display_callback(self):
-        return self.display_bridge.message_received.emit
+    def get_display_callback(self) -> Callable[[str, str], None]:
+        """Provides a thread-safe callback for backend services to send messages to the UI."""
+
+        def callback(message: str, tag: str):
+            # This function will be called from backend threads
+            if tag == "avm_response":
+                self.add_ai_message_signal.emit(message)
+            else:
+                # For simplicity, other tags can be handled as system messages
+                # We can differentiate them later if needed
+                formatted_message = f"[{tag.replace('_', ' ').upper()}] {message}"
+                self.add_system_message_signal.emit(formatted_message)
+
+        return callback
 
     def submit_input(self):
         input_text = self.command_input.toPlainText().strip()
         if not input_text: return
 
-        # Use the display bridge to show user input for consistency
-        self.display_bridge.message_received.emit(f"👤 {input_text}", "user_message")
+        self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
 
         if input_text.startswith("/"):
+            self.show_thinking_signal.emit()  # Show thinking for commands too
             try:
                 parts = shlex.split(input_text[1:])
                 command, args = parts[0], parts[1:]
                 self.event_bus.publish(UserCommandEntered(command=command, args=args))
             except Exception as e:
-                self.get_display_callback()(f"Error parsing command: {e}", "avm_error")
+                self.add_system_message_signal.emit(f"Error parsing command: {e}")
+            finally:
+                self.hide_thinking_signal.emit()
         else:
+            self.show_thinking_signal.emit()
             is_build_mode = self.main_window.is_build_mode()
-            if is_build_mode:
-                logger.info("Input submitted in 'Build' mode (auto-approve plan).")
-            else:
-                logger.info("Input submitted in 'Plan' mode (interactive plan approval).")
 
             event = UserPromptEntered(
                 prompt_text=input_text,
                 auto_approve_plan=is_build_mode
             )
-            threading.Thread(target=self.event_bus.publish, args=(event,),
-                             daemon=True).start()
+            # Run the LLM call in a separate thread
+            threading.Thread(target=self._process_prompt_async, args=(event,), daemon=True).start()
+
+    def _process_prompt_async(self, event: UserPromptEntered):
+        """Worker function to handle LLM interaction without blocking the GUI."""
+        try:
+            self.event_bus.publish(event)
+        finally:
+            # Ensure the thinking indicator is always hidden after the operation
+            self.hide_thinking_signal.emit()
 
     def post_welcome_message(self):
-        banner = get_aura_banner()
-        self.output_log.setHtml(f"<pre>{banner}</pre>System online. Waiting for command...")
+        """Adds the initial welcome message to the chat."""
+        # This is a bit of a hack to show the banner correctly.
+        # A proper WelcomeWidget would be better in the future.
+        banner_widget = QLabel(f"<pre>{get_aura_banner()}</pre>System online. Waiting for command...")
+        banner_widget.setObjectName("WelcomeBanner")
+        self._insert_widget(banner_widget)
 
-    @Slot(PlanReadyForApproval)
-    def handle_plan_ready_for_approval(self, event: PlanReadyForApproval):
-        """Creates and displays the plan approval widget in the chat log."""
-        if not event.plan:
-            logger.warning("PlanReadyForApproval event received with an empty plan.")
-            return
+    @Slot(str)
+    def _add_system_message(self, message: str):
+        # A simple QLabel for system messages
+        widget = QLabel(message)
+        widget.setWordWrap(True)
+        widget.setObjectName("SystemMessage")
+        self._insert_widget(widget)
 
-        approval_widget = PlanApprovalWidget(plan=event.plan)
+    @Slot(str)
+    def _add_user_message(self, text: str):
+        widget = UserMessageWidget(text)
+        self._insert_widget(widget)
 
-        # Connect the widget's signals to handlers that publish system-wide events
-        approval_widget.plan_approved.connect(
-            lambda plan_data: self.event_bus.publish(PlanApproved(plan=plan_data))
-        )
-        approval_widget.plan_denied.connect(
-            lambda: self.event_bus.publish(PlanDenied())
-        )
+    @Slot(str)
+    def _add_ai_message(self, text: str):
+        widget = AIMessageWidget(text)
+        self._insert_widget(widget)
 
-        # Use the bridge to add the widget to the UI thread-safely
-        self.display_bridge.widget_received.emit(approval_widget)
+    @Slot()
+    def _show_thinking(self):
+        if self.thinking_widget: return  # Already showing
+        self.thinking_widget = ThinkingWidget()
+        self._insert_widget(self.thinking_widget)
+        self.thinking_widget.start_animation()
 
-    @Slot(DisplayFileInEditor)
-    def handle_display_file(self, event: DisplayFileInEditor):
-        self.toggle_code_viewer()
-        if self.code_viewer_window:
-            self.code_viewer_window.display_file(path_str=event.file_path, content=event.file_content)
+    @Slot()
+    def _hide_thinking(self):
+        if self.thinking_widget:
+            self.thinking_widget.stop_animation()
+            self.thinking_widget.deleteLater()
+            self.thinking_widget = None
 
-    @Slot(ProjectCreated)
-    def on_project_created(self, event: ProjectCreated):
-        self.toggle_code_viewer()
-        if self.code_viewer_window:
-            self.code_viewer_window.load_project(event.project_path)
-        if self.mission_log_service:
-            self.mission_log_service.load_log_for_active_project()
+    def _insert_widget(self, widget: QWidget):
+        """Inserts a widget at the end of the chat layout."""
+        # The layout has a stretch at the end, so we insert before it.
+        self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
+        # Ensure the scroll area scrolls to the bottom to show the new widget
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
 
+    def get_full_chat_text(self) -> str:
+        """Retrieves all text from the chat log for the /build command."""
+        text_parts = []
+        for i in range(self.chat_layout.count()):
+            widget = self.chat_layout.itemAt(i).widget()
+            if isinstance(widget, (UserMessageWidget, AIMessageWidget)):
+                text_parts.append(widget.message_label.text())
+        return "\n".join(text_parts)
+
+    # --- Window Toggling Methods (no significant changes) ---
     def toggle_node_viewer(self):
         if self.node_viewer_window is None or not self.node_viewer_window.isVisible():
             self.node_viewer_window = NodeViewerWindow()
@@ -164,20 +181,18 @@ class GUIController:
 
     def toggle_code_viewer(self):
         if self.project_manager is None:
-            self.get_display_callback()("Project system is not ready yet.", "avm_error")
+            self.add_system_message_signal.emit("Project system is not ready yet.")
             return
         if self.code_viewer_window is None or not self.code_viewer_window.isVisible():
             self.code_viewer_window = CodeViewerWindow(project_manager=self.project_manager, event_bus=self.event_bus)
-            self.code_viewer_window.show()
-        else:
-            self.code_viewer_window.activateWindow()
+        self.code_viewer_window.show()
+        self.code_viewer_window.activateWindow()
 
     def toggle_mission_log(self):
         if self.mission_log_service is None:
-            self.get_display_callback()("Mission Log system is not ready yet.", "avm_error")
+            self.add_system_message_signal.emit("Mission Log system is not ready yet.")
             return
         if self.mission_log_window is None or not self.mission_log_window.isVisible():
             self.mission_log_window = MissionLogWindow(event_bus=self.event_bus)
-            # Trigger an initial load of tasks
-            self.mission_log_service.load_log_for_active_project()
+        self.mission_log_service.load_log_for_active_project()
         self.mission_log_window.show_window()

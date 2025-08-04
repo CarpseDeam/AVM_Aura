@@ -1,7 +1,7 @@
 # services/command_handler.py
 import logging
 import re
-from PySide6.QtWidgets import QTextEdit
+from typing import Callable
 from foundry import FoundryManager
 from .view_formatter import format_as_box
 from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
@@ -18,7 +18,7 @@ class CommandHandler:
     """
 
     def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
-                 project_manager: ProjectManager, display_callback, output_log: QTextEdit):
+                 project_manager: ProjectManager, display_callback, output_log_text_fetcher: Callable[[], str]):
         """
         Initializes the CommandHandler.
         """
@@ -26,26 +26,24 @@ class CommandHandler:
         self.event_bus = event_bus
         self.project_manager = project_manager
         self.display = display_callback
-        self.output_log = output_log  # Store the output log for retrieving text
-        self.last_aura_response = ""  # Store the last response from Aura
+        self.output_log_text_fetcher = output_log_text_fetcher
+        self.last_aura_response = ""
         logger.info("CommandHandler initialized and ready.")
 
     def _update_last_aura_response(self):
         """Scan the log to find the last message from Aura."""
-        full_text = self.output_log.toPlainText()
-        # Find all Aura responses, the last one is what we need.
-        aura_messages = re.findall(r'💬 Aura:\n(.*?)(?=\n(?:👤|▶️|🧠|✅|❌|🚀|🎉|💬|$))', full_text, re.S)
-        if aura_messages:
-            self.last_aura_response = aura_messages[-1].strip()
+        full_text = self.output_log_text_fetcher()
+        # This regex is simpler now since we control the text format
+        # It looks for the last occurrence of "Aura:" and captures everything after it.
+        matches = list(re.finditer(r'Aura:\n(.*?)$', full_text, re.S | re.M))
+        if matches:
+            self.last_aura_response = matches[-1].group(1).strip()
             logger.info(f"Captured last Aura response for /build command.")
         else:
             self.last_aura_response = ""
+            logger.warning("Could not find a previous 'Aura:' response to use for /build.")
 
-    def handle(self, event):  # event is a UserCommandEntered event
-        """
-        Receives a command event and routes it to the correct handler method.
-        """
-        # Before handling, update the last response in case it's needed.
+    def handle(self, event):
         self._update_last_aura_response()
 
         command = event.command.lower()
@@ -74,14 +72,12 @@ class CommandHandler:
             self.display(format_as_box(f"Error: {command}", error_message), "avm_error")
 
     def _handle_build(self):
-        """Handler for the /build command. Sends the last Aura response to build mode."""
         if not self.last_aura_response:
             self.display(format_as_box("Error", "No previous response from Aura to build from."), "avm_error")
             return
 
         self.display(f"▶️ Sending last prompt to Build Mode...", "system_message")
 
-        # We re-publish the captured prompt as a new UserPromptEntered event in build mode.
         self.event_bus.publish(
             UserPromptEntered(
                 prompt_text=self.last_aura_response,
@@ -90,48 +86,36 @@ class CommandHandler:
         )
 
     def _handle_list_files(self, args: list):
-        """Handler for the /list_files command."""
         list_files_action = self.foundry.get_action("list_files")
         relative_path = args[0] if args else "."
         resolved_path = self.project_manager.resolve_path(relative_path)
         result = list_files_action(path=str(resolved_path))
-
         display_path = self.project_manager.get_active_project_name() or "Current Directory"
         if relative_path != ".":
             display_path = f"{display_path}/{relative_path}"
-
         formatted_output = format_as_box(f"Directory Listing: {display_path}", result)
         self.display(formatted_output, "avm_output")
 
     def _handle_read_file(self, args: list):
-        """
-        Handler for the /read command.
-        """
         if not args:
             self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /read <path/to/file>"),
                          "avm_error")
             return
-
         read_file_action = self.foundry.get_action("read_file")
         relative_path = args[0]
         resolved_path = self.project_manager.resolve_path(relative_path)
         content = read_file_action(path=str(resolved_path))
-
         if content.strip().startswith("Error:"):
             self.display(format_as_box(f"Error reading file", content), "avm_error")
             return
-
-        logger.info(f"Publishing DisplayFileInEditor event for path: {resolved_path}")
         self.event_bus.publish(DisplayFileInEditor(file_path=str(resolved_path), file_content=content))
         self.display(f"Opened `{relative_path}` in Code Viewer.", "system_message")
 
     def _handle_lint(self, args: list):
-        """Handler for the /lint command."""
         if not args:
             self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /lint <path/to/file>"),
                          "avm_error")
             return
-
         lint_action = self.foundry.get_action("lint_file")
         relative_path = args[0]
         resolved_path = self.project_manager.resolve_path(relative_path)
@@ -140,20 +124,15 @@ class CommandHandler:
         self.display(formatted_output, "avm_output")
 
     def _handle_index(self):
-        """Handler for the /index command to manually trigger project indexing."""
         if not self.project_manager.active_project_path:
             self.display(format_as_box("Error", "No active project. Please create or load a project first."),
                          "avm_error")
             return
-
         self.display("Starting project re-indexing...", "system_message")
-        self.event_bus.publish(DirectToolInvocationRequest(
-            tool_id='index_project_context',
-            params={'path': str(self.project_manager.active_project_path)}
-        ))
+        self.event_bus.publish(DirectToolInvocationRequest(tool_id='index_project_context', params={
+            'path': str(self.project_manager.active_project_path)}))
 
     def _handle_help(self):
-        """Displays a help message with available commands."""
         help_text = (
             "Aura Direct Commands:\n\n"
             "/build                - Sends the last generated prompt from Plan mode to Build mode.\n"
@@ -163,4 +142,4 @@ class CommandHandler:
             "/read <path>          - Reads a file from the active project into the Code Viewer.\n"
             "/lint <path>          - Lints a Python file in the active project."
         )
-        self.display(format_as_box("Aura Help", help_text), "system_message")
+        self.display(format_as_box("Aura Help", help_text), "avm_output")
