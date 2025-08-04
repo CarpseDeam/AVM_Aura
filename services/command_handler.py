@@ -1,8 +1,10 @@
 # services/command_handler.py
 import logging
+import re
+from PySide6.QtWidgets import QTextEdit
 from foundry import FoundryManager
 from .view_formatter import format_as_box
-from events import DisplayFileInEditor, DirectToolInvocationRequest
+from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
 from event_bus import EventBus
 from .project_manager import ProjectManager
 
@@ -16,32 +18,44 @@ class CommandHandler:
     """
 
     def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
-                 project_manager: ProjectManager, display_callback):
+                 project_manager: ProjectManager, display_callback, output_log: QTextEdit):
         """
         Initializes the CommandHandler.
-
-        Args:
-            foundry_manager: An instance of FoundryManager to access tools.
-            event_bus: The central event bus for publishing events.
-            project_manager: The service for managing project contexts.
-            display_callback: A thread-safe function to send output to the GUI.
         """
         self.foundry = foundry_manager
         self.event_bus = event_bus
         self.project_manager = project_manager
         self.display = display_callback
+        self.output_log = output_log  # Store the output log for retrieving text
+        self.last_aura_response = ""  # Store the last response from Aura
         logger.info("CommandHandler initialized and ready.")
+
+    def _update_last_aura_response(self):
+        """Scan the log to find the last message from Aura."""
+        full_text = self.output_log.toPlainText()
+        # Find all Aura responses, the last one is what we need.
+        aura_messages = re.findall(r'💬 Aura:\n(.*?)(?=\n(?:👤|▶️|🧠|✅|❌|🚀|🎉|💬|$))', full_text, re.S)
+        if aura_messages:
+            self.last_aura_response = aura_messages[-1].strip()
+            logger.info(f"Captured last Aura response for /build command.")
+        else:
+            self.last_aura_response = ""
 
     def handle(self, event):  # event is a UserCommandEntered event
         """
         Receives a command event and routes it to the correct handler method.
         """
+        # Before handling, update the last response in case it's needed.
+        self._update_last_aura_response()
+
         command = event.command.lower()
         args = event.args
         logger.info(f"Handling command '/{command}' with args: {args}")
 
         try:
-            if command == "list_files":
+            if command == "build":
+                self._handle_build()
+            elif command == "list_files":
                 self._handle_list_files(args)
             elif command == "read":
                 self._handle_read_file(args)
@@ -59,6 +73,22 @@ class CommandHandler:
             logger.error(error_message, exc_info=True)
             self.display(format_as_box(f"Error: {command}", error_message), "avm_error")
 
+    def _handle_build(self):
+        """Handler for the /build command. Sends the last Aura response to build mode."""
+        if not self.last_aura_response:
+            self.display(format_as_box("Error", "No previous response from Aura to build from."), "avm_error")
+            return
+
+        self.display(f"▶️ Sending last prompt to Build Mode...", "system_message")
+
+        # We re-publish the captured prompt as a new UserPromptEntered event in build mode.
+        self.event_bus.publish(
+            UserPromptEntered(
+                prompt_text=self.last_aura_response,
+                auto_approve_plan=True
+            )
+        )
+
     def _handle_list_files(self, args: list):
         """Handler for the /list_files command."""
         list_files_action = self.foundry.get_action("list_files")
@@ -75,7 +105,7 @@ class CommandHandler:
 
     def _handle_read_file(self, args: list):
         """
-        Handler for the /read command. Now publishes an event for the Code Viewer.
+        Handler for the /read command.
         """
         if not args:
             self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /read <path/to/file>"),
@@ -112,7 +142,8 @@ class CommandHandler:
     def _handle_index(self):
         """Handler for the /index command to manually trigger project indexing."""
         if not self.project_manager.active_project_path:
-            self.display(format_as_box("Error", "No active project. Please create or load a project first."), "avm_error")
+            self.display(format_as_box("Error", "No active project. Please create or load a project first."),
+                         "avm_error")
             return
 
         self.display("Starting project re-indexing...", "system_message")
@@ -125,6 +156,7 @@ class CommandHandler:
         """Displays a help message with available commands."""
         help_text = (
             "Aura Direct Commands:\n\n"
+            "/build                - Sends the last generated prompt from Plan mode to Build mode.\n"
             "/help                 - Shows this help message.\n"
             "/index                - Manually re-indexes the entire project for the AI.\n"
             "/list_files [path]    - Lists files in the active project.\n"

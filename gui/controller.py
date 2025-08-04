@@ -5,14 +5,18 @@ import shlex
 from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtWidgets import QTextEdit, QWidget
 
 from event_bus import EventBus
-from events import UserPromptEntered, UserCommandEntered, DisplayFileInEditor, ProjectCreated
+from events import (
+    UserPromptEntered, UserCommandEntered, DisplayFileInEditor,
+    ProjectCreated, PlanReadyForApproval, PlanApproved, PlanDenied
+)
 from services import ProjectManager, MissionLogService
-
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
+from .plan_approval_widget import PlanApprovalWidget
 from .utils import get_aura_banner
 
 logger = logging.getLogger(__name__)
@@ -20,15 +24,32 @@ logger = logging.getLogger(__name__)
 
 class DisplayBridge(QObject):
     message_received = Signal(str, str)
+    widget_received = Signal(QWidget)
 
-    def __init__(self, output_log_widget):
+    def __init__(self, output_log_widget: QTextEdit):
         super().__init__()
         self.output_log = output_log_widget
         self.message_received.connect(self.append_message)
+        self.widget_received.connect(self.append_widget)
 
     @Slot(str, str)
     def append_message(self, message, tag):
+        # We can add more advanced formatting based on tag here later
         self.output_log.append(message)
+        self.output_log.ensureCursorVisible()
+
+    @Slot(QWidget)
+    def append_widget(self, widget: QWidget):
+        """Embeds a custom widget into the QTextEdit log."""
+        cursor = self.output_log.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.output_log.setTextCursor(cursor)
+        # Add a newline for spacing before the widget
+        self.output_log.insertHtml("<br>")
+        self.output_log.document().addTextLayout(widget.layout())
+        widget.setParent(self.output_log)
+        widget.show()
+        self.output_log.insertHtml("<br>")
         self.output_log.ensureCursorVisible()
 
 
@@ -44,12 +65,13 @@ class GUIController:
         self.mission_log_window = None
 
         # UI elements will be registered after they are created
-        self.output_log = None
+        self.output_log: Optional[QTextEdit] = None
         self.command_input = None
         self.display_bridge = None
 
         self.event_bus.subscribe(DisplayFileInEditor, self.handle_display_file)
         self.event_bus.subscribe(ProjectCreated, self.on_project_created)
+        self.event_bus.subscribe(PlanReadyForApproval, self.handle_plan_ready_for_approval)
 
     def register_ui_elements(self, output_log, command_input):
         """Connects the controller to the main window's widgets after they exist."""
@@ -69,8 +91,11 @@ class GUIController:
     def submit_input(self):
         input_text = self.command_input.toPlainText().strip()
         if not input_text: return
-        self.output_log.append(f"👤 {input_text}")
+
+        # Use the display bridge to show user input for consistency
+        self.display_bridge.message_received.emit(f"👤 {input_text}", "user_message")
         self.command_input.clear()
+
         if input_text.startswith("/"):
             try:
                 parts = shlex.split(input_text[1:])
@@ -94,7 +119,27 @@ class GUIController:
 
     def post_welcome_message(self):
         banner = get_aura_banner()
-        self.output_log.setText(f"{banner}\nSystem online. Waiting for command...")
+        self.output_log.setHtml(f"<pre>{banner}</pre>System online. Waiting for command...")
+
+    @Slot(PlanReadyForApproval)
+    def handle_plan_ready_for_approval(self, event: PlanReadyForApproval):
+        """Creates and displays the plan approval widget in the chat log."""
+        if not event.plan:
+            logger.warning("PlanReadyForApproval event received with an empty plan.")
+            return
+
+        approval_widget = PlanApprovalWidget(plan=event.plan)
+
+        # Connect the widget's signals to handlers that publish system-wide events
+        approval_widget.plan_approved.connect(
+            lambda plan_data: self.event_bus.publish(PlanApproved(plan=plan_data))
+        )
+        approval_widget.plan_denied.connect(
+            lambda: self.event_bus.publish(PlanDenied())
+        )
+
+        # Use the bridge to add the widget to the UI thread-safely
+        self.display_bridge.widget_received.emit(approval_widget)
 
     @Slot(DisplayFileInEditor)
     def handle_display_file(self, event: DisplayFileInEditor):

@@ -9,7 +9,7 @@ and subscribed to within the application, facilitating a decoupled architecture.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Optional
 
 # The architect has specified that these types are available for import.
 from foundry.blueprints import Blueprint, RawCodeInstruction
@@ -29,7 +29,8 @@ class UserPromptEntered(Event):
     """Event published when a user enters a standard prompt."""
 
     prompt_text: str
-    auto_approve_plan: bool = False # Retained from previous feature
+    auto_approve_plan: bool = False
+    task_id: Optional[int] = None  # For tracking agentic tasks
 
 
 @dataclass
@@ -55,6 +56,7 @@ class ActionReadyForExecution(Event):
     Event published when a structured action is parsed and ready for execution.
     """
     instruction: Union[BlueprintInvocation, RawCodeInstruction, List[BlueprintInvocation]]
+    task_id: Optional[int] = None  # For tracking agentic tasks
 
 
 @dataclass
@@ -97,6 +99,7 @@ class PlanReadyForApproval(Event):
 class PlanApproved(Event):
     """
     Published by the GUI when the user clicks 'Approve' on a plan.
+    This event carries the plan data to the ExecutorService.
     """
     plan: List[BlueprintInvocation] = field(default_factory=list)
 
@@ -135,3 +138,21 @@ class MissionLogUpdated(Event):
     The GUI should listen for this to stay in sync.
     """
     tasks: List[Dict[str, Any]]
+
+
+@dataclass
+class MissionDispatchRequest(Event):
+    """
+    Published by the Mission Log window when the user clicks the 'Dispatch' button.
+    This signals the system to begin autonomously executing the tasks in the log.
+    """
+    pass
+
+
+@dataclass
+class AgentTaskCompleted(Event):
+    """
+    Published by the ExecutorService when a plan associated with an agentic task
+    has finished executing.
+    """
+    task_id: int

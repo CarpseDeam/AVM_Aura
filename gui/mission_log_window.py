@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QSize, Slot
 from PySide6.QtGui import QIcon
 
 from event_bus import EventBus
-from events import MissionLogUpdated, DirectToolInvocationRequest
+from events import MissionLogUpdated, DirectToolInvocationRequest, MissionDispatchRequest
 from .task_widget import TaskWidget
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,18 @@ class MissionLogWindow(QMainWindow):
                 color: #FFB74D;
                 font-size: 14px;
             }
+            #DispatchButton {
+                background-color: #FFB74D;
+                color: #0d0d0d;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 10px;
+                font-size: 15px;
+                margin-top: 5px;
+            }
+            #DispatchButton:hover {
+                background-color: #FFA726;
+            }
         """)
 
         main_layout = QVBoxLayout(central_widget)
@@ -68,21 +80,27 @@ class MissionLogWindow(QMainWindow):
 
         main_layout.addWidget(scroll_area, 1)
 
-        input_frame = QFrame()
-        input_layout = QVBoxLayout(input_frame)
-        input_layout.setContentsMargins(0, 0, 0, 0)
+        # --- Input and Dispatch Controls ---
+        bottom_frame = QFrame()
+        bottom_layout = QVBoxLayout(bottom_frame)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(5)
 
         self.add_task_input = QLineEdit()
         self.add_task_input.setPlaceholderText("Add a new task...")
         self.add_task_input.returnPressed.connect(self._on_add_task)
-        input_layout.addWidget(self.add_task_input)
+        bottom_layout.addWidget(self.add_task_input)
 
-        main_layout.addWidget(input_frame)
+        self.dispatch_button = QPushButton("Dispatch Aura")
+        self.dispatch_button.setObjectName("DispatchButton")
+        self.dispatch_button.clicked.connect(self._on_dispatch)
+        bottom_layout.addWidget(self.dispatch_button)
+
+        main_layout.addWidget(bottom_frame)
 
     @Slot(MissionLogUpdated)
     def update_tasks(self, event: MissionLogUpdated):
         """Clears and redraws the list of tasks from the event data."""
-        # --- FIX: More robustly clear all existing widgets from the layout ---
         while self.task_list_layout.count():
             item = self.task_list_layout.takeAt(0)
             widget = item.widget()
@@ -109,6 +127,11 @@ class MissionLogWindow(QMainWindow):
             ))
             self.add_task_input.clear()
 
+    def _on_dispatch(self):
+        """Handles when the user clicks the 'Dispatch Aura' button."""
+        logger.info("Dispatch Aura button clicked. Publishing MissionDispatchRequest.")
+        self.event_bus.publish(MissionDispatchRequest())
+
     def _on_task_state_changed(self, task_id: int, is_done: bool):
         """Handles when a task's checkbox is toggled."""
         if is_done:
@@ -117,8 +140,6 @@ class MissionLogWindow(QMainWindow):
                 params={'task_id': task_id}
             ))
         else:
-            # We can implement 'un-doing' a task later if we want.
-            # For now, we'll need a new tool for that.
             logger.warning(f"Task {task_id} unchecked. No action is currently configured for this.")
 
     def show_window(self):

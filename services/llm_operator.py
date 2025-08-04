@@ -3,7 +3,7 @@ import logging
 from typing import Callable, Optional
 
 from event_bus import EventBus
-from events import ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered
+from events import ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered, PlanApproved, PlanDenied
 from providers import LLMProvider
 from .prompt_engine import PromptEngine
 from .instruction_factory import InstructionFactory
@@ -34,6 +34,8 @@ class LLMOperator:
         self.instruction_factory = instruction_factory
         self.display_callback = display_callback
         logger.info("LLMOperator initialized.")
+        self.event_bus.subscribe(PlanApproved, self.handle_plan_approved)
+        self.event_bus.subscribe(PlanDenied, self.handle_plan_denied)
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
@@ -44,38 +46,45 @@ class LLMOperator:
         self._display(f"🧠 Thinking ({mode} mode)...", "system_message")
 
         try:
-            # 1. Create a context-rich prompt
+            # 1. Create a context-rich prompt (RAG is now implicitly handled here)
             final_prompt = self.prompt_engine.create_prompt(event.prompt_text)
 
             # 2. Get a response from the LLM provider
-            tool_definitions = self.foundry_manager.get_llm_tool_definitions()
+            tool_definitions = self.foundry_manager.get_llm_tool_definitions() if mode == 'build' else None
             response = self.provider.get_response(
                 prompt=final_prompt,
                 mode=mode,
                 tools=tool_definitions
             )
 
-            # 3. Parse and validate the response into an instruction
+            # 3. If in 'plan' mode, just display the conversational response and stop.
+            if mode == 'plan':
+                self._display(f"💬 Aura:\n{response}", "avm_response")
+                return
+
+            # --- The rest of the logic is for 'build' mode only ---
+
+            # 4. Parse and validate the response into an instruction
             instruction = self.instruction_factory.create_instruction(response)
 
             if not instruction:
-                # If instruction is None, it means the response was conversational
-                # or an error, which the factory has already displayed.
+                # Factory already displayed error or conversational fallback.
                 return
 
-            # 4. Publish the appropriate event based on the instruction type
-            if isinstance(instruction, list):  # It's a plan
-                if event.auto_approve_plan:
-                    logger.info("Auto-approving plan and publishing for execution.")
-                    self._display("✅ Plan auto-approved. Executing now...", "system_message")
-                    self.event_bus.publish(ActionReadyForExecution(instruction=instruction))
-                else:
-                    logger.info("Plan requires approval. Publishing for GUI.")
-                    self.event_bus.publish(PlanReadyForApproval(plan=instruction))
-            else:  # It's a single action, which is always "auto-approved"
-                logger.info("Single action is ready. Publishing for execution.")
-                self.event_bus.publish(ActionReadyForExecution(instruction=instruction))
+            # 5. Publish the validated instruction for execution.
+            # In build mode, all plans are executed immediately.
+            self.event_bus.publish(ActionReadyForExecution(instruction=instruction, task_id=event.task_id))
 
         except Exception as e:
             logger.error(f"Error processing prompt in LLMOperator: {e}", exc_info=True)
             self._display(f"An unexpected error occurred: {e}", "avm_error")
+
+    def handle_plan_approved(self, event: PlanApproved):
+        # This handler is now unused but kept for potential future UI changes.
+        logger.warning("handle_plan_approved called, but this flow is deprecated.")
+        pass
+
+    def handle_plan_denied(self, event: PlanDenied):
+        # This handler is now unused but kept for potential future UI changes.
+        logger.warning("handle_plan_denied called, but this flow is deprecated.")
+        pass

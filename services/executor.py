@@ -8,7 +8,7 @@ from event_bus import EventBus
 from events import (
     ActionReadyForExecution, BlueprintInvocation, PauseExecutionForUserInput,
     PlanApproved, ProjectCreated, DisplayFileInEditor, DirectToolInvocationRequest,
-    RefreshFileTreeRequest
+    RefreshFileTreeRequest, AgentTaskCompleted
 )
 from foundry import FoundryManager
 from foundry.blueprints import RawCodeInstruction, UserInputRequest
@@ -39,6 +39,7 @@ class ExecutorService:
         self.mission_log_service = mission_log_service
         self.display_callback = display_callback
         self.ast_root = ast.Module(body=[], type_ignores=[])
+        self.active_agent_task_id: Optional[int] = None  # For tracking mission tasks
 
         self.PATH_PARAM_KEYS = {
             'write_file': ['path'], 'read_file': ['path'], 'list_files': ['path'],
@@ -58,7 +59,7 @@ class ExecutorService:
         self.event_bus.subscribe(ActionReadyForExecution, self._handle_action_ready)
         self.event_bus.subscribe(PlanApproved, self._handle_plan_approved)
         self.event_bus.subscribe(DirectToolInvocationRequest, self._handle_direct_tool_invocation)
-        self.event_bus.subscribe(ProjectCreated, self._handle_project_created)  # <-- NEW: Subscribe to event
+        self.event_bus.subscribe(ProjectCreated, self._handle_project_created)
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
@@ -85,6 +86,12 @@ class ExecutorService:
                 self._display(f"Error: Plan step {i + 1} is not a valid BlueprintInvocation.", "avm_error")
                 break
         self._display("✅ Plan execution complete.", "avm_executing")
+
+        # If this plan was part of an agentic task, signal its completion.
+        if self.active_agent_task_id is not None:
+            logger.info(f"Signaling completion for agentic task {self.active_agent_task_id}")
+            self.event_bus.publish(AgentTaskCompleted(task_id=self.active_agent_task_id))
+            self.active_agent_task_id = None  # Reset for the next operation
 
     def _execute_blueprint(self, invocation: BlueprintInvocation) -> None:
         blueprint = invocation.blueprint
@@ -148,6 +155,11 @@ class ExecutorService:
         self._display("▶️ Executing Raw Code... Not yet implemented.", "avm_executing")
 
     def _handle_action_ready(self, event: ActionReadyForExecution) -> None:
+        # If this action is part of an agentic task, keep track of its ID.
+        if event.task_id is not None:
+            self.active_agent_task_id = event.task_id
+            logger.info(f"Executor is now handling agentic task ID: {self.active_agent_task_id}")
+
         if isinstance(event.instruction, list):
             self._execute_plan(event.instruction)
         elif isinstance(event.instruction, BlueprintInvocation):
@@ -177,7 +189,6 @@ class ExecutorService:
         self._display(f"🚀 Project '{event.project_name}' created. Starting initial codebase indexing...",
                       "system_message")
 
-        # We can directly invoke the action since we have the services we need.
         action_function = self.foundry_manager.get_action("index_project_context")
         if action_function:
             try:

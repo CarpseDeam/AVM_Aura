@@ -14,7 +14,7 @@ from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService, PromptEngine, InstructionFactory
+    MissionLogService, PromptEngine, InstructionFactory, MissionManager
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -160,13 +160,18 @@ class AuraMainWindow(QMainWindow):
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
 
-            # --- NEW: Instantiate the new services ---
             prompt_engine = PromptEngine(
                 vector_context_service=vector_context_service,
                 context_manager=context_manager
             )
             instruction_factory = InstructionFactory(
                 foundry_manager=foundry_manager,
+                display_callback=display_callback
+            )
+
+            MissionManager(
+                event_bus=self.event_bus,
+                mission_log_service=mission_log_service,
                 display_callback=display_callback
             )
 
@@ -184,7 +189,6 @@ class AuraMainWindow(QMainWindow):
             else:
                 raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
 
-            # --- MODIFIED: LLMOperator now has fewer dependencies ---
             llm_operator = LLMOperator(
                 provider=provider,
                 event_bus=self.event_bus,
@@ -194,9 +198,13 @@ class AuraMainWindow(QMainWindow):
                 display_callback=display_callback
             )
 
+            # --- MODIFIED: Pass the output_log to the CommandHandler ---
             command_handler = CommandHandler(
-                foundry_manager=foundry_manager, event_bus=self.event_bus,
-                project_manager=project_manager, display_callback=display_callback
+                foundry_manager=foundry_manager,
+                event_bus=self.event_bus,
+                project_manager=project_manager,
+                display_callback=display_callback,
+                output_log=self.output_log
             )
 
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager,
