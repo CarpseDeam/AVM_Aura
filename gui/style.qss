@@ -89,31 +89,31 @@ QTextEdit::placeholderText {
 
 /* --- Chat Widget Styling --- */
 #UserMessageWidget {
-    background-color: transparent;
+    background-color: #1f1f1f;
+    border-radius: 5px;
 }
 
 #UserPromptLabel {
     color: #FFB74D;
     font-size: 18px;
+    font-weight: bold;
 }
 
-/* --- SIMPLIFIED: AI Message Styling --- */
 #AIMessageWidget {
-    /* The widget itself handles its own background and border painting */
-    background-color: transparent;
+    background-color: transparent; /* The paint event handles the bg color now */
+    border: none;
 }
 
 #AuraAuthorLabel {
     color: #FFB74D;
     font-weight: bold;
-    background-color: #111111; /* Match the painted background color */
-    padding: 0 5px; /* Give it some breathing room */
+    background-color: #111111;
+    padding: 0 5px;
 }
 
 #AIMessageLabel {
-    color: #d4d4d4; /* Standard text color for the message body */
+    color: #d4d4d4;
 }
-
 
 #ThinkingWidget {
     background-color: transparent;
