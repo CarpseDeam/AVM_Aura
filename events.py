@@ -126,3 +126,12 @@ class ProjectCreated(Event):
     """
     project_name: str
     project_path: str
+
+
+@dataclass
+class MissionLogUpdated(Event):
+    """
+    Published by the MissionLogService whenever the list of tasks changes.
+    The GUI should listen for this to stay in sync.
+    """
+    tasks: List[Dict[str, Any]]

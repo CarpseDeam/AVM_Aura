@@ -6,13 +6,14 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon  # <-- NEW IMPORT!
+from PySide6.QtGui import QIcon
 
 from .controller import GUIController
 from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
-    ContextManager, VectorContextService, format_as_box, ProjectManager
+    ContextManager, VectorContextService, format_as_box, ProjectManager,
+    MissionLogService
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -22,31 +23,30 @@ logger = logging.getLogger(__name__)
 
 
 class AuraMainWindow(QMainWindow):
-    """
-    The main Command Deck for Aura. It provides the central chat/CLI interface
-    and a tabbed sidebar to launch specialized viewer windows.
-    """
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Aura - Command Deck")
         self.setGeometry(100, 100, 1100, 800)
 
-        # --- NEW: SET THE WINDOW ICON ---
         icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'Ava_icon.ico')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-            logger.info(f"Successfully set window icon from {icon_path}")
         else:
             logger.warning(f"Window icon not found at {icon_path}")
 
         self.event_bus = EventBus()
-        self._setup_ui()
         self.controller = GUIController(self, self.event_bus)
+
+        # --- THE FIX: This is the correct initialization order ---
+        # 1. Create UI elements
+        self._setup_ui()
+        # 2. Give the UI elements to the controller
+        self.controller.register_ui_elements(self.output_log, self.command_input)
+        # --- END FIX ---
+
         self._start_backend_setup()
 
     def _setup_ui(self):
-        """Builds the main user interface."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
@@ -73,9 +73,8 @@ class AuraMainWindow(QMainWindow):
         self.send_button = QPushButton("Build")
         self.send_button.setObjectName("SendButton")
         self.send_button.setFixedSize(QSize(100, 80))
-        self.send_button.clicked.connect(lambda: self.controller.submit_input())
+        self.send_button.clicked.connect(self.controller.submit_input)
         input_area_layout.addWidget(self.send_button)
-
         chat_layout.addLayout(input_area_layout)
 
         self.tab_bar = QWidget()
@@ -88,25 +87,27 @@ class AuraMainWindow(QMainWindow):
 
         node_viewer_tab = QPushButton("Node Viewer")
         node_viewer_tab.setObjectName("SideTabButton")
-        node_viewer_tab.clicked.connect(lambda: self.controller.toggle_node_viewer())
+        node_viewer_tab.clicked.connect(self.controller.toggle_node_viewer)
         tab_bar_layout.addWidget(node_viewer_tab)
 
         code_viewer_tab = QPushButton("Code Viewer")
         code_viewer_tab.setObjectName("SideTabButton")
-        code_viewer_tab.clicked.connect(lambda: self.controller.toggle_code_viewer())
+        code_viewer_tab.clicked.connect(self.controller.toggle_code_viewer)
         tab_bar_layout.addWidget(code_viewer_tab)
+
+        mission_log_tab = QPushButton("Mission Log")
+        mission_log_tab.setObjectName("SideTabButton")
+        mission_log_tab.clicked.connect(self.controller.toggle_mission_log)
+        tab_bar_layout.addWidget(mission_log_tab)
 
         main_layout.addWidget(chat_widget, 1)
         main_layout.addWidget(self.tab_bar)
 
     def _start_backend_setup(self):
-        """Initializes all the core Aura services in a background thread."""
         self.controller.post_welcome_message()
-        backend_thread = threading.Thread(target=self._setup_backend_services, daemon=True)
-        backend_thread.start()
+        threading.Thread(target=self._setup_backend_services, daemon=True).start()
 
     def _setup_backend_services(self):
-        """Instantiates and wires up all the non-UI services."""
         try:
             logger.info("Setting up backend services...")
             display_callback = self.controller.get_display_callback()
@@ -115,7 +116,10 @@ class AuraMainWindow(QMainWindow):
             context_manager = ContextManager()
             vector_context_service = VectorContextService()
             project_manager = ProjectManager()
+            mission_log_service = MissionLogService(project_manager=project_manager, event_bus=self.event_bus)
+
             self.controller.set_project_manager(project_manager)
+            self.controller.set_mission_log_service(mission_log_service)
 
             provider_name = config_manager.get("llm_provider")
             temperature = config_manager.get("temperature")
@@ -135,14 +139,13 @@ class AuraMainWindow(QMainWindow):
                                        vector_context_service=vector_context_service, display_callback=display_callback)
 
             command_handler = CommandHandler(
-                foundry_manager=foundry_manager,
-                event_bus=self.event_bus,
-                project_manager=project_manager,
-                display_callback=display_callback
+                foundry_manager=foundry_manager, event_bus=self.event_bus,
+                project_manager=project_manager, display_callback=display_callback
             )
 
-            ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
-                            vector_context_service=vector_context_service, project_manager=project_manager,
+            ExecutorService(event_bus=self.event_bus, context_manager=context_manager,
+                            foundry_manager=foundry_manager, vector_context_service=vector_context_service,
+                            project_manager=project_manager, mission_log_service=mission_log_service,
                             display_callback=display_callback)
 
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)

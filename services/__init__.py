@@ -11,3 +11,4 @@ from .vector_context_service import VectorContextService
 from .command_handler import CommandHandler
 from .view_formatter import format_as_box
 from .project_manager import ProjectManager
+from .mission_log_service import MissionLogService
