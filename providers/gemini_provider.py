@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Union
 import google.generativeai as genai
 from .base import LLMProvider
 from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
+from services.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +19,17 @@ class GeminiProvider(LLMProvider):
     An LLM provider for Google's Gemini models that supports tool-calling.
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-pro", temperature: float = 0.1) -> None:
+    def __init__(self, api_key: str, config: ConfigManager) -> None:
         if not api_key:
             raise ValueError("Google API key is required for GeminiProvider.")
 
         try:
             genai.configure(api_key=api_key)
-            self.model_name = model_name
-            self.temperature = temperature
+            self.model_name = config.get('gemini.model')
+            self.plan_temperature = config.get('plan_temperature')
+            self.build_temperature = config.get('build_temperature')
             logger.info(
-                f"GeminiProvider initialized for model: {self.model_name} with temperature {self.temperature}.")
+                f"GeminiProvider initialized for model: {self.model_name} with temps (Plan: {self.plan_temperature}, Build: {self.build_temperature}).")
         except Exception as e:
             logger.error(f"Failed to configure Gemini: {e}", exc_info=True)
             raise RuntimeError(f"Could not initialize GeminiProvider: {e}") from e
@@ -44,8 +46,10 @@ class GeminiProvider(LLMProvider):
         """
         if mode == 'plan':
             system_instruction = ARCHITECT_SYSTEM_PROMPT
+            temp = self.plan_temperature
         elif mode == 'build':
             system_instruction = OPERATOR_SYSTEM_PROMPT
+            temp = self.build_temperature
         else:
             raise ValueError(f"Unknown mode '{mode}' provided to GeminiProvider.")
 
@@ -61,10 +65,10 @@ class GeminiProvider(LLMProvider):
         else:
             logger.debug("No context provided for Gemini prompt.")
 
-        logger.debug(f"Sending prompt to Gemini model in '{mode}' mode: '{final_prompt[:200]}...'")
+        logger.debug(f"Sending prompt to Gemini model in '{mode}' mode with temp {temp}: '{final_prompt[:200]}...'")
 
         try:
-            generation_config = genai.GenerationConfig(temperature=self.temperature)
+            generation_config = genai.GenerationConfig(temperature=temp)
             model = genai.GenerativeModel(
                 self.model_name,
                 system_instruction=system_instruction,
@@ -91,7 +95,6 @@ class GeminiProvider(LLMProvider):
                     }
 
             if hasattr(response, "text"):
-                # In 'plan' mode, a text response is acceptable.
                 if mode == 'plan':
                     return response.text
                 logger.warning("Gemini returned a text response despite strict tool-use instructions in 'build' mode.")

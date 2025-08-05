@@ -149,7 +149,7 @@ class AuraMainWindow(QMainWindow):
         main_layout.addWidget(right_column_widget)
 
         # --- Autocomplete Popup ---
-        self.autocomplete_popup = QLabel(self.command_input)  # Child of the input now!
+        self.autocomplete_popup = QLabel(self.command_input)
         self.autocomplete_popup.setObjectName("AutoCompletePopup")
         self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
         self.autocomplete_popup.setWordWrap(True)
@@ -181,22 +181,23 @@ class AuraMainWindow(QMainWindow):
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
             prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
-            instruction_factory = InstructionFactory(foundry_manager=foundry_manager, display_callback=display_callback)
+            instruction_factory = InstructionFactory(foundry_manager=foundry_manager)
+
             MissionManager(event_bus=self.event_bus, mission_log_service=mission_log_service,
                            project_manager=project_manager, display_callback=display_callback)
+
             provider_name = config_manager.get("llm_provider")
-            temperature = config_manager.get("temperature")
             provider = None
+
             if provider_name == "ollama":
-                model, host = config_manager.get("ollama.model"), config_manager.get("ollama.host")
-                provider = OllamaProvider(model_name=model, host=host, temperature=temperature)
+                provider = OllamaProvider(config=config_manager)
             elif provider_name == "gemini":
                 api_key = os.getenv("GOOGLE_API_KEY")
                 if not api_key: raise ValueError("GOOGLE_API_KEY environment variable not set.")
-                model = config_manager.get("gemini.model")
-                provider = GeminiProvider(api_key=api_key, model_name=model, temperature=temperature)
+                provider = GeminiProvider(api_key=api_key, config=config_manager)
             else:
                 raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
+
             llm_operator = LLMOperator(provider=provider, event_bus=self.event_bus, foundry_manager=foundry_manager,
                                        prompt_engine=prompt_engine, instruction_factory=instruction_factory,
                                        display_callback=display_callback)
@@ -205,12 +206,12 @@ class AuraMainWindow(QMainWindow):
                                              project_manager=project_manager, display_callback=display_callback,
                                              output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
 
-            # --- THE FIX: Wire up the command handler to the controller AFTER it's created ---
             self.controller.wire_up_command_handler(command_handler)
 
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
                             vector_context_service=vector_context_service, project_manager=project_manager,
                             mission_log_service=mission_log_service, display_callback=display_callback)
+
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
             self.event_bus.subscribe(UserCommandEntered, command_handler.handle)
             logger.info("Backend services initialized and ready.")

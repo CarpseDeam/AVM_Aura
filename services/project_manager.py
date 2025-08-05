@@ -1,7 +1,10 @@
 # services/project_manager.py
 import logging
+import os
 from pathlib import Path
 from typing import Optional
+
+from .project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -10,41 +13,64 @@ PROJECTS_ROOT_DIR = "projects"
 
 class ProjectManager:
     """
-    Manages the workspace, active project, and resolves file paths.
+    Manages the workspace, active project, and its execution context.
     """
 
     def __init__(self):
-        """Initializes the ProjectManager and ensures the root projects directory exists."""
-        self.root_path = Path(PROJECTS_ROOT_DIR).resolve() # Ensure root is absolute
+        self.root_path = Path(PROJECTS_ROOT_DIR).resolve()
         self.root_path.mkdir(exist_ok=True)
         self.active_project_path: Optional[Path] = None
+        self.active_project_context: Optional[ProjectContext] = None
         logger.info(f"ProjectManager initialized. Workspace is at '{self.root_path}'")
 
+    def _update_project_context(self):
+        """
+        Scans the active project path and builds the ProjectContext object.
+        """
+        if not self.active_project_path:
+            self.active_project_context = None
+            return
+
+        venv_python = None
+        venv_pip = None
+        venv_path = self.active_project_path / 'venv'
+
+        if venv_path.is_dir():
+            if os.name == 'nt':  # Windows
+                py_path = venv_path / 'Scripts' / 'python.exe'
+                pip_path = venv_path / 'Scripts' / 'pip.exe'
+            else:  # Unix-like
+                py_path = venv_path / 'bin' / 'python'
+                pip_path = venv_path / 'bin' / 'pip'
+
+            if py_path.exists():
+                venv_python = py_path
+                logger.info(f"Found venv python at: {venv_python}")
+            if pip_path.exists():
+                venv_pip = pip_path
+                logger.info(f"Found venv pip at: {venv_pip}")
+
+        self.active_project_context = ProjectContext(
+            project_root=self.active_project_path,
+            venv_python_path=venv_python,
+            venv_pip_path=venv_pip
+        )
+
     def is_project_active(self) -> bool:
-        """Checks if a project is currently active."""
         return self.active_project_path is not None
 
     def create_project(self, project_name: str) -> tuple[bool, str]:
-        """
-        Creates a new directory for a project and sets it as the active project.
-
-        Args:
-            project_name: The name for the new project.
-
-        Returns:
-            A tuple of (success, message).
-        """
         try:
             new_project_path = self.root_path / project_name
             if new_project_path.exists():
                 message = f"Project '{project_name}' already exists. Setting it as active project."
                 logger.warning(message)
-                self.active_project_path = new_project_path.resolve() # THE FIX!
-                return True, message
+            else:
+                new_project_path.mkdir(parents=True, exist_ok=True)
+                message = f"Successfully created and activated project: {project_name}"
 
-            new_project_path.mkdir(parents=True, exist_ok=True)
-            self.active_project_path = new_project_path.resolve() # THE FIX!
-            message = f"Successfully created and activated project: {project_name}"
+            self.active_project_path = new_project_path.resolve()
+            self._update_project_context()
             logger.info(message)
             return True, message
         except Exception as e:
@@ -53,21 +79,22 @@ class ProjectManager:
             return False, message
 
     def resolve_path(self, relative_or_absolute_path: str) -> Path:
-        """
-        Resolves a path relative to the active project.
-        If no project is active, or if the path is absolute, it's returned as is.
-        """
         path_obj = Path(relative_or_absolute_path)
-
         if not self.active_project_path or path_obj.is_absolute():
-            # Return path as-is if no active project or if it's already absolute
             return path_obj.resolve()
-
-        # Join the active project path with the relative path
         return (self.active_project_path / path_obj).resolve()
 
     def get_active_project_name(self) -> Optional[str]:
-        """Returns the name of the active project, or None."""
         if not self.active_project_path:
             return None
         return self.active_project_path.name
+
+    def get_relative_path_str(self, absolute_path_str: str) -> str:
+        if not self.is_project_active():
+            return absolute_path_str
+        try:
+            absolute_path = Path(absolute_path_str)
+            relative_path = absolute_path.relative_to(self.active_project_path)
+            return str(relative_path)
+        except ValueError:
+            return absolute_path_str

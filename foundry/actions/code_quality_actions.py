@@ -7,8 +7,11 @@ import pycodestyle
 import io
 import subprocess
 import sys
+import os
 from contextlib import redirect_stdout
 from typing import Optional
+
+from services.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +28,10 @@ def lint_file(path: str) -> str:
     """
     logger.info(f"Linting file: {path}")
     try:
-        # Create a StyleGuide instance. We can configure it if needed.
         style_guide = pycodestyle.StyleGuide(quiet=False)
-
-        # pycodestyle's check_files method prints to stdout. We need to capture it.
         string_io = io.StringIO()
         with redirect_stdout(string_io):
             result = style_guide.check_files([path])
-
-        # Get the output from the StringIO buffer
         output = string_io.getvalue()
 
         if result.total_errors == 0:
@@ -41,15 +39,9 @@ def lint_file(path: str) -> str:
             logger.info(success_message)
             return success_message
         else:
-            report_message = (
-                f"Linting found {result.total_errors} issue(s) in '{path}':\n"
-                f"----------------------------------------\n"
-                f"{output}"
-                f"----------------------------------------"
-            )
+            report_message = f"Linting found {result.total_errors} issue(s) in '{path}':\n{output}"
             logger.warning(f"Linting found issues in '{path}'.")
             return report_message
-
     except FileNotFoundError:
         error_message = f"Error: File not found at '{path}'."
         logger.warning(error_message)
@@ -60,22 +52,30 @@ def lint_file(path: str) -> str:
         return error_message
 
 
-def run_tests(path: Optional[str] = None) -> str:
+def run_tests(project_context: ProjectContext, path: Optional[str] = None) -> str:
     """
-    Runs automated tests using pytest.
+    Runs automated tests using pytest within the project's context.
 
     Args:
-        path: Optional. A specific file or directory to test. If None,
-              pytest will discover and run all tests in the project.
+        project_context: The context of the active project.
+        path: Optional. A specific file or directory to test.
 
     Returns:
         A formatted string with the pytest results.
     """
+    if not project_context:
+        return "Error: Cannot run tests. No active project context."
+
     target = path or "the project"
     logger.info(f"Running pytest on {target}.")
 
-    # Using sys.executable ensures we use the pytest from the correct venv
-    command = [sys.executable, "-m", "pytest"]
+    python_executable = str(project_context.venv_python_path) if project_context.venv_python_path else sys.executable
+    working_dir = str(project_context.project_root)
+
+    logger.info(f"Using python: {python_executable}")
+    logger.info(f"Setting working directory for pytest to: {working_dir}")
+
+    command = [python_executable, "-m", "pytest"]
     if path:
         command.append(path)
 
@@ -84,33 +84,26 @@ def run_tests(path: Optional[str] = None) -> str:
             command,
             capture_output=True,
             text=True,
-            check=False  # We handle the return code manually
+            check=False,
+            cwd=working_dir
         )
 
         output = result.stdout + "\n" + result.stderr
 
-        # pytest exit codes:
-        # 0: All tests passed
-        # 1: Tests were collected and run, but some tests failed
-        # 2: Test execution was interrupted by the user
-        # 3: Internal error occurred while executing tests
-        # 4: pytest command line usage error
-        # 5: No tests were collected
         if result.returncode == 0:
-            success_message = f"✅ All tests passed for {target}!\n\n" + output
+            success_message = f"✅ All tests passed for {target}!\n\n{output}"
             logger.info(success_message)
             return success_message
         elif result.returncode == 5:
-            no_tests_message = f"⚠️ No tests were found for {target}.\n\n" + output
+            no_tests_message = f"⚠️ No tests were found for {target}.\n\n{output}"
             logger.warning(no_tests_message)
             return no_tests_message
         else:
             failure_message = f"❌ Tests failed for {target} (exit code {result.returncode}).\n\n" + output
             logger.error(failure_message)
             return failure_message
-
     except FileNotFoundError:
-        error_msg = "Error: 'pytest' could not be run. Is it installed in the environment?"
+        error_msg = f"Error: '{python_executable}' could not be run. Is it a valid executable?"
         logger.error(error_msg)
         return error_msg
     except Exception as e:

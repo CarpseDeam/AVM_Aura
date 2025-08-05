@@ -89,42 +89,50 @@ class MissionManager:
                 for attempt in range(max_attempts):
                     self.display_callback(f"--- TDD Attempt {attempt + 1}/{max_attempts} ---", "avm_info")
 
-                    # Step 1: Generate Code (and Test on first attempt)
                     if attempt == 0:
-                        prompt = (f"Objective: {task['description']}. Create a plan to write both the feature code "
-                                  f"and a new pytest test file to verify it. Use the 'write_file' tool for both.")
+                        prompt = (
+                            f"Your objective is to complete the following task: '{task['description']}'. "
+                            "You are working inside an existing project. Your plan must NOT include a 'create_project' step. "
+                            "The plan MUST include these specific actions in order:\n"
+                            "1. A `write_file` action for `requirements.txt` that includes `pytest`, `requests`, and `beautifulsoup4`.\n"
+                            "2. A `write_file` action for the main python script (e.g., `scraper.py`).\n"
+                            "3. A `write_file` action for a test script (e.g., `test_scraper.py`) that uses `pytest` with mocks (`unittest.mock`) to test the main script's functionality without making real network requests.\n"
+                            "4. A `run_shell_command` action to create a virtual environment: `python -m venv venv`.\n"
+                            "5. A `run_shell_command` action to install dependencies: `pip install -r requirements.txt`.\n"
+                            "6. A `run_tests` action to execute the tests."
+                        )
                     else:
                         prompt = (f"Objective: {task['description']}. The previous attempt failed. "
                                   f"Error: '{last_error}'. The relevant files are: {file_paths}. "
                                   f"Please analyze the error and the code in the files, then create a plan to "
-                                  f"fix the code using the 'write_file' tool.")
+                                  f"fix the code using the 'write_file' tool. Your response must be only a single JSON object."
+                                  )
 
-                    code_writing_result = self._execute_sub_task(prompt)
-                    if not code_writing_result: break  # Timeout or other critical error
-                    if code_writing_result.file_paths:
-                        file_paths.update(code_writing_result.file_paths)
+                    # Execute the entire plan in one go.
+                    plan_execution_result = self._execute_sub_task(prompt)
 
-                    if 'test' not in file_paths:
-                        self.display_callback("❌ Agent did not provide a test file path. Aborting task.", "avm_error")
-                        break
+                    if not plan_execution_result:
+                        self.display_callback(
+                            "❌ Mission Manager did not receive a response from the LLM Operator. Aborting task.",
+                            "avm_error")
+                        break  # Critical failure, move to next task
 
-                    # Step 2: Run the tests
-                    self.display_callback(f"Code written. Running test: {file_paths['test']}", "avm_info")
-                    test_run_prompt = (f"Run the pytest test located at '{file_paths['test']}' and report the result.")
-                    test_result_event = self._execute_sub_task(test_run_prompt)
+                    # Keep track of the file paths for the next retry attempt
+                    if plan_execution_result.file_paths:
+                        file_paths.update(plan_execution_result.file_paths)
 
-                    if not test_result_event or not isinstance(test_result_event.result, str):
-                        self.display_callback("❌ Failed to get a valid test result. Aborting task.", "avm_error")
-                        break
+                    # The result of the sub-task is the output of the last step of the plan (which should be run_tests)
+                    final_output = plan_execution_result.result
 
-                    test_output = test_result_event.result
-                    if "All tests passed" in test_output or "== 1 passed in" in test_output:
+                    if isinstance(final_output, str) and (
+                            "All tests passed" in final_output or "passed in" in final_output):
                         self.display_callback(f"✅ Tests passed on attempt {attempt + 1}!", "avm_executing")
                         task_successful = True
-                        break
+                        break  # Success, exit the attempt loop
                     else:
-                        self.display_callback(f"❌ Tests failed. Analyzing error...", "avm_error")
-                        last_error = test_output
+                        self.display_callback(f"❌ Tests failed on attempt {attempt + 1}. Analyzing error...",
+                                              "avm_error")
+                        last_error = str(final_output)
                         time.sleep(2)
 
                 if task_successful:
@@ -133,7 +141,7 @@ class MissionManager:
                     self.display_callback(f"✅ Task {self._current_task_id} completed successfully.", "avm_executing")
                 else:
                     self.display_callback(
-                        f"💔 Task {self._current_task_id} failed after {max_attempts} attempts. Moving to next task.",
+                        f"💔 Task {self._current_task_id} failed after {max_attempts} attempts. Final error: {last_error}",
                         "avm_error")
 
                 time.sleep(2)

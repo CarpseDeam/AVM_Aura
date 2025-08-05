@@ -39,19 +39,14 @@ class ExecutorService:
         self.mission_log_service = mission_log_service
         self.display_callback = display_callback
         self.ast_root = ast.Module(body=[], type_ignores=[])
-        self.active_agent_task_id: Optional[int] = None  # For tracking mission tasks
+        self.active_agent_task_id: Optional[int] = None
 
-        self.PATH_PARAM_KEYS = {
-            'write_file': ['path'], 'read_file': ['path'], 'list_files': ['path'],
-            'delete_file': ['path'], 'delete_directory': ['path'], 'lint_file': ['path'],
-            'add_import': ['path'], 'add_method_to_class': ['path'], 'get_code_for': ['path'],
-            'list_functions_in_file': ['path'], 'index_project_context': ['path'],
-            'copy_file': ['source_path', 'destination_path'],
-            'move_file': ['source_path', 'destination_path'],
-            'run_tests': ['path'],
-        }
+        self.PATH_PARAM_KEYS = [
+            'path', 'source_path', 'destination_path'
+        ]
         self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory',
                                      'copy_file'}
+        self.CONTEXT_AWARE_ACTIONS = {'run_shell_command', 'run_tests'}
 
         logger.info("ExecutorService initialized with a blank AST root and project awareness.")
         self._register_handlers()
@@ -66,48 +61,51 @@ class ExecutorService:
         if self.display_callback:
             self.display_callback(message, tag)
 
-    def _resolve_action_paths(self, action_id: str, action_params: dict) -> dict:
+    def _prepare_parameters(self, action_id: str, action_params: dict) -> dict:
+        """Resolves file paths and injects project context for aware tools."""
         resolved_params = action_params.copy()
-        path_keys = self.PATH_PARAM_KEYS.get(action_id, [])
-        if 'path' in path_keys and 'path' not in resolved_params:
-            resolved_params['path'] = '.'
-        for key in path_keys:
+
+        # Resolve any path-like parameters to be absolute
+        for key in self.PATH_PARAM_KEYS:
             if key in resolved_params and isinstance(resolved_params.get(key), str):
-                if not Path(resolved_params[key]).is_absolute():
-                    resolved_params[key] = str(self.project_manager.resolve_path(resolved_params[key]))
+                resolved_params[key] = str(self.project_manager.resolve_path(resolved_params[key]))
+
+        # Inject the project context object for tools that need it
+        if action_id in self.CONTEXT_AWARE_ACTIONS:
+            resolved_params['project_context'] = self.project_manager.active_project_context
+
         return resolved_params
 
     def _execute_plan(self, plan: List[BlueprintInvocation]) -> None:
         self._display(f"▶️ Executing {len(plan)}-step plan...", "avm_executing")
-        # --- MODIFIED: Capture results for agentic tasks ---
         plan_results: Dict[str, Any] = {"run_tests": None, "file_paths": {}}
+        final_result_for_agent = None
 
         for i, step in enumerate(plan):
             self._display(f"--- Step {i + 1}/{len(plan)} ---", "avm_executing")
-            if isinstance(step, BlueprintInvocation):
-                result = self._execute_blueprint(step)
+            result = self._execute_blueprint(step)
+            final_result_for_agent = result
 
-                # If this is part of an agentic mission, capture key results
-                if self.active_agent_task_id is not None:
-                    if step.blueprint.id == 'run_tests':
-                        plan_results['run_tests'] = result
-                    elif step.blueprint.id == 'write_file':
-                        # Store by simple key 'code' or 'test' for the mission manager
-                        path_str = step.parameters.get('path', '')
-                        key = 'test' if 'test' in path_str else 'code'
-                        plan_results['file_paths'][key] = path_str
-
-            else:
-                self._display(f"Error: Plan step {i + 1} is not a valid BlueprintInvocation.", "avm_error")
+            if isinstance(result, str) and (
+                    "Error executing command" in result or "An unexpected error occurred" in result):
+                self._display(f"❌ Step failed. Aborting plan.", "avm_error")
                 break
 
-        self._display("✅ Plan execution complete.", "avm_executing")
+            if self.active_agent_task_id is not None:
+                if step.blueprint.id == 'run_tests':
+                    plan_results['run_tests'] = result
+                elif step.blueprint.id == 'write_file':
+                    path_str = step.parameters.get('path', '')
+                    key = 'test' if 'test' in path_str else 'code'
+                    plan_results['file_paths'][key] = self.project_manager.get_relative_path_str(path_str)
+        else:
+            self._display("✅ Plan execution complete.", "avm_executing")
 
         if self.active_agent_task_id is not None:
             logger.info(f"Signaling completion for agentic task {self.active_agent_task_id} with results.")
             self.event_bus.publish(AgentTaskCompleted(
                 task_id=self.active_agent_task_id,
-                result=plan_results.get('run_tests'),
+                result=plan_results.get('run_tests') or final_result_for_agent,
                 file_paths=plan_results.get('file_paths', {})
             ))
             self.active_agent_task_id = None
@@ -124,37 +122,34 @@ class ExecutorService:
             return error_msg
 
         try:
-            resolved_params = self._resolve_action_paths(action_id, invocation.parameters)
-            result = None
+            # Prepare parameters by resolving paths and injecting context
+            prepared_params = self._prepare_parameters(action_id, invocation.parameters)
 
-            # --- Service Injection ---
-            if action_id == "get_generated_code":
-                result = action_function(code_ast=self.ast_root)
-            elif action_id == "index_project_context":
-                result = action_function(vector_context_service=self.vector_context_service, **resolved_params)
+            # Inject other services as needed (a bit of a service locator pattern here)
+            if action_id == "index_project_context":
+                prepared_params['vector_context_service'] = self.vector_context_service
             elif action_id == "create_project":
-                result = action_function(project_manager=self.project_manager, **resolved_params)
-            elif action_id.startswith("add_task") or action_id.startswith("mark_task") or action_id.startswith(
-                    "get_mission"):
-                result = action_function(mission_log_service=self.mission_log_service, **resolved_params)
-            else:
-                result = action_function(**resolved_params)
+                prepared_params['project_manager'] = self.project_manager
+            elif action_id.startswith(("add_task", "mark_task", "get_mission")):
+                prepared_params['mission_log_service'] = self.mission_log_service
+
+            result = action_function(**prepared_params)
 
             if isinstance(result, str):
                 self._display(f"✅ Result from {action_id}:\n{result}", "avm_output")
                 if "Successfully" in result and action_id in self.FS_MODIFYING_ACTIONS:
                     self.event_bus.publish(RefreshFileTreeRequest())
                 if action_id == "create_project" and "Successfully created" in result:
-                    project_name = resolved_params['project_name']
+                    project_name = prepared_params['project_name']
                     project_path = str(self.project_manager.active_project_path)
                     self.event_bus.publish(ProjectCreated(project_name=project_name, project_path=project_path))
                 elif action_id == "write_file" and "Successfully wrote" in result:
-                    file_path = resolved_params.get("path")
-                    content = resolved_params.get("content", "")
+                    file_path = prepared_params.get("path")
+                    content = prepared_params.get("content", "")
                     if file_path:
                         self.event_bus.publish(DisplayFileInEditor(file_path=file_path, file_content=content))
                 elif action_id == "read_file" and not result.strip().startswith("Error:"):
-                    file_path = resolved_params.get("path")
+                    file_path = prepared_params.get("path")
                     if file_path:
                         self.context_manager.add_to_context(key=file_path, content=result)
                         self._display(f"📝 Content of '{Path(file_path).name}' added to context.", "avm_info")
@@ -185,7 +180,6 @@ class ExecutorService:
             self._execute_plan(event.instruction)
         elif isinstance(event.instruction, BlueprintInvocation):
             result = self._execute_blueprint(event.instruction)
-            # If it was a single step for an agent, complete it now
             if self.active_agent_task_id is not None:
                 self.event_bus.publish(AgentTaskCompleted(task_id=self.active_agent_task_id, result=result))
                 self.active_agent_task_id = None

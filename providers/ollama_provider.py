@@ -9,6 +9,7 @@ import requests
 from typing import Any, Dict, List, Optional, Union
 from .base import LLMProvider
 from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
+from services.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,14 @@ class OllamaProvider(LLMProvider):
     that instructs the model to return a JSON object when it needs to use a tool.
     """
 
-    def __init__(self, model_name: str, host: str = "http://localhost:11434", temperature: float = 0.1) -> None:
-        self.model_name = model_name
+    def __init__(self, config: ConfigManager) -> None:
+        self.model_name = config.get('ollama.model')
+        host = config.get('ollama.host')
         self.api_url = f"{host}/api/generate"
-        self.temperature = temperature
-        logger.info(f"OllamaProvider initialized for model '{model_name}' at {self.api_url} with temperature {self.temperature}")
+        self.plan_temperature = config.get('plan_temperature')
+        self.build_temperature = config.get('build_temperature')
+        logger.info(
+            f"OllamaProvider initialized for model '{self.model_name}' at {self.api_url} with temps (Plan: {self.plan_temperature}, Build: {self.build_temperature})")
 
     def _create_system_prompt(
             self,
@@ -72,12 +76,14 @@ class OllamaProvider(LLMProvider):
         """
         Sends the prompt to the Ollama /api/generate endpoint and returns the response.
         """
+        temp = self.plan_temperature if mode == 'plan' else self.build_temperature
+
         payload = {
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": self.temperature
+                "temperature": temp
             }
         }
 
@@ -86,7 +92,6 @@ class OllamaProvider(LLMProvider):
             payload["system"] = system_prompt
             logger.debug(f"Injecting system prompt for mode '{mode}'.")
 
-        # In 'build' mode, we MUST have JSON. In 'plan' mode, it's optional but preferred.
         if mode == 'build':
             payload["format"] = "json"
             logger.debug("Build mode active. Requesting JSON format.")
@@ -104,8 +109,6 @@ class OllamaProvider(LLMProvider):
                 logger.warning("Ollama response was empty.")
                 return "Error: Received an empty response from Ollama."
 
-            # If we requested JSON, we should try to parse it.
-            # This is always true for 'build' mode.
             if payload.get("format") == "json":
                 try:
                     if isinstance(text_response, str):

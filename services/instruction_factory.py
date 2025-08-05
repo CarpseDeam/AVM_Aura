@@ -17,14 +17,9 @@ class InstructionFactory:
     BlueprintInvocation instructions.
     """
 
-    def __init__(self, foundry_manager: FoundryManager, display_callback: Optional[Callable[[str, str], None]]):
+    def __init__(self, foundry_manager: FoundryManager):
         self.foundry_manager = foundry_manager
-        self.display_callback = display_callback
         logger.info("InstructionFactory initialized.")
-
-    def _display(self, message: str, tag: str) -> None:
-        if self.display_callback:
-            self.display_callback(message, tag)
 
     def _deep_convert_proto_maps(self, data: Any) -> Any:
         """Recursively converts protobuf MapComposite objects to standard Python dicts."""
@@ -40,64 +35,61 @@ class InstructionFactory:
         Union[BlueprintInvocation, List[BlueprintInvocation]]]:
         """
         Parses the raw LLM response and attempts to build a valid instruction or plan.
-
-        Returns:
-            A single BlueprintInvocation, a list of them (for a plan), or None if parsing fails.
+        Returns the instruction or None, but does NOT display anything.
         """
         logger.info("Attempting to create instruction from LLM response.")
+        data = None
         if isinstance(llm_response, str):
             try:
-                # If the response is a string, it must be valid JSON.
-                data: Dict[str, Any] = json.loads(llm_response)
+                data = json.loads(llm_response)
             except json.JSONDecodeError:
-                # Not valid JSON, so we treat it as a conversational text response.
-                self._display(f"💬 Aura:\n{llm_response}", "avm_response")
-                return None
+                logger.warning("LLM response was a string but not valid JSON.")
+                return None  # Not a valid instruction, but not an error either.
         elif isinstance(llm_response, dict):
             data = llm_response
         else:
-            self._display(f"Error: Unexpected response type from provider: {type(llm_response).__name__}", "avm_error")
+            logger.error(f"Unexpected response type from provider: {type(llm_response).__name__}")
             return None
 
+        if not isinstance(data, dict):
+             logger.warning(f"Parsed JSON is not a dictionary: {type(data).__name__}")
+             return None
+
         # Check for a multi-step plan first.
-        if "plan" in data and isinstance(data["plan"], list):
+        if "plan" in data and isinstance(data.get("plan"), list):
             return self._create_plan_from_data(data["plan"])
 
         # Check for a single tool call.
-        tool_name = data.get("tool_name")
-        if tool_name:
+        if "tool_name" in data:
             return self._create_single_invocation_from_data(data)
 
-        # If it's a dict but neither a plan nor a tool call, display it as structured text.
-        pretty_json = json.dumps(data, indent=2)
-        self._display(f"💬 Aura (JSON Response):\n{pretty_json}", "avm_response")
+        # The data was a valid dict, but not in a recognized instruction format.
+        logger.warning("LLM response was valid JSON but not a recognized tool call or plan.")
         return None
 
     def _create_plan_from_data(self, plan_data: List[Dict]) -> Optional[List[BlueprintInvocation]]:
         """Validates a list of tool calls and converts it into a plan."""
         plan_invocations: List[BlueprintInvocation] = []
-        self._display(f"📋 LLM has proposed a {len(plan_data)}-step plan. Validating...", "system_message")
+        logger.info(f"LLM has proposed a {len(plan_data)}-step plan. Validating...")
         for i, step in enumerate(plan_data):
             invocation = self._create_single_invocation_from_data(step)
             if not invocation:
-                self._display(f"Error in Plan Step {i + 1}: Invalid tool call data.", "avm_error")
+                logger.error(f"Invalid tool call data in plan step {i + 1}: {step}")
                 return None  # The entire plan is invalid if one step fails.
             plan_invocations.append(invocation)
-
-        self._display("✅ Plan validated successfully.", "system_message")
+        logger.info("Plan validated successfully.")
         return plan_invocations
 
     def _create_single_invocation_from_data(self, data: Dict) -> Optional[BlueprintInvocation]:
         """Validates a single tool call dictionary and creates a BlueprintInvocation."""
         tool_name = data.get("tool_name")
         if not tool_name:
-            # This is an error, as a step in a plan or a single call MUST have a name.
             logger.warning(f"Tool call data is missing 'tool_name': {data}")
             return None
 
         blueprint = self.foundry_manager.get_blueprint(tool_name)
         if not blueprint:
-            self._display(f"Error: LLM requested unknown tool '{tool_name}'.", "avm_error")
+            logger.error(f"LLM requested unknown tool '{tool_name}'.")
             return None
 
         arguments = data.get("arguments", {})
