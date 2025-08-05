@@ -28,10 +28,16 @@ def run_shell_command(project_context: ProjectContext, command: str) -> str:
     try:
         command_parts = shlex.split(command, posix=os.name != 'nt')
 
-        # Intercept python calls to use the venv python if it exists
-        if command_parts[0].lower() == 'python' and project_context.venv_python_path:
-            command_parts[0] = str(project_context.venv_python_path)
-            logger.info(f"Replaced 'python' with venv executable: {command_parts[0]}")
+        # --- THIS IS THE CORRECTED LOGIC ---
+        # Intercept python and pip calls to use the venv executables if they exist
+        if command_parts: # Ensure the list is not empty
+            executable_name = command_parts[0].lower() # Check the FIRST element
+            if 'python' in executable_name and project_context.venv_python_path:
+                command_parts[0] = str(project_context.venv_python_path) # Replace the FIRST element
+                logger.info(f"Replaced '{executable_name}' with venv executable: {command_parts[0]}")
+            elif 'pip' in executable_name and project_context.venv_pip_path:
+                command_parts[0] = str(project_context.venv_pip_path) # Replace the FIRST element
+                logger.info(f"Replaced '{executable_name}' with venv executable: {command_parts[0]}")
 
         result = subprocess.run(
             command_parts,
