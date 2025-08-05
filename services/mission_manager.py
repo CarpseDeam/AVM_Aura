@@ -92,25 +92,19 @@ class MissionManager:
 
                     # --- PROMPT GENERATION ---
                     if attempt == 0:
-                        # First attempt: Write the tests and the code
+                        # First attempt: Write the tests and the code, using the new debugger tool.
                         prompt = (
                             f"Your objective is to complete the following task: '{task['description']}'. "
-                            "You are working inside an existing project. Your plan must NOT include a 'create_project' step. "
-                            "The plan MUST include these specific actions in order:\n"
-                            "1. `write_file` for `requirements.txt` (including `pytest`, `requests`, `beautifulsoup4`).\n"
-                            "2. `write_file` for the main python script (e.g., `scraper.py`).\n"
-                            "3. `write_file` for a `pytest` test script (e.g., `test_scraper.py`) that uses `unittest.mock`.\n"
-                            "4. `run_shell_command` to create a virtual environment: `python -m venv venv`.\n"
-                            "5. `pip_install` to install dependencies from `requirements.txt`.\n"
-                            "6. `run_tests` to execute the tests."
+                            "You are working inside an existing project. Do NOT use `create_project`. "
+                            "Create a plan that writes all necessary code and test files. The plan MUST end with a call to the "
+                            "`run_with_debugger` tool to execute the tests."
                         )
                     else:
-                        # Subsequent attempts: Fix the code based on the error
-                        prompt = (f"Objective: {task['description']}. The previous attempt failed. "
-                                  f"Error: '{last_error}'. The relevant files are: {file_paths}. "
-                                  f"Please analyze the error and the code in the files, then create a plan to "
-                                  f"fix the code using the 'write_file' tool. Your response must be only a single JSON object."
-                                  )
+                        # Subsequent attempts: The system prompt has examples. This just provides the data.
+                        prompt = (
+                            "Fix the following error:\n\n"
+                            f"--- DEBUGGER REPORT ---\n{last_error}\n--- END REPORT ---"
+                        )
 
                     # --- EXECUTE THE PLAN ---
                     plan_execution_result = self._execute_sub_task(prompt)
@@ -119,7 +113,7 @@ class MissionManager:
                         self.display_callback(
                             "❌ Mission Manager did not receive a response from the LLM Operator. Aborting task.",
                             "avm_error")
-                        break # Exit the attempt loop for this task
+                        break  # Exit the attempt loop for this task
 
                     # Keep track of file paths for the next attempt's context
                     if plan_execution_result.file_paths:
@@ -128,17 +122,41 @@ class MissionManager:
                     final_output = plan_execution_result.result
 
                     # --- CHECK FOR SUCCESS ---
-                    if isinstance(final_output, str) and (
-                            "All tests passed" in final_output or "passed in" in final_output):
-                        self.display_callback(f"✅ Tests passed on attempt {attempt + 1}!", "avm_executing")
-                        task_successful = True
-                        break # Success! Exit the attempt loop.
-                    else:
-                        # Failure: record the error and loop again
-                        self.display_callback(f"❌ Tests failed on attempt {attempt + 1}. Analyzing error...",
-                                              "avm_error")
-                        last_error = str(final_output)
-                        time.sleep(2) # Give a moment to see the error
+                    # On the first attempt, we expect a test result.
+                    # On subsequent attempts, we just need to know the write was successful.
+                    if attempt == 0:
+                        if isinstance(final_output, str) and ("All tests passed" in final_output or "passed in" in final_output):
+                            self.display_callback(f"✅ Tests passed on attempt {attempt + 1}!", "avm_executing")
+                            task_successful = True
+                            break  # Success! Exit the attempt loop.
+                        else:
+                            # Failure: record the error and loop again
+                            self.display_callback(f"❌ Tests failed on attempt {attempt + 1}. Analyzing debugger report...",
+                                                  "avm_error")
+                            last_error = str(final_output)
+                            time.sleep(2)  # Give a moment to see the error
+                    else:  # This handles the fix attempt
+                        if isinstance(final_output, str) and "Successfully wrote" in final_output:
+                            self.display_callback(f"✅ Code fix applied successfully. Re-running tests to verify...",
+                                                  "avm_executing")
+                            # Now we must re-run the tests to confirm the fix
+                            verify_prompt = "The code has been patched. Now, please create a plan that contains only a single call to `run_with_debugger` to verify the fix."
+                            verification_result = self._execute_sub_task(verify_prompt)
+                            if verification_result and isinstance(verification_result.result,
+                                                                 str) and "All tests passed" in verification_result.result:
+                                self.display_callback(f"✅ Verification successful! All tests passed!",
+                                                      "avm_executing")
+                                task_successful = True
+                                break  # The fix is confirmed!
+                            else:
+                                last_error = str(
+                                    verification_result.result if verification_result else "Verification step failed.")
+                                self.display_callback(f"❌ Verification failed. {last_error}", "avm_error")
+                        else:
+                            # The fix plan failed somehow
+                            last_error = str(final_output)
+                            self.display_callback(f"❌ The attempt to apply the code fix failed. {last_error}",
+                                                  "avm_error")
 
                 # --- MARK TASK AS DONE (OR NOT) ---
                 if task_successful:
@@ -147,10 +165,10 @@ class MissionManager:
                     self.display_callback(f"✅ Task {self._current_task_id} completed successfully.", "avm_executing")
                 else:
                     self.display_callback(
-                        f"💔 Task {self._current_task_id} failed after {max_attempts} attempts. Final error: {last_error}",
+                        f"💔 Task {self._current_task_id} failed after {max_attempts} attempts. Final error report is available in the log.",
                         "avm_error")
 
-                time.sleep(2) # Pause between tasks
+                time.sleep(2)  # Pause between tasks
 
             self.display_callback("🎉 All mission tasks completed or attempted!", "system_message")
 

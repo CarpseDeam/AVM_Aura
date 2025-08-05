@@ -46,7 +46,9 @@ class ExecutorService:
         ]
         self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory',
                                      'copy_file'}
-        self.CONTEXT_AWARE_ACTIONS = {'run_shell_command', 'run_tests', 'pip_install'}
+        # --- THIS IS THE FIX ---
+        # Add 'run_with_debugger' to the list of actions that need project context.
+        self.CONTEXT_AWARE_ACTIONS = {'run_shell_command', 'run_tests', 'pip_install', 'run_with_debugger'}
 
         logger.info("ExecutorService initialized with a blank AST root and project awareness.")
         self._register_handlers()
@@ -92,7 +94,7 @@ class ExecutorService:
                 break
 
             if self.active_agent_task_id is not None:
-                if step.blueprint.id == 'run_tests':
+                if step.blueprint.id == 'run_tests' or step.blueprint.id == 'run_with_debugger':
                     plan_results['run_tests'] = result
                 elif step.blueprint.id == 'write_file':
                     # ** THE FIX IS HERE **
@@ -137,7 +139,7 @@ class ExecutorService:
             result = action_function(**prepared_params)
 
             if isinstance(result, str):
-                self._display(f"✅ Result from {action_id}:\n{result}", "avm_output")
+                self.display_callback(f"✅ Result from {action_id}:\n{result}", "avm_output")
                 if "Successfully" in result and action_id in self.FS_MODIFYING_ACTIONS:
                     self.event_bus.publish(RefreshFileTreeRequest())
                 if action_id == "create_project" and "Successfully created" in result:
