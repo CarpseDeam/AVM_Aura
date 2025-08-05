@@ -86,55 +86,61 @@ class MissionManager:
                 last_error = ""
                 file_paths = {}
 
+                # --- THIS IS THE TDD LOOP ---
                 for attempt in range(max_attempts):
                     self.display_callback(f"--- TDD Attempt {attempt + 1}/{max_attempts} ---", "avm_info")
 
+                    # --- PROMPT GENERATION ---
                     if attempt == 0:
+                        # First attempt: Write the tests and the code
                         prompt = (
                             f"Your objective is to complete the following task: '{task['description']}'. "
                             "You are working inside an existing project. Your plan must NOT include a 'create_project' step. "
                             "The plan MUST include these specific actions in order:\n"
-                            "1. A `write_file` action for `requirements.txt` that includes `pytest`, `requests`, and `beautifulsoup4`.\n"
-                            "2. A `write_file` action for the main python script (e.g., `scraper.py`).\n"
-                            "3. A `write_file` action for a test script (e.g., `test_scraper.py`) that uses `pytest` with mocks (`unittest.mock`) to test the main script's functionality without making real network requests.\n"
-                            "4. A `run_shell_command` action to create a virtual environment: `python -m venv venv`.\n"
-                            "5. A `run_shell_command` action to install dependencies: `pip install -r requirements.txt`.\n"
-                            "6. A `run_tests` action to execute the tests."
+                            "1. `write_file` for `requirements.txt` (including `pytest`, `requests`, `beautifulsoup4`).\n"
+                            "2. `write_file` for the main python script (e.g., `scraper.py`).\n"
+                            "3. `write_file` for a `pytest` test script (e.g., `test_scraper.py`) that uses `unittest.mock`.\n"
+                            "4. `run_shell_command` to create a virtual environment: `python -m venv venv`.\n"
+                            "5. `pip_install` to install dependencies from `requirements.txt`.\n"
+                            "6. `run_tests` to execute the tests."
                         )
                     else:
+                        # Subsequent attempts: Fix the code based on the error
                         prompt = (f"Objective: {task['description']}. The previous attempt failed. "
                                   f"Error: '{last_error}'. The relevant files are: {file_paths}. "
                                   f"Please analyze the error and the code in the files, then create a plan to "
                                   f"fix the code using the 'write_file' tool. Your response must be only a single JSON object."
                                   )
 
-                    # Execute the entire plan in one go.
+                    # --- EXECUTE THE PLAN ---
                     plan_execution_result = self._execute_sub_task(prompt)
 
                     if not plan_execution_result:
                         self.display_callback(
                             "❌ Mission Manager did not receive a response from the LLM Operator. Aborting task.",
                             "avm_error")
-                        break  # Critical failure, move to next task
+                        break # Exit the attempt loop for this task
 
-                    # Keep track of the file paths for the next retry attempt
+                    # Keep track of file paths for the next attempt's context
                     if plan_execution_result.file_paths:
                         file_paths.update(plan_execution_result.file_paths)
 
-                    # The result of the sub-task is the output of the last step of the plan (which should be run_tests)
                     final_output = plan_execution_result.result
 
+                    # --- CHECK FOR SUCCESS ---
                     if isinstance(final_output, str) and (
                             "All tests passed" in final_output or "passed in" in final_output):
                         self.display_callback(f"✅ Tests passed on attempt {attempt + 1}!", "avm_executing")
                         task_successful = True
-                        break  # Success, exit the attempt loop
+                        break # Success! Exit the attempt loop.
                     else:
+                        # Failure: record the error and loop again
                         self.display_callback(f"❌ Tests failed on attempt {attempt + 1}. Analyzing error...",
                                               "avm_error")
                         last_error = str(final_output)
-                        time.sleep(2)
+                        time.sleep(2) # Give a moment to see the error
 
+                # --- MARK TASK AS DONE (OR NOT) ---
                 if task_successful:
                     self.event_bus.publish(
                         DirectToolInvocationRequest('mark_task_as_done', {'task_id': self._current_task_id}))
@@ -144,7 +150,7 @@ class MissionManager:
                         f"💔 Task {self._current_task_id} failed after {max_attempts} attempts. Final error: {last_error}",
                         "avm_error")
 
-                time.sleep(2)
+                time.sleep(2) # Pause between tasks
 
             self.display_callback("🎉 All mission tasks completed or attempted!", "system_message")
 

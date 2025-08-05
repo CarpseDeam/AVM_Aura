@@ -3,7 +3,6 @@ import logging
 import subprocess
 import shlex
 import os
-from typing import Optional
 from services.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
@@ -29,17 +28,10 @@ def run_shell_command(project_context: ProjectContext, command: str) -> str:
     try:
         command_parts = shlex.split(command, posix=os.name != 'nt')
 
-        # Intercept and replace python/pip calls with venv paths
+        # Intercept python calls to use the venv python if it exists
         if command_parts[0].lower() == 'python' and project_context.venv_python_path:
             command_parts[0] = str(project_context.venv_python_path)
             logger.info(f"Replaced 'python' with venv executable: {command_parts[0]}")
-        elif command_parts[0].lower() == 'pip' and project_context.venv_pip_path:
-             command_parts[0] = str(project_context.venv_pip_path)
-             logger.info(f"Replaced 'pip' with venv executable: {command_parts[0]}")
-        elif os.name == 'nt' and command_parts[0].lower().replace('\\', '/') == 'venv/scripts/pip' and project_context.venv_pip_path:
-             command_parts[0] = str(project_context.venv_pip_path)
-             logger.info(f"Replaced 'venv/scripts/pip' with venv executable: {command_parts[0]}")
-
 
         result = subprocess.run(
             command_parts,

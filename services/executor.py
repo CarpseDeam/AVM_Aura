@@ -42,11 +42,11 @@ class ExecutorService:
         self.active_agent_task_id: Optional[int] = None
 
         self.PATH_PARAM_KEYS = [
-            'path', 'source_path', 'destination_path'
+            'path', 'source_path', 'destination_path', 'requirements_path'
         ]
         self.FS_MODIFYING_ACTIONS = {'write_file', 'delete_file', 'delete_directory', 'move_file', 'create_directory',
                                      'copy_file'}
-        self.CONTEXT_AWARE_ACTIONS = {'run_shell_command', 'run_tests'}
+        self.CONTEXT_AWARE_ACTIONS = {'run_shell_command', 'run_tests', 'pip_install'}
 
         logger.info("ExecutorService initialized with a blank AST root and project awareness.")
         self._register_handlers()
@@ -87,7 +87,7 @@ class ExecutorService:
             final_result_for_agent = result
 
             if isinstance(result, str) and (
-                    "Error executing command" in result or "An unexpected error occurred" in result):
+                    "Error executing command" in result or "An unexpected error occurred" in result or "Error installing dependencies" in result):
                 self._display(f"❌ Step failed. Aborting plan.", "avm_error")
                 break
 
@@ -95,7 +95,10 @@ class ExecutorService:
                 if step.blueprint.id == 'run_tests':
                     plan_results['run_tests'] = result
                 elif step.blueprint.id == 'write_file':
-                    path_str = step.parameters.get('path', '')
+                    # ** THE FIX IS HERE **
+                    # We need to get the resolved path for the file_paths dictionary
+                    prepared_params = self._prepare_parameters(step.blueprint.id, step.parameters)
+                    path_str = prepared_params.get("path", "")
                     key = 'test' if 'test' in path_str else 'code'
                     plan_results['file_paths'][key] = self.project_manager.get_relative_path_str(path_str)
         else:
@@ -122,10 +125,8 @@ class ExecutorService:
             return error_msg
 
         try:
-            # Prepare parameters by resolving paths and injecting context
             prepared_params = self._prepare_parameters(action_id, invocation.parameters)
 
-            # Inject other services as needed (a bit of a service locator pattern here)
             if action_id == "index_project_context":
                 prepared_params['vector_context_service'] = self.vector_context_service
             elif action_id == "create_project":
@@ -142,7 +143,10 @@ class ExecutorService:
                 if action_id == "create_project" and "Successfully created" in result:
                     project_name = prepared_params['project_name']
                     project_path = str(self.project_manager.active_project_path)
+                    self.project_manager._update_project_context()
                     self.event_bus.publish(ProjectCreated(project_name=project_name, project_path=project_path))
+                elif action_id == "run_shell_command" and prepared_params.get('command') == 'python -m venv venv':
+                    self.project_manager._update_project_context()
                 elif action_id == "write_file" and "Successfully wrote" in result:
                     file_path = prepared_params.get("path")
                     content = prepared_params.get("content", "")
