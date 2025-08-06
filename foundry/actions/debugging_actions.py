@@ -9,7 +9,7 @@ import sys
 import json
 import pprint
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from services.project_context import ProjectContext
 
@@ -67,15 +67,11 @@ def pytest_runtest_call(item):
                 frame = tb_cursor.tb_frame
                 filename = Path(frame.f_code.co_filename)
 
-                # Only include frames that are within the project's directory
-                # to avoid clutter from standard library or site-packages.
                 is_in_project = False
                 try:
-                    # is_relative_to is Python 3.9+
                     if filename.is_relative_to(project_root):
                         is_in_project = True
                 except (ValueError, AttributeError):
-                    # Fallback for older python or different drives on Windows
                     if str(project_root) in str(filename):
                         is_in_project = True
 
@@ -90,11 +86,19 @@ def pytest_runtest_call(item):
 
             tb_string = "".join(traceback.format_exception(exc_type, exc_value, tb))
 
-            report_data = {
+            # This is the detailed report specific to the debugger
+            debugger_report = {
                 "exception_type": str(exc_type.__name__),
                 "exception_value": str(exc_value),
                 "traceback_string": tb_string,
                 "stack": frames,
+            }
+
+            # This is the standardized report structure
+            report_data = {
+                "status": "failure",
+                "summary": "Test failed with an exception.",
+                "debugger_report": debugger_report
             }
 
             try:
@@ -103,17 +107,16 @@ def pytest_runtest_call(item):
                     json.dump(report_data, f, indent=2)
             except Exception as e:
                 print(f"Aura Debugger Hook Error: Failed to write to {output_path}: {e}")
-
-    # We do not raise here. Let pytest handle its own reporting flow after we're done.
 """
 
 
-def run_with_debugger(project_context: ProjectContext, path: Optional[str] = None) -> str:
+def run_with_debugger(project_context: ProjectContext, path: Optional[str] = None) -> Dict[str, Any]:
     """
     Runs pytest with a debugger hook to capture detailed state on failure.
+    Returns a structured JSON result.
     """
     if not project_context:
-        return "Error: Cannot run debugger. No active project context."
+        return {"status": "error", "summary": "Cannot run debugger. No active project context."}
 
     working_dir = Path(project_context.project_root)
     target = path or "the project"
@@ -123,69 +126,31 @@ def run_with_debugger(project_context: ProjectContext, path: Optional[str] = Non
     conftest_path = working_dir / "aura_debugger_conftest.py"
     output_path = working_dir / "aura_debug_output.json"
 
-    return_value = ""  # The value to be returned at the end.
-
     try:
-        # Step 1: Write the dynamic conftest file into the target project
         conftest_path.write_text(DEBUGGER_CONTEST_CODE, encoding='utf-8')
-        logger.info(f"Created temporary debugger plugin at {conftest_path}")
-
-        # Step 2: Build and run the pytest command, loading our plugin
-        command = [
-            python_executable, "-m", "pytest",
-            "-p", "aura_debugger_conftest"
-        ]
+        command = [python_executable, "-m", "pytest", "-p", "aura_debugger_conftest"]
         if path:
             command.append(path)
 
         result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,  # We handle the non-zero exit code ourselves
-            cwd=str(working_dir)
+            command, capture_output=True, text=True, check=False, cwd=str(working_dir)
         )
 
-        # Step 3: Check if the debugger hook created its output file
         if output_path.exists():
-            logger.info("Test failure detected. Reading full debug report from Omniscient Debugger.")
+            logger.info("Test failure detected. Reading full debug report.")
             with open(output_path, 'r', encoding='utf-8') as f:
-                debug_data = json.load(f)
-
-            # Step 4: Format the rich debug info into a single string for the LLM
-            report = [
-                "❌ Tests failed! The Omniscient Debugger captured the following state:",
-                "--- EXCEPTION ---",
-                f"Type: {debug_data['exception_type']}",
-                f"Value: {debug_data['exception_value']}",
-                "\n--- FULL STACK TRACE ---",
-                debug_data['traceback_string'],
-                "\n--- LOCAL VARIABLES (Most Recent Call First) ---"
-            ]
-
-            for frame in reversed(debug_data.get('stack', [])):
-                report.append(f"\n[File: '{frame['file']}', Line: {frame['line']}, In: `{frame['function']}`]")
-                locals_str = pprint.pformat(frame['locals'], indent=2, width=120, sort_dicts=False)
-                report.append(locals_str)
-
-            return_value = "\n".join(report)
-
+                return json.load(f)
         else:
-            # Step 5: If no debug file, tests passed or another error occurred
-            output = result.stdout + "\n" + result.stderr
             if result.returncode == 0:
-                return_value = f"✅ All tests passed!\n\n{output}"
+                return {"status": "success", "summary": "All tests passed."}
             else:
-                return_value = f"⚠️ Tests failed, but the debugger did not generate a report. Standard pytest output:\n\n{output}"
+                return {"status": "error", "summary": "Tests failed, but debugger did not generate a report.", "full_output": result.stdout + result.stderr}
 
     except Exception as e:
         error_message = f"An unexpected error occurred while running the debugger: {e}"
         logger.exception(error_message)
-        return_value = error_message
+        return {"status": "error", "summary": error_message}
     finally:
-        # Step 6: Always clean up the temporary files
         conftest_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
         logger.info("Cleaned up temporary debugger files.")
-
-    return return_value

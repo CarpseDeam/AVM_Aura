@@ -6,7 +6,8 @@ handling all HTTP request logic.
 import logging
 import json
 import requests
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
+
 from .base import LLMProvider
 from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
 from services.config_manager import ConfigManager
@@ -17,9 +18,6 @@ logger = logging.getLogger(__name__)
 class OllamaProvider(LLMProvider):
     """
     An LLM provider for local models served via the Ollama API.
-
-    This provider simulates tool-calling by constructing a strict system prompt
-    that instructs the model to return a JSON object when it needs to use a tool.
     """
 
     def __init__(self, config: ConfigManager) -> None:
@@ -31,39 +29,16 @@ class OllamaProvider(LLMProvider):
         logger.info(
             f"OllamaProvider initialized for model '{self.model_name}' at {self.api_url} with temps (Plan: {self.plan_temperature}, Build: {self.build_temperature})")
 
-    def _create_system_prompt(
-            self,
-            mode: str,
-            context: Optional[Dict[str, str]],
-            tools: Optional[List[Dict[str, Any]]],
-    ) -> str:
-        """
-        Creates a system prompt incorporating role, context, and/or tool instructions.
-        """
-        if mode == 'plan':
-            role_prompt = ARCHITECT_SYSTEM_PROMPT
-        elif mode == 'build':
-            role_prompt = OPERATOR_SYSTEM_PROMPT
-        else:
-            raise ValueError(f"Unknown mode '{mode}' provided to OllamaProvider.")
-
+    def _create_system_prompt(self, mode: str, context: Optional[Dict[str, str]], tools: Optional[List[Dict[str, Any]]]) -> str:
+        role_prompt = ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT
         prompt_parts = [role_prompt]
-
         if context:
-            context_header = "You have the following information in your working memory. Use it to inform your actions."
-            context_block_parts = ["--- CONTEXT ---"]
-            for key, content in context.items():
-                context_block_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
-            context_block_parts.append("--- END CONTEXT ---")
-
-            full_context_block = f"{context_header}\n\n" + "\n".join(context_block_parts)
-            prompt_parts.append(full_context_block)
-
+            context_block = "\n".join([f"Content of file '{k}':\n```\n{v}\n```" for k, v in context.items()])
+            prompt_parts.append(f"--- CONTEXT ---\n{context_block}\n--- END CONTEXT ---")
         if tools:
             tool_definitions = json.dumps(tools, indent=2)
-            tool_block = f"Here are the available tools:\n{tool_definitions}"
+            tool_block = f"Here are the available tools you can call in your JSON response:\n{tool_definitions}"
             prompt_parts.append(tool_block)
-
         return "\n\n".join(prompt_parts)
 
     def get_response(
@@ -72,67 +47,52 @@ class OllamaProvider(LLMProvider):
             mode: str,
             context: Optional[Dict[str, str]] = None,
             tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        Sends the prompt to the Ollama /api/generate endpoint and returns the response.
+        Sends the prompt to the Ollama /api/generate endpoint and returns a structured response.
         """
         temp = self.plan_temperature if mode == 'plan' else self.build_temperature
-
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temp
-            }
-        }
-
         system_prompt = self._create_system_prompt(mode, context, tools)
-        if system_prompt:
-            payload["system"] = system_prompt
-            logger.debug(f"Injecting system prompt for mode '{mode}'.")
-
-        if mode == 'build':
+        payload = {"model": self.model_name, "prompt": prompt, "system": system_prompt, "stream": False, "options": {"temperature": temp}}
+        is_json_mode = mode == 'build' or (mode == 'plan' and tools)
+        if is_json_mode:
             payload["format"] = "json"
-            logger.debug("Build mode active. Requesting JSON format.")
 
-        logger.debug(f"Sending payload to Ollama: {payload}")
+        structured_response = {"text": None, "tool_calls": []}
 
         try:
             response = requests.post(self.api_url, json=payload, timeout=120)
             response.raise_for_status()
+            raw_response = response.json().get("response", "").strip()
 
-            response_data = response.json()
-            text_response = response_data.get("response", "").strip()
+            if not raw_response:
+                structured_response["text"] = "Error: Received an empty response from Ollama."
+                return structured_response
 
-            if not text_response:
-                logger.warning("Ollama response was empty.")
-                return "Error: Received an empty response from Ollama."
-
-            if payload.get("format") == "json":
+            if is_json_mode:
                 try:
-                    if isinstance(text_response, str):
-                        parsed_json = json.loads(text_response)
-                    else:
-                        parsed_json = text_response
+                    data = json.loads(raw_response)
+                    # For plan mode, we look for a text explanation inside the JSON
+                    if mode == 'plan' and 'reasoning' in data:
+                        structured_response['text'] = data.pop('reasoning')
 
-                    if isinstance(parsed_json, dict) and ("tool_name" in parsed_json or "plan" in parsed_json):
-                        logger.info("Ollama simulated a tool call or plan.")
-                        return parsed_json
-                    else:
-                        logger.info("Ollama returned valid JSON, but it was not a tool call. Treating as text.")
-                        return json.dumps(parsed_json, indent=2)
+                    # The remaining data is assumed to be a tool call or plan
+                    if "tool_name" in data:
+                        structured_response["tool_calls"].append(data)
+                    elif "plan" in data and isinstance(data['plan'], list):
+                        structured_response["tool_calls"] = data['plan']
                 except json.JSONDecodeError:
-                    if mode == 'build':
-                        logger.warning("Ollama did not return valid JSON for a tool call in 'build' mode.")
-                    return text_response
+                    structured_response["text"] = raw_response
+            else:
+                structured_response["text"] = raw_response
 
-            logger.info("Successfully received text response from Ollama.")
-            return text_response
+            return structured_response
 
         except requests.exceptions.RequestException as e:
             logger.error(f"An HTTP error occurred while communicating with Ollama: {e}", exc_info=True)
-            return f"Error communicating with Ollama server: {e}"
+            structured_response["text"] = f"Error communicating with Ollama server: {e}"
+            return structured_response
         except Exception as e:
             logger.error(f"An unexpected error occurred in OllamaProvider: {e}", exc_info=True)
-            return f"An unexpected error occurred: {e}"
+            structured_response["text"] = f"An unexpected error occurred: {e}"
+            return structured_response

@@ -2,11 +2,13 @@
 import logging
 import threading
 import time
-from typing import Optional, Callable, Dict
+import json
+from typing import Optional, Callable, Dict, Any
 
 from event_bus import EventBus
 from events import UserPromptEntered, AgentTaskCompleted
 from .prompt_engine import PromptEngine
+from foundry.actions.code_quality_actions import lint_file
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +37,6 @@ class TaskAgent:
 
     def _unsubscribe_from_completion(self):
         self._is_active = False
-        # This is tricky due to multithreading. A simple flag is safer than
-        # trying to unsubscribe during an event callback cycle.
 
     def _handle_task_completed(self, event: AgentTaskCompleted):
         if self._is_active and event.task_id == self.task_id:
@@ -56,68 +56,79 @@ class TaskAgent:
             return None
         return self._last_result
 
-    def _is_successful_outcome(self, result_text: str) -> bool:
-        """
-        Checks if the result of a plan execution indicates success.
-        Success can be passing tests or a successful shell command execution.
-        """
-        if not isinstance(result_text, str):
-            return False
-
-        # keywords for successful test runs
-        test_success_keywords = ["all tests passed", "passed in"]
-        # keywords for successful shell commands (like running main.py)
-        shell_success_keywords = ["command executed successfully"]
-
-        lower_text = result_text.lower()
-
-        if any(keyword in lower_text for keyword in test_success_keywords):
-            return True
-        if any(keyword in lower_text for keyword in shell_success_keywords):
-            return True
-
-        return False
+    def _run_linting_check(self, file_paths: Dict[str, str]) -> Optional[str]:
+        linting_errors = []
+        for file_path in file_paths.values():
+            if file_path.endswith('.py'):
+                self.display(f"Checking code quality for {file_path}...", "avm_info")
+                lint_result = lint_file(file_path)
+                if "No issues found" not in lint_result:
+                    linting_errors.append(f"--- LINTING ERRORS for {file_path} ---\n{lint_result}")
+        return "\n".join(linting_errors) if linting_errors else None
 
     def execute(self, mission_goal: str) -> Optional[Dict[str, str]]:
-        """
-        Executes the full TDD & Linting loop for the assigned task.
-        Returns a dictionary of new file paths and their content if successful,
-        otherwise returns None.
-        """
         self._subscribe_to_completion()
         self.display(f"▶️ Agent assigned to task {self.task_id}: {self.description}", "avm_executing")
 
-        max_attempts = 3
+        max_attempts = 5
         current_prompt_text = self.description
         mission_context = {}
 
         for attempt in range(max_attempts):
-            self.display(f"--- TDD Attempt {attempt + 1}/{max_attempts} for Task {self.task_id} ---", "avm_info")
+            self.display(f"--- Agent Attempt {attempt + 1}/{max_attempts} for Task {self.task_id} ---", "avm_info")
 
             prompt = self.prompt_engine.create_prompt(
                 user_prompt=current_prompt_text,
                 mission_goal=mission_goal,
                 mission_context=mission_context
             )
-
             result_event = self._execute_sub_phase(prompt)
 
-            if not result_event or not result_event.result:
-                self.display(f"❌ Agent for task {self.task_id} received no result from LLM. Aborting.", "avm_error")
+            if not result_event or not isinstance(result_event.result, dict):
+                self.display(f"❌ Agent for task {self.task_id} received invalid result. Aborting.", "avm_error")
                 break
 
-            final_output_text = str(result_event.result)
-            if self._is_successful_outcome(final_output_text):
-                self.display(f"✅ Task {self.task_id} completed successfully!", "avm_executing")
-                self._unsubscribe_from_completion()
-                return result_event.file_paths
-            else:
+            run_result = result_event.result
+            status = run_result.get("status")
+
+            if status == "success":
+                self.display("✅ Tests passed! Checking code quality...", "avm_executing")
+                linting_report = self._run_linting_check(result_event.file_paths)
+                if linting_report:
+                    self.display("⚠️ Code quality issues found. Requesting fixes...", "avm_warning")
+                    current_prompt_text = (
+                        "Your code is functionally correct, but has style issues. "
+                        "Fix these linting errors without changing functionality:\n\n"
+                        f"{linting_report}"
+                    )
+                    continue
+                else:
+                    self.display("✨ Code quality check passed! Task complete.", "avm_executing")
+                    self._unsubscribe_from_completion()
+                    return result_event.file_paths
+
+            elif status == "failure":
+                self.display(f"❌ Tests failed. Analyzing report...", "avm_error")
+                # Create a very specific prompt for fixing the error
+                error_report = json.dumps(run_result, indent=2)
                 current_prompt_text = (
-                    "Your previous attempt failed. Fix the following error:\n\n"
-                    f"--- ERROR REPORT ---\n{final_output_text}\n--- END REPORT ---"
+                    "Your previous attempt failed the tests. Analyze this structured report and fix the bug. "
+                    "Focus only on the failing code.\n\n"
+                    f"--- STRUCTURED ERROR REPORT ---\n{error_report}\n--- END REPORT ---"
                 )
-                self.display(f"❌ Attempt {attempt + 1} failed for task {self.task_id}. Analyzing...", "avm_error")
                 time.sleep(2)
+                continue
+
+            else:  # Handle 'error' or 'no_tests_found' or other unexpected statuses
+                self.display(
+                    f"⚠️ Task {self.task_id} resulted in an inconclusive state: {status}. Summary: {run_result.get('summary')}",
+                    "avm_warning")
+                current_prompt_text = (
+                    "Your previous attempt was inconclusive. Please try to accomplish the original task again, "
+                    "ensuring you create both implementation and test files. "
+                    f"Original task: '{self.description}'"
+                )
+                continue
 
         self.display(f"💔 Task {self.task_id} failed after {max_attempts} attempts.", "avm_error")
         self._unsubscribe_from_completion()

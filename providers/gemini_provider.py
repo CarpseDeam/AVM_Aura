@@ -4,7 +4,7 @@ Implement the LLMProvider interface for Google's Gemini models,
 encapsulating all API-specific logic, including native tool-calling.
 """
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
 from .base import LLMProvider
@@ -40,74 +40,58 @@ class GeminiProvider(LLMProvider):
             mode: str,
             context: Optional[Dict[str, str]] = None,
             tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        Sends the prompt to the Gemini API and returns the response.
+        Sends the prompt to the Gemini API and returns a structured response dictionary.
         """
-        if mode == 'plan':
-            system_instruction = ARCHITECT_SYSTEM_PROMPT
-            temp = self.plan_temperature
-        elif mode == 'build':
-            system_instruction = OPERATOR_SYSTEM_PROMPT
-            temp = self.build_temperature
-        else:
-            raise ValueError(f"Unknown mode '{mode}' provided to GeminiProvider.")
+        system_instruction = ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT
+        temp = self.plan_temperature if mode == 'plan' else self.build_temperature
 
         final_prompt = prompt
         if context:
-            context_parts = ["--- CONTEXT ---"]
-            for key, content in context.items():
-                context_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
-            context_parts.append("--- END CONTEXT ---")
-            context_str = "\n\n".join(context_parts)
-            final_prompt = f"{context_str}\n\nUser Prompt: {prompt}"
+            context_str = "\n\n".join([f"Content of file '{k}':\n```\n{v}\n```" for k, v in context.items()])
+            final_prompt = f"--- CONTEXT ---\n{context_str}\n--- END CONTEXT ---\n\nUser Prompt: {prompt}"
             logger.info(f"Injecting context for {len(context)} files into the Gemini prompt.")
-        else:
-            logger.debug("No context provided for Gemini prompt.")
 
-        logger.debug(f"Sending prompt to Gemini model in '{mode}' mode with temp {temp}: '{final_prompt[:200]}...'")
+        logger.debug(f"Sending prompt to Gemini in '{mode}' mode (temp: {temp}): '{final_prompt[:200]}...'")
 
         try:
             generation_config = genai.GenerationConfig(temperature=temp)
-            model = genai.GenerativeModel(
-                self.model_name,
-                system_instruction=system_instruction,
-                generation_config=generation_config
-            )
-
+            model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction, generation_config=generation_config)
             response = model.generate_content(final_prompt, tools=tools)
 
-            if (
-                    response.candidates
-                    and response.candidates[0].content.parts
-                    and hasattr(response.candidates[0].content.parts[0], "function_call")
-            ):
-                tool_call = response.candidates[0].content.parts[0].function_call
-                if tool_call and tool_call.name:
-                    arguments = dict(tool_call.args)
-                    logger.info(f"Gemini model invoked tool: '{tool_call.name}' with args: {arguments}")
-                    if tool_call.name == 'plan':
-                        return arguments
+            structured_response = {"text": None, "tool_calls": []}
 
-                    return {
-                        "tool_name": tool_call.name,
-                        "arguments": arguments,
-                    }
+            if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, "function_call"):
+                        fc = part.function_call
+                        # --- THIS IS THE FIX ---
+                        # Explicitly check if the function call has a name before processing.
+                        if fc.name:
+                            arguments = dict(fc.args) if fc.args else {}
+                            tool_call_dict = {"tool_name": fc.name, "arguments": arguments}
+                            structured_response["tool_calls"].append(tool_call_dict)
+                            logger.info(f"Gemini response included a tool call: {fc.name}")
+                        else:
+                            logger.warning("Gemini API returned a malformed tool call with no name. Discarding.")
 
-            if hasattr(response, "text"):
-                if mode == 'plan':
-                    return response.text
-                logger.warning("Gemini returned a text response despite strict tool-use instructions in 'build' mode.")
-                return response.text
+            try:
+                if hasattr(response, "text") and response.text:
+                    structured_response["text"] = response.text
+            except ValueError as e:
+                logger.debug(f"Suppressed Gemini API ValueError - response was tool-call only: {e}")
+                if not structured_response["tool_calls"]:
+                    structured_response["text"] = f"Warning: Could not extract text from Gemini response. {e}"
+
 
             if response.prompt_feedback and response.prompt_feedback.block_reason:
                 reason = response.prompt_feedback.block_reason.name
-                logger.warning(f"Gemini response was blocked. Reason: {reason}")
-                return f"Error: Gemini response blocked due to safety filters. Reason: {reason}"
+                structured_response["text"] = f"Error: Gemini response blocked due to safety filters. Reason: {reason}"
+                logger.warning(f"Gemini response blocked. Reason: {reason}")
 
-            logger.warning(f"Gemini response did not contain text or a tool call. Full response: {response}")
-            return "Error: Gemini response was empty."
+            return structured_response
 
         except Exception as e:
             logger.error(f"An error occurred with the Gemini API: {e}", exc_info=True)
-            return f"An error occurred with the Gemini API: {e}"
+            return {"text": f"An error occurred with the Gemini API: {e}", "tool_calls": []}

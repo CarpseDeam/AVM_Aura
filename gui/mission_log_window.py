@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QScrollArea, QFrame
 )
-from PySide6.QtCore import Qt, QSize, Slot
+from PySide6.QtCore import Qt, QSize, Slot, Signal
 from PySide6.QtGui import QIcon, QFont
 
 from event_bus import EventBus
@@ -21,6 +21,8 @@ class MissionLogWindow(QMainWindow):
     """
     A pop-out window to display and manage the project's Mission Log.
     """
+    # Signal to safely update the UI from another thread
+    update_tasks_signal = Signal(list)
 
     def __init__(self, event_bus: EventBus):
         super().__init__()
@@ -35,8 +37,17 @@ class MissionLogWindow(QMainWindow):
 
         self.task_widgets: Dict[int, TaskWidget] = {}
         self._init_ui()
-        self.event_bus.subscribe(MissionLogUpdated, self.update_tasks)
-        # self.event_bus.subscribe(MissionTaskProgressUpdate, self.on_task_progress_update) # Temporarily commented out
+
+        # Connect the signal to the slot that updates the UI
+        self.update_tasks_signal.connect(self.handle_task_update)
+
+        # Subscribe the event handler that will emit the signal
+        self.event_bus.subscribe(MissionLogUpdated, self.on_mission_log_updated)
+
+    def on_mission_log_updated(self, event: MissionLogUpdated):
+        """Event handler that receives updates from any thread."""
+        # Emit the signal to pass the data to the main UI thread safely
+        self.update_tasks_signal.emit(event.tasks)
 
     def _init_ui(self):
         """Builds the user interface."""
@@ -70,11 +81,9 @@ class MissionLogWindow(QMainWindow):
             #SeparatorLine { color: #333; }
         """)
 
-        # --- Main Layout ---
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(10)
 
-        # --- Scroll Area Setup ---
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; }")
@@ -83,13 +92,11 @@ class MissionLogWindow(QMainWindow):
         self.scroll_content_layout = QVBoxLayout(scroll_content_widget)
         self.scroll_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # --- Pending Tasks Layout ---
         self.pending_tasks_layout = QVBoxLayout()
         self.pending_tasks_layout.setSpacing(5)
         self.scroll_content_layout.addLayout(self.pending_tasks_layout)
-        self.scroll_content_layout.addStretch(1) # Pushes completed section down
+        self.scroll_content_layout.addStretch(1)
 
-        # --- Completed Section ---
         self.separator = QFrame()
         self.separator.setFrameShape(QFrame.Shape.HLine)
         self.separator.setFrameShadow(QFrame.Shadow.Sunken)
@@ -100,7 +107,9 @@ class MissionLogWindow(QMainWindow):
         self.toggle_completed_button.setObjectName("ToggleCompletedButton")
         self.toggle_completed_button.setCheckable(True)
         self.toggle_completed_button.clicked.connect(self._on_toggle_completed)
-        font = self.toggle_completed_button.font(); font.setBold(True); self.toggle_completed_button.setFont(font)
+        font = self.toggle_completed_button.font();
+        font.setBold(True);
+        self.toggle_completed_button.setFont(font)
         self.scroll_content_layout.addWidget(self.toggle_completed_button)
 
         self.completed_tasks_container = QWidget()
@@ -111,7 +120,6 @@ class MissionLogWindow(QMainWindow):
 
         main_layout.addWidget(scroll_area, 1)
 
-        # --- Input and Dispatch Controls ---
         bottom_frame = QFrame()
         bottom_layout = QVBoxLayout(bottom_frame)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
@@ -132,7 +140,6 @@ class MissionLogWindow(QMainWindow):
         bottom_layout.addWidget(self.dispatch_button)
         main_layout.addWidget(bottom_frame)
 
-        # Set initial visibility
         self.completed_tasks_container.hide()
         self.separator.hide()
         self.toggle_completed_button.hide()
@@ -144,15 +151,15 @@ class MissionLogWindow(QMainWindow):
             if widget:
                 widget.deleteLater()
 
-    @Slot(MissionLogUpdated)
-    def update_tasks(self, event: MissionLogUpdated):
-        """Clears and redraws both task lists from the event data."""
+    @Slot(list)
+    def handle_task_update(self, tasks: List[Dict[str, Any]]):
+        """This slot is guaranteed to run on the main UI thread."""
         self._clear_layout(self.pending_tasks_layout)
         self._clear_layout(self.completed_tasks_layout)
         self.task_widgets.clear()
 
-        completed_tasks = [task for task in event.tasks if task.get('done')]
-        pending_tasks = [task for task in event.tasks if not task.get('done')]
+        completed_tasks = [task for task in tasks if task.get('done')]
+        pending_tasks = [task for task in tasks if not task.get('done')]
 
         for task_data in pending_tasks:
             self._create_and_add_task_widget(task_data, self.pending_tasks_layout)
@@ -169,7 +176,7 @@ class MissionLogWindow(QMainWindow):
         task_widget = TaskWidget(
             task_id=task_data['id'],
             description=task_data['description'],
-            is_done=task_data['done']
+            is_done=task_data.get('done', False)
         )
         task_widget.task_state_changed.connect(self._on_task_state_changed)
         layout.addWidget(task_widget)

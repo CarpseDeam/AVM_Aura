@@ -5,7 +5,7 @@ ensuring architectural consistency.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +24,21 @@ class LLMProvider(ABC):
         mode: str,
         context: Optional[Dict[str, str]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        Get a response from the LLM, optionally with tool-calling capabilities
-        and a stateful context.
+        Get a response from the LLM, optionally with tool-calling capabilities.
 
         Args:
             prompt: The user's input prompt.
-            mode: The interaction mode ('plan' or 'build'), which determines
-                  the AI's personality and response format.
-            context: An optional dictionary containing contextual information,
-                     such as the content of previously read files. This allows
-                     for stateful conversations.
-            tools: An optional list of tool definitions that the LLM can use.
-                   Each tool is a dictionary describing its name, description,
-                   and parameters.
+            mode: The interaction mode ('plan' or 'build').
+            context: Optional dictionary with contextual info (e.g., file contents).
+            tools: Optional list of tool definitions for the LLM.
 
         Returns:
-            A string containing the text response from the LLM, or a dictionary
-            representing a tool call if the LLM decides to use a tool.
+            A dictionary with a standardized structure:
+            {
+                "text": Optional[str],       # The conversational part of the response
+                "tool_calls": Optional[list] # A list of tool call dictionaries
+            }
         """
         pass

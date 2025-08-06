@@ -31,56 +31,36 @@ class InstructionFactory:
             return [self._deep_convert_proto_maps(item) for item in data]
         return data
 
-    def create_instruction(self, llm_response: Union[str, Dict[str, Any]]) -> Optional[
+    def create_instruction(self, llm_tool_calls: Optional[List[Dict[str, Any]]]) -> Optional[
         Union[BlueprintInvocation, List[BlueprintInvocation]]]:
         """
-        Parses the raw LLM response and attempts to build a valid instruction or plan.
+        Parses a list of raw LLM tool calls and attempts to build a valid instruction or plan.
         Returns the instruction or None, but does NOT display anything.
         """
-        logger.info("Attempting to create instruction from LLM response.")
-        data = None
-        if isinstance(llm_response, str):
-            try:
-                data = json.loads(llm_response)
-            except json.JSONDecodeError:
-                logger.warning("LLM response was a string but not valid JSON.")
-                return None  # Not a valid instruction, but not an error either.
-        elif isinstance(llm_response, dict):
-            data = llm_response
-        else:
-            logger.error(f"Unexpected response type from provider: {type(llm_response).__name__}")
+        if not llm_tool_calls:
             return None
 
-        if not isinstance(data, dict):
-             logger.warning(f"Parsed JSON is not a dictionary: {type(data).__name__}")
-             return None
+        # If there's only one tool call, return it as a single invocation.
+        if len(llm_tool_calls) == 1:
+            return self.create_single_invocation_from_data(llm_tool_calls[0])
 
-        # Check for a multi-step plan first.
-        if "plan" in data and isinstance(data.get("plan"), list):
-            return self._create_plan_from_data(data["plan"])
-
-        # Check for a single tool call.
-        if "tool_name" in data:
-            return self._create_single_invocation_from_data(data)
-
-        # The data was a valid dict, but not in a recognized instruction format.
-        logger.warning("LLM response was valid JSON but not a recognized tool call or plan.")
-        return None
+        # If there are multiple, it's a plan.
+        return self._create_plan_from_data(llm_tool_calls)
 
     def _create_plan_from_data(self, plan_data: List[Dict]) -> Optional[List[BlueprintInvocation]]:
         """Validates a list of tool calls and converts it into a plan."""
         plan_invocations: List[BlueprintInvocation] = []
         logger.info(f"LLM has proposed a {len(plan_data)}-step plan. Validating...")
         for i, step in enumerate(plan_data):
-            invocation = self._create_single_invocation_from_data(step)
+            invocation = self.create_single_invocation_from_data(step)
             if not invocation:
                 logger.error(f"Invalid tool call data in plan step {i + 1}: {step}")
-                return None  # The entire plan is invalid if one step fails.
+                return None
             plan_invocations.append(invocation)
         logger.info("Plan validated successfully.")
         return plan_invocations
 
-    def _create_single_invocation_from_data(self, data: Dict) -> Optional[BlueprintInvocation]:
+    def create_single_invocation_from_data(self, data: Dict) -> Optional[BlueprintInvocation]:
         """Validates a single tool call dictionary and creates a BlueprintInvocation."""
         tool_name = data.get("tool_name")
         if not tool_name:

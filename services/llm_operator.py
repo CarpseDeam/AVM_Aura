@@ -4,7 +4,8 @@ from typing import Callable, Optional, List
 
 from event_bus import EventBus
 from events import (
-    ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered, PlanApproved, PlanDenied, BlueprintInvocation
+    ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered, PlanApproved, PlanDenied, BlueprintInvocation,
+    DirectToolInvocationRequest
 )
 from providers import LLMProvider
 from .prompt_engine import PromptEngine
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class LLMOperator:
     """
     Orchestrates LLM interactions by coordinating the prompt engine, LLM provider,
-    and instruction factory. Includes retry logic for invalid responses.
+    and instruction factory.
     """
 
     def __init__(
@@ -51,55 +52,56 @@ class LLMOperator:
         self._display(f"🧠 Thinking ({mode} mode)...", "system_message")
 
         try:
-            # For agent tasks, the prompt is pre-built by the TaskAgent.
-            # For user prompts, the engine adds general context.
-            if is_agent_task:
-                current_prompt = event.prompt_text
-            else:
-                current_prompt = self.prompt_engine.create_prompt(user_prompt=event.prompt_text)
+            current_prompt = event.prompt_text if is_agent_task else self.prompt_engine.create_prompt(
+                user_prompt=event.prompt_text)
 
             tool_definitions = None
             if mode == 'build':
                 all_tools = self.foundry_manager.get_llm_tool_definitions()
-                if "ERROR REPORT" in current_prompt or "DEBUGGER REPORT" in current_prompt:
-                    logger.info("Debugger context detected. Filtering for only the 'write_file' tool.")
-                    tool_definitions = [tool for tool in all_tools if tool.get("name") == "write_file"]
+                if "ERROR REPORT" in current_prompt or "DEBUGGER REPORT" in current_prompt or "LINTING ERRORS" in current_prompt:
+                    tool_definitions = [t for t in all_tools if t.get("name") == "write_file"]
                 else:
                     tool_definitions = [t for t in all_tools if 'mission_log' not in t.get("name")]
+            elif mode == 'plan':
+                architect_tools = ['add_task_to_mission_log', 'create_new_tool']
+                tool_definitions = [t for t in self.foundry_manager.get_llm_tool_definitions() if
+                                    t.get("name") in architect_tools]
 
             response, instruction = None, None
             for attempt in range(self.max_retries + 1):
                 if attempt > 0:
-                    self._display(f"LLM response was invalid. Retrying ({attempt}/{self.max_retries})...", "avm_warning")
+                    self._display(f"LLM response was invalid. Retrying ({attempt}/{self.max_retries})...",
+                                  "avm_warning")
+
                 response = self.provider.get_response(prompt=current_prompt, mode=mode, tools=tool_definitions)
 
                 if mode == 'build':
-                    instruction = self.instruction_factory.create_instruction(response)
+                    instruction = self.instruction_factory.create_instruction(response.get("tool_calls"))
                     if instruction:
-                        logger.info(f"Successfully created instruction on attempt {attempt + 1}.")
                         break
-                    else:
-                        current_prompt = (
-                            "Your previous response was not a valid JSON tool call or plan. You MUST respond with "
-                            f"ONLY a single, valid JSON object. Original request: {event.prompt_text}"
-                        )
+                    current_prompt = f"Your previous response was not a valid JSON tool call. Please try again. Original request: {event.prompt_text}"
                 else:
                     break
 
-            if mode == 'plan':
-                self._display(f"💬 Aura:\n{response}", "avm_response")
-                return
+            if response.get("text"):
+                self._display(f"💬 Aura:\n{response['text']}", "avm_response")
 
-            if instruction:
-                if not event.auto_approve_plan and isinstance(instruction, list):
-                    self.event_bus.publish(PlanReadyForApproval(plan=instruction))
-                else:
-                    self.event_bus.publish(ActionReadyForExecution(instruction=instruction, task_id=event.task_id))
-            else:
-                final_error = ("Aura failed to generate a valid plan after multiple attempts. "
-                               f"The last response was:\n{response}")
-                logger.error(final_error)
-                self._display(f"❌ {final_error}", "avm_error")
+            if response.get("tool_calls"):
+                if mode == 'plan':
+                    for tool_call in response["tool_calls"]:
+                        invocation = self.instruction_factory.create_single_invocation_from_data(tool_call)
+                        if invocation:
+                            self.event_bus.publish(DirectToolInvocationRequest(tool_id=invocation.blueprint.id,
+                                                                               params=invocation.parameters))
+                elif mode == 'build' and instruction:
+                    if not event.auto_approve_plan and isinstance(instruction, list):
+                        self.event_bus.publish(PlanReadyForApproval(plan=instruction))
+                    else:
+                        self.event_bus.publish(ActionReadyForExecution(instruction=instruction, task_id=event.task_id))
+
+            if mode == 'build' and not instruction:
+                self._display(f"❌ Aura failed to generate a valid plan. Last response: {response.get('text')}",
+                              "avm_error")
 
         except Exception as e:
             logger.error(f"Error processing prompt in LLMOperator: {e}", exc_info=True)

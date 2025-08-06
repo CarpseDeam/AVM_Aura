@@ -38,10 +38,6 @@ class MissionManager:
         logger.info("MissionManager (Conductor) initialized.")
 
     def handle_user_prompt(self, event: UserPromptEntered):
-        """
-        When a user prompt comes in (not from an agent), we treat it as a potential
-        high-level goal for a future mission.
-        """
         if event.task_id is None:
             self._last_user_prompt = event.prompt_text
             logger.info(f"Captured user prompt for potential mission goal: '{self._last_user_prompt[:100]}...'")
@@ -51,10 +47,8 @@ class MissionManager:
             self.display_callback("Mission is already in progress.", "avm_error")
             return
 
-        # Determine the overall goal for the mission
         overall_goal = self._last_user_prompt
-        tasks = self.mission_log_service.get_tasks()
-        pending_tasks = [task for task in tasks if not task.get('done', False)]
+        pending_tasks = [task for task in self.mission_log_service.get_tasks() if not task.get('done', False)]
 
         if not pending_tasks:
             self.display_callback("Mission log has no pending tasks. Nothing to dispatch.", "avm_warning")
@@ -84,7 +78,7 @@ class MissionManager:
 
                 agent = TaskAgent(
                     task_id=current_task['id'],
-                    task_description=current_task['description'],
+                    description=current_task['description'],
                     event_bus=self.event_bus,
                     display_callback=self.display_callback,
                     prompt_engine=self.prompt_engine
@@ -94,10 +88,11 @@ class MissionManager:
 
                 if newly_generated_code_paths:
                     self.display_callback(f"Indexing new code from task {current_task['id']}...", "avm_info")
+                    # The agent now returns absolute paths, which is what the indexer needs
                     for file_path in newly_generated_code_paths.values():
                         self.event_bus.publish(DirectToolInvocationRequest(
                             tool_id='index_project_context',
-                            params={'path': self.project_manager.resolve_path(file_path)}
+                            params={'path': file_path}
                         ))
                     time.sleep(1)
 
@@ -115,7 +110,6 @@ class MissionManager:
                 time.sleep(2)
 
             self.display_callback("🎉 All mission tasks completed successfully!", "system_message")
-
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)
             self.display_callback(f"A critical error occurred in the MissionManager: {e}", "avm_error")
