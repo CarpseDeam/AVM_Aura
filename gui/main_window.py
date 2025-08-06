@@ -180,11 +180,20 @@ class AuraMainWindow(QMainWindow):
             mission_log_service = MissionLogService(project_manager=project_manager, event_bus=self.event_bus)
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
+
+            # Create the PromptEngine here, as it's a shared dependency now
             prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
+
             instruction_factory = InstructionFactory(foundry_manager=foundry_manager)
 
-            MissionManager(event_bus=self.event_bus, mission_log_service=mission_log_service,
-                           project_manager=project_manager, display_callback=display_callback)
+            # Update the MissionManager instantiation to include the prompt_engine
+            MissionManager(
+                event_bus=self.event_bus,
+                mission_log_service=mission_log_service,
+                project_manager=project_manager,
+                display_callback=display_callback,
+                prompt_engine=prompt_engine
+            )
 
             provider_name = config_manager.get("llm_provider")
             provider = None
@@ -198,9 +207,14 @@ class AuraMainWindow(QMainWindow):
             else:
                 raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
 
-            llm_operator = LLMOperator(provider=provider, event_bus=self.event_bus, foundry_manager=foundry_manager,
-                                       prompt_engine=prompt_engine, instruction_factory=instruction_factory,
-                                       display_callback=display_callback)
+            llm_operator = LLMOperator(
+                provider=provider,
+                event_bus=self.event_bus,
+                foundry_manager=foundry_manager,
+                prompt_engine=prompt_engine,  # Pass the engine to the LLMOperator too
+                instruction_factory=instruction_factory,
+                display_callback=display_callback
+            )
 
             command_handler = CommandHandler(foundry_manager=foundry_manager, event_bus=self.event_bus,
                                              project_manager=project_manager, display_callback=display_callback,
