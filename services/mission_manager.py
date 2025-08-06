@@ -31,7 +31,6 @@ class MissionManager:
 
         self._is_mission_active = False
         self._mission_thread = None
-        self._overall_goal: str = ""
         self._last_user_prompt: str = ""
 
         self.event_bus.subscribe(MissionDispatchRequest, self.handle_dispatch_request)
@@ -43,33 +42,39 @@ class MissionManager:
         When a user prompt comes in (not from an agent), we treat it as a potential
         high-level goal for a future mission.
         """
-        if event.task_id is None:  # Only capture non-agentic prompts
+        if event.task_id is None:
             self._last_user_prompt = event.prompt_text
             logger.info(f"Captured user prompt for potential mission goal: '{self._last_user_prompt[:100]}...'")
 
     def handle_dispatch_request(self, event: MissionDispatchRequest):
-        if not self._last_user_prompt:
-            self.display_callback("No overall goal has been set. Please describe what you want to build first.", "avm_warning")
-            return
-
         if self._is_mission_active:
             self.display_callback("Mission is already in progress.", "avm_error")
             return
+
+        # Determine the overall goal for the mission
+        overall_goal = self._last_user_prompt
+        tasks = self.mission_log_service.get_tasks()
+        pending_tasks = [task for task in tasks if not task.get('done', False)]
+
+        if not pending_tasks:
+            self.display_callback("Mission log has no pending tasks. Nothing to dispatch.", "avm_warning")
+            return
+
+        if not overall_goal:
+            logger.info("No Architect goal set. Using a generic goal based on mission log.")
+            overall_goal = "Complete the tasks in the mission log to build the desired application."
 
         if not self.project_manager.is_project_active():
             self.display_callback("❌ Cannot dispatch mission. No active project.", "avm_error")
             return
 
         self._is_mission_active = True
-        self._overall_goal = self._last_user_prompt
-        self.display_callback("🚀 Mission dispatch acknowledged. Beginning autonomous execution...", "system_message")
-        self._mission_thread = threading.Thread(target=self._run_mission, daemon=True)
+        self.display_callback(f"🚀 Mission dispatch acknowledged. Goal: {overall_goal[:100]}...", "system_message")
+        self._mission_thread = threading.Thread(target=self._run_mission, args=(overall_goal,), daemon=True)
         self._mission_thread.start()
 
-    def _run_mission(self):
+    def _run_mission(self, overall_goal: str):
         try:
-            mission_context = {}  # This will now be handled by RAG
-
             while self._is_mission_active:
                 undone_tasks = [task for task in self.mission_log_service.get_tasks() if not task.get('done', False)]
                 if not undone_tasks:
@@ -85,23 +90,17 @@ class MissionManager:
                     prompt_engine=self.prompt_engine
                 )
 
-                # The agent will now use the prompt engine to build its own context-rich prompt
-                # by combining the mission goal with RAG results.
-                newly_generated_code_paths = agent.execute(self._overall_goal)
+                newly_generated_code_paths = agent.execute(overall_goal)
 
                 if newly_generated_code_paths:
-                    # SMART BATON: Index the newly created code *immediately*
-                    # so the next agent is aware of it.
                     self.display_callback(f"Indexing new code from task {current_task['id']}...", "avm_info")
                     for file_path in newly_generated_code_paths.values():
-                        # We use a direct invocation request to the executor
                         self.event_bus.publish(DirectToolInvocationRequest(
                             tool_id='index_project_context',
                             params={'path': self.project_manager.resolve_path(file_path)}
                         ))
-                    time.sleep(1) # Give a moment for indexing to process
+                    time.sleep(1)
 
-                    # Mark the task as done
                     self.event_bus.publish(
                         DirectToolInvocationRequest('mark_task_as_done', {'task_id': current_task['id']})
                     )
@@ -110,7 +109,7 @@ class MissionManager:
                         f"💔 Conductor halting mission: Agent failed to complete task {current_task['id']}.",
                         "avm_error"
                     )
-                    self._is_mission_active = False # Stop the loop
+                    self._is_mission_active = False
                     return
 
                 time.sleep(2)

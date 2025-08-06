@@ -35,9 +35,8 @@ class TaskAgent:
 
     def _unsubscribe_from_completion(self):
         self._is_active = False
-        # A bit of a workaround to avoid race conditions with event handlers
-        # This lambda ensures we don't try to unsubscribe the same method twice
-        # self.event_bus.unsubscribe(AgentTaskCompleted, self._handle_task_completed)
+        # This is tricky due to multithreading. A simple flag is safer than
+        # trying to unsubscribe during an event callback cycle.
 
     def _handle_task_completed(self, event: AgentTaskCompleted):
         if self._is_active and event.task_id == self.task_id:
@@ -57,6 +56,28 @@ class TaskAgent:
             return None
         return self._last_result
 
+    def _is_successful_outcome(self, result_text: str) -> bool:
+        """
+        Checks if the result of a plan execution indicates success.
+        Success can be passing tests or a successful shell command execution.
+        """
+        if not isinstance(result_text, str):
+            return False
+
+        # keywords for successful test runs
+        test_success_keywords = ["all tests passed", "passed in"]
+        # keywords for successful shell commands (like running main.py)
+        shell_success_keywords = ["command executed successfully"]
+
+        lower_text = result_text.lower()
+
+        if any(keyword in lower_text for keyword in test_success_keywords):
+            return True
+        if any(keyword in lower_text for keyword in shell_success_keywords):
+            return True
+
+        return False
+
     def execute(self, mission_goal: str) -> Optional[Dict[str, str]]:
         """
         Executes the full TDD & Linting loop for the assigned task.
@@ -68,35 +89,32 @@ class TaskAgent:
 
         max_attempts = 3
         current_prompt_text = self.description
-        # The agent starts with no 'mission context' of its own, it will be discovered by the prompt engine
         mission_context = {}
 
         for attempt in range(max_attempts):
             self.display(f"--- TDD Attempt {attempt + 1}/{max_attempts} for Task {self.task_id} ---", "avm_info")
 
-            # Use the PromptEngine to create the full prompt with all context
             prompt = self.prompt_engine.create_prompt(
                 user_prompt=current_prompt_text,
                 mission_goal=mission_goal,
                 mission_context=mission_context
             )
 
-            result = self._execute_sub_phase(prompt)
+            result_event = self._execute_sub_phase(prompt)
 
-            if not result or not result.result:
+            if not result_event or not result_event.result:
                 self.display(f"❌ Agent for task {self.task_id} received no result from LLM. Aborting.", "avm_error")
                 break
 
-            final_output = result.result
-            if isinstance(final_output, str) and ("All tests passed" in final_output or "passed in" in final_output):
+            final_output_text = str(result_event.result)
+            if self._is_successful_outcome(final_output_text):
                 self.display(f"✅ Task {self.task_id} completed successfully!", "avm_executing")
                 self._unsubscribe_from_completion()
-                return result.file_paths
+                return result_event.file_paths
             else:
-                # On failure, the next attempt's "user_prompt" becomes the error report.
                 current_prompt_text = (
                     "Your previous attempt failed. Fix the following error:\n\n"
-                    f"--- ERROR REPORT ---\n{str(final_output)}\n--- END REPORT ---"
+                    f"--- ERROR REPORT ---\n{final_output_text}\n--- END REPORT ---"
                 )
                 self.display(f"❌ Attempt {attempt + 1} failed for task {self.task_id}. Analyzing...", "avm_error")
                 time.sleep(2)
