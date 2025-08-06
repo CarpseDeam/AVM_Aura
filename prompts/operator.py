@@ -29,6 +29,12 @@ OPERATOR_SYSTEM_PROMPT = dedent(f"""
     - CORRECT: {{"working_directory": "sub-folder"}}
     - INCORRECT: {{"working_directory": "my-project/sub-folder"}}
 
+    **CRITICAL RULE FOR CREATING AND TESTING NEW TOOLS:**
+    When you use `create_new_tool`, you MUST also write a test file for it. The new action file is created at `foundry/actions/{{tool_name}}_action.py`. Your test file should be placed in the `tests/` directory of the project. To import the function you just created into your test, you must find its containing python module and import from that.
+    - EXAMPLE: The action function `my_tool` is in `foundry/actions/my_tool_action.py`.
+    - EXAMPLE: The test file `tests/test_my_tool.py` should import it like this: `from foundry.actions.my_tool_action import my_tool`.
+    - Do NOT import from a non-existent package like `aura`.
+
     **CRITICAL RULE FOR PROJECTS WITH DEPENDENCIES:**
     If a project requires external libraries (e.g., flask, requests), your plan MUST follow this sequence:
     1.  **`write_file`**: Create a `requirements.txt` file at the project root.

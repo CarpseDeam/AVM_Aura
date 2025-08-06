@@ -1,12 +1,15 @@
 # foundry/actions/file_system_actions.py
 """
 Contains actions related to direct file system manipulation.
+All functions in this module assume that any relative paths have been
+resolved to absolute paths by the ExecutorService before being passed in.
 """
 import logging
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
 
 def write_file(path: str, content: str) -> str:
     """Writes content to a specified file, creating directories if necessary."""
@@ -22,6 +25,7 @@ def write_file(path: str, content: str) -> str:
         error_message = f"An unexpected error occurred while writing to file {path}: {e}"
         logger.exception(error_message)
         return error_message
+
 
 def read_file(path: str) -> str:
     """Reads the content of a specified file."""
@@ -40,11 +44,12 @@ def read_file(path: str) -> str:
         logger.exception(error_message)
         return error_message
 
+
 def list_files(path: str = ".") -> str:
     """Lists files and directories at a given path."""
     try:
         if not path:
-            path = ""
+            path = "."
         logger.info(f"Listing contents of directory: {path}")
         path_obj = Path(path)
         if not path_obj.exists():
@@ -61,6 +66,7 @@ def list_files(path: str = ".") -> str:
         error_message = f"An unexpected error occurred while listing directory {path}: {e}"
         logger.exception(error_message)
         return error_message
+
 
 def create_directory(path: str) -> str:
     """Creates a new, empty directory."""
@@ -79,6 +85,7 @@ def create_directory(path: str) -> str:
         error_message = f"An unexpected error occurred while creating directory {path}: {e}"
         logger.exception(error_message)
         return error_message
+
 
 def delete_directory(path: str) -> str:
     """
@@ -103,5 +110,94 @@ def delete_directory(path: str) -> str:
         return success_message
     except Exception as e:
         error_message = f"An unexpected error occurred while deleting directory {path}: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
+def copy_file(source_path: str, destination_path: str) -> str:
+    """
+    Copies a file from a source to a destination, preserving metadata.
+    Creates parent directories for the destination if they don't exist.
+    """
+    try:
+        source = Path(source_path)
+        destination = Path(destination_path)
+        logger.info(f"Attempting to copy '{source}' to '{destination}'.")
+
+        if not source.exists():
+            error_message = f"Error: Source file not found at '{source_path}'."
+            logger.warning(error_message)
+            return error_message
+        if not source.is_file():
+            error_message = f"Error: Source path '{source_path}' is a directory, not a file. This tool only copies files."
+            logger.warning(error_message)
+            return error_message
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source), str(destination))
+
+        success_message = f"Successfully copied file from '{source_path}' to '{destination_path}'."
+        logger.info(success_message)
+        return success_message
+    except Exception as e:
+        error_message = f"An unexpected error occurred while copying file: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
+def move_file(source_path: str, destination_path: str) -> str:
+    """
+    Moves a file from a source to a destination. Can be used to rename files.
+    """
+    try:
+        source = Path(source_path)
+        destination = Path(destination_path)
+        logger.info(f"Attempting to move '{source}' to '{destination}'.")
+
+        if not source.exists():
+            error_message = f"Error: Source file not found at '{source_path}'."
+            logger.warning(error_message)
+            return error_message
+        if not source.is_file():
+            error_message = f"Error: Source path '{source_path}' is a directory, not a file. This tool only moves files."
+            logger.warning(error_message)
+            return error_message
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+
+        success_message = f"Successfully moved file from '{source_path}' to '{destination_path}'."
+        logger.info(success_message)
+        return success_message
+    except Exception as e:
+        error_message = f"An unexpected error occurred while moving file: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
+def delete_file(path: str) -> str:
+    """
+    Deletes a single file after performing safety checks.
+    """
+    try:
+        logger.info(f"Attempting to delete file: {path}")
+        path_obj = Path(path)
+
+        if not path_obj.exists():
+            error_message = f"Error: Cannot delete. File not found at '{path}'."
+            logger.warning(error_message)
+            return error_message
+
+        if not path_obj.is_file():
+            error_message = f"Error: Path '{path}' is a directory, not a file. This tool only deletes files."
+            logger.warning(error_message)
+            return error_message
+
+        path_obj.unlink()
+        success_message = f"Successfully deleted file: {path}"
+        logger.info(success_message)
+        return success_message
+    except Exception as e:
+        error_message = f"An unexpected error occurred while deleting file {path}: {e}"
         logger.exception(error_message)
         return error_message

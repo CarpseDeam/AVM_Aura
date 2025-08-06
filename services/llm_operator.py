@@ -49,34 +49,23 @@ class LLMOperator:
 
         try:
             current_prompt = self.prompt_engine.create_prompt(event.prompt_text)
-            tool_definitions = None # Default to no tools for plan mode
+            tool_definitions = None  # Default to no tools for plan mode
 
             if mode == 'build':
-                # --- THIS IS THE FIX ---
+                # Get the full, PROCESSED list of tools from the manager first.
+                all_tools = self.foundry_manager.get_llm_tool_definitions()
+
                 # Check if we are in a debugging context.
                 if "DEBUGGER REPORT" in current_prompt:
-                    logger.info("Debugger context detected. Offering only the 'write_file' tool.")
-                    # If so, only provide the 'write_file' tool to the LLM.
-                    write_file_bp = self.foundry_manager.get_blueprint('write_file')
-                    if write_file_bp:
-                        # The provider expects a list of tool definitions.
-                        # We must get the raw tool definitions and let the provider's wrapper
-                        # handle any provider-specific formatting (like Gemini's schema uppercasing).
-                         tool_definitions = [
-                             {
-                                 "name": write_file_bp.id,
-                                 "description": write_file_bp.description,
-                                 "parameters": write_file_bp.parameters
-                             }
-                         ]
-                    else:
-                        logger.error("Could not find the 'write_file' blueprint for the debugger fix.")
-                        # Proceed with all tools as a fallback.
-                        tool_definitions = self.foundry_manager.get_llm_tool_definitions()
+                    logger.info("Debugger context detected. Filtering for only the 'write_file' tool.")
+                    # Filter the already-processed list.
+                    tool_definitions = [tool for tool in all_tools if tool.get("name") == "write_file"]
+                    if not tool_definitions:
+                        logger.error("Could not find 'write_file' in the processed tool definitions. Falling back to all tools.")
+                        tool_definitions = all_tools
                 else:
                     # Otherwise, provide all available tools.
-                    tool_definitions = self.foundry_manager.get_llm_tool_definitions()
-
+                    tool_definitions = all_tools
 
             response = None
             instruction = None
