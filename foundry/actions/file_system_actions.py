@@ -87,6 +87,40 @@ def create_directory(path: str) -> str:
         return error_message
 
 
+def create_package_init(path: str) -> str:
+    """
+    Initializes a directory as a Python package by creating an __init__.py file.
+    """
+    try:
+        dir_path = Path(path)
+        logger.info(f"Attempting to initialize package at: {dir_path}")
+
+        # Ensure the directory exists, create it if it doesn't.
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        init_file_path = dir_path / "__init__.py"
+
+        if init_file_path.exists():
+            message = f"Package already initialized at '{path}'."
+            logger.warning(message)
+            return message
+
+        # Add a quality docstring by default.
+        package_name = dir_path.name
+        content = f'"""Initializes the \'{package_name}\' package."""\n'
+
+        init_file_path.write_text(content, encoding='utf-8')
+
+        success_message = f"Successfully initialized package '{package_name}' at '{path}'."
+        logger.info(success_message)
+        return success_message
+
+    except Exception as e:
+        error_message = f"An unexpected error occurred while initializing package at {path}: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
 def delete_directory(path: str) -> str:
     """
     Recursively deletes a directory and all its contents.

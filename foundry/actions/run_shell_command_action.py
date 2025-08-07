@@ -10,14 +10,8 @@ logger = logging.getLogger(__name__)
 
 def run_shell_command(project_context: ProjectContext, command: str) -> str:
     """
-    Executes a shell command within the project's context.
-
-    Args:
-        project_context: The context of the active project.
-        command: The shell command to execute.
-
-    Returns:
-        A formatted string containing the command's stdout and stderr.
+    Executes a shell command within the project's context, intelligently using
+    the project's virtual environment if 'python' or 'pip' are called.
     """
     if not project_context:
         return "Error: Cannot run shell command. No active project context."
@@ -27,17 +21,22 @@ def run_shell_command(project_context: ProjectContext, command: str) -> str:
 
     try:
         command_parts = shlex.split(command, posix=os.name != 'nt')
+        if not command_parts:
+            return "Error: Empty command provided."
 
-        # --- THIS IS THE CORRECTED LOGIC ---
-        # Intercept python and pip calls to use the venv executables if they exist
-        if command_parts: # Ensure the list is not empty
-            executable_name = command_parts[0].lower() # Check the FIRST element
-            if 'python' in executable_name and project_context.venv_python_path:
-                command_parts[0] = str(project_context.venv_python_path) # Replace the FIRST element
-                logger.info(f"Replaced '{executable_name}' with venv executable: {command_parts[0]}")
-            elif 'pip' in executable_name and project_context.venv_pip_path:
-                command_parts[0] = str(project_context.venv_pip_path) # Replace the FIRST element
-                logger.info(f"Replaced '{executable_name}' with venv executable: {command_parts[0]}")
+        # --- Venv-Aware Execution Logic ---
+        # Intercept python and pip calls to use the venv executables if they exist.
+        executable_name = command_parts[0].lower()
+
+        # Be very specific to avoid accidentally matching other scripts.
+        if (executable_name == 'python' or executable_name == 'python.exe') and project_context.venv_python_path:
+            original_executable = command_parts[0]
+            command_parts[0] = str(project_context.venv_python_path)
+            logger.info(f"Intercepted '{original_executable}'. Using venv executable: {command_parts[0]}")
+        elif (executable_name == 'pip' or executable_name == 'pip.exe') and project_context.venv_pip_path:
+            original_executable = command_parts[0]
+            command_parts[0] = str(project_context.venv_pip_path)
+            logger.info(f"Intercepted '{original_executable}'. Using venv executable: {command_parts[0]}")
 
         result = subprocess.run(
             command_parts,
@@ -62,7 +61,7 @@ def run_shell_command(project_context: ProjectContext, command: str) -> str:
         logger.error(error_output)
         return error_output
     except FileNotFoundError:
-        error_output = f"An unexpected error occurred: Command not found '{command_parts[0]}'. Make sure it's a valid command."
+        error_output = f"An unexpected error occurred: Command not found '{command_parts[0]}'. Make sure it's a valid command and in the system's PATH."
         logger.exception(error_output)
         return error_output
     except Exception as e:

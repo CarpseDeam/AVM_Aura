@@ -21,6 +21,7 @@ class PromptEngine:
 
     def create_architect_prompt(self, user_prompt: str) -> str:
         """
+
         Builds a comprehensive prompt for the Architect, layering relevant context.
         """
         logger.info("Creating a new Architect prompt...")
@@ -54,11 +55,11 @@ class PromptEngine:
         logger.debug("Final Architect prompt created with layered context.")
         return final_prompt
 
-    def create_planner_prompt(self, task: str, available_tools: List[Dict[str, Any]]) -> str:
+    def create_translator_prompt(self, task: str, available_tools: List[Dict[str, Any]]) -> str:
         """
-        Builds a precise prompt for the Planner agent to convert a task into a tool call.
+        Builds a precise prompt for the Translator agent to convert a task into a tool call.
         """
-        logger.info(f"Creating a new Planner prompt for task: '{task}'")
+        logger.info(f"Creating a new Translator prompt for task: '{task}'")
 
         tools_json = json.dumps(available_tools, indent=2)
 

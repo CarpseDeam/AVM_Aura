@@ -25,6 +25,18 @@ class Event:
 
 
 @dataclass
+class StatusUpdate(Event):
+    """
+    Published by backend services to update the GUI's persistent status bar.
+    """
+    status: str  # e.g., "PLANNING", "EXECUTING"
+    activity: str  # e.g., "Architect is formulating a plan..."
+    animate: bool = True
+    progress: Optional[int] = None # e.g., 3
+    total: Optional[int] = None # e.g., 12
+
+
+@dataclass
 class UserPromptEntered(Event):
     """Event published when a user enters a standard prompt."""
 
@@ -154,5 +166,3 @@ class ToolsModified(Event):
     FoundryManager needs to rescan its available tools.
     """
     pass
-
-

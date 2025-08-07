@@ -1,7 +1,33 @@
-# foundry/actions/ast_modification_actions.py
+# blueprints/add_class_to_file_bp.py
+from foundry.blueprints import Blueprint
+
+params = {
+    "type": "object",
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "The path to the Python file to add the class to.",
+        },
+        "class_code": {
+            "type": "string",
+            "description": "A string containing the complete, well-formatted Python code for the new class, including its definition, methods, and docstrings.",
+        }
+    },
+    "required": ["path", "class_code"],
+}
+
+blueprint = Blueprint(
+    id="add_class_to_file",
+    description="Adds a new class definition to an existing Python file without overwriting other contents. This is the preferred way to create new classes.",
+    parameters=params,
+    action_function_name="add_class_to_file"
+)
+
+# foundry/actions/ast_insertion_actions.py
 """
-Contains actions that read, parse, modify, and write Python files using AST.
-These tools are for inspecting and surgically altering existing code on disk.
+Contains actions that surgically add new, complete code constructs to a file.
+These tools are for inserting functions, methods, and imports without
+overwriting existing code.
 """
 import ast
 import logging
@@ -10,101 +36,123 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
-def get_generated_code(code_ast: ast.Module) -> str:
-    """Unparses a complete AST module into a Python code string."""
-    logger.info("Unparsing the current AST to generate code string.")
-    try:
-        ast.fix_missing_locations(code_ast)
-        # --- FIX --- Ensure this tool also returns a markdown block
-        return f"Generated Code:\n```python\n{ast.unparse(code_ast)}\n```"
-    except Exception as e:
-        return f"An unexpected error occurred while unparsing the AST: {e}"
-
-
-def list_functions_in_file(path: str) -> str:
+def add_class_to_file(path: str, class_code: str) -> str:
     """
-    Parses a Python file and returns a list of its top-level function names.
-
-    Args:
-        path: The path to the Python file.
-
-    Returns:
-        A string listing the function names, or an error message.
+    Parses a Python file, adds a new class to it, and writes the result back.
+    If a class with the same name exists, it will be replaced.
     """
-    logger.info(f"Attempting to list functions in file: {path}")
+    logger.info(f"Attempting to add class to file: {path}")
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
     except FileNotFoundError:
-        error_msg = f"Error: File not found at '{path}'."
-        logger.warning(error_msg)
-        return error_msg
-    except Exception as e:
-        error_msg = f"Error reading file at '{path}': {e}"
-        logger.exception(error_msg)
-        return error_msg
-
-    try:
-        tree = ast.parse(content)
-        function_names = [
-            node.name for node in tree.body
-            if isinstance(node, ast.FunctionDef)
-        ]
-
-        if not function_names:
-            return f"No top-level functions found in '{path}'."
-
-        result_str = f"Functions in '{path}':\n" + "\n".join(f"- {name}" for name in sorted(function_names))
-        logger.info(f"Found functions in '{path}': {', '.join(function_names)}")
-        return result_str
-
-    except SyntaxError as e:
-        error_msg = f"Error: The file at '{path}' contains a syntax error and could not be parsed. Line {e.lineno}, Column {e.offset}: {e.msg}"
-        logger.warning(error_msg)
-        return error_msg
-    except Exception as e:
-        error_msg = f"An unexpected error occurred while parsing file '{path}': {e}"
-        logger.exception(error_msg)
-        return error_msg
-
-
-def get_code_for(path: str, function_name: str) -> str:
-    """
-    Parses a Python file and returns the full source code for a specific function or class.
-
-    Args:
-        path: The path to the Python file.
-        function_name: The name of the node to retrieve.
-
-    Returns:
-        A formatted string with the node's source code, or an error message.
-    """
-    logger.info(f"Attempting to get source for node '{function_name}' in file: {path}")
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        return f"Error: File not found at '{path}'."
+        logger.info(f"File {path} not found. Creating it with the provided class.")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(class_code + '\n')
+        return f"Successfully created new file {path} with the provided class."
     except Exception as e:
         return f"Error reading file at '{path}': {e}"
 
     try:
         tree = ast.parse(content)
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == function_name:
-                source_code = ast.unparse(node)
-                logger.info(f"Successfully extracted source code for '{function_name}'.")
-                # --- FIX --- Wrap the output in a markdown code block
-                return f"Source code for '{function_name}' from '{path}':\n```python\n{source_code}\n```"
+        new_class_tree = ast.parse(class_code)
 
-        not_found_msg = f"Error: Node '{function_name}' not found as a top-level function or class in '{path}'."
-        logger.warning(not_found_msg)
-        return not_found_msg
+        new_class_def = None
+        for node in new_class_tree.body:
+            if isinstance(node, ast.ClassDef):
+                new_class_def = node
+                break
+
+        if not new_class_def:
+            return "Error: The provided `class_code` did not contain a valid class definition."
+
+        # Check if a class or function with the same name already exists and replace it.
+        class_replaced = False
+        for i, existing_node in enumerate(tree.body):
+            if isinstance(existing_node, (ast.ClassDef, ast.FunctionDef)) and existing_node.name == new_class_def.name:
+                tree.body[i] = new_class_def
+                class_replaced = True
+                break
+
+        if not class_replaced:
+            tree.body.append(new_class_def)
+
+        new_code = ast.unparse(tree)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_code)
+
+        status = "replaced" if class_replaced else "added"
+        success_message = f"Successfully {status} class '{new_class_def.name}' in '{path}'."
+        logger.info(success_message)
+        return success_message
 
     except SyntaxError as e:
-        return f"Error: The file at '{path}' contains a syntax error and could not be parsed. Line {e.lineno}, Column {e.offset}: {e.msg}"
+        return f"Error: Syntax error in the file '{path}' or in the provided `class_code`. Details: {e}"
     except Exception as e:
-        return f"An unexpected error occurred while parsing file '{path}': {e}"
+        error_message = f"An unexpected error occurred while adding class: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
+def add_function_to_file(path: str, function_code: str) -> str:
+    """
+    Parses a Python file, adds a new function to it, and writes the result back.
+    This is a non-destructive way to add code.
+    """
+    logger.info(f"Attempting to add function to file: {path}")
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        # If the file doesn't exist, we can treat this as a write_file operation.
+        logger.info(f"File {path} not found. Creating it with the provided function.")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(function_code + '\n')
+        return f"Successfully created new file {path} with the provided function."
+    except Exception as e:
+        return f"Error reading file at '{path}': {e}"
+
+    try:
+        tree = ast.parse(content)
+        new_function_tree = ast.parse(function_code)
+
+        new_function_def = None
+        for node in new_function_tree.body:
+            if isinstance(node, ast.FunctionDef):
+                new_function_def = node
+                break
+
+        if not new_function_def:
+            return "Error: The provided `function_code` did not contain a valid function definition."
+
+        # Check if a function with the same name already exists and replace it.
+        function_replaced = False
+        for i, existing_node in enumerate(tree.body):
+            if isinstance(existing_node, ast.FunctionDef) and existing_node.name == new_function_def.name:
+                tree.body[i] = new_function_def
+                function_replaced = True
+                break
+
+        if not function_replaced:
+            tree.body.append(new_function_def)
+
+        new_code = ast.unparse(tree)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_code)
+
+        status = "replaced" if function_replaced else "added"
+        success_message = f"Successfully {status} function '{new_function_def.name}' in '{path}'."
+        logger.info(success_message)
+        return success_message
+
+    except SyntaxError as e:
+        return f"Error: Syntax error in the file '{path}' or in the provided `function_code`. Details: {e}"
+    except Exception as e:
+        error_message = f"An unexpected error occurred while adding function: {e}"
+        logger.exception(error_message)
+        return error_message
 
 
 def add_method_to_class(path: str, class_name: str, name: str, args: list) -> str:
