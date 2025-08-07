@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon, QResizeEvent
 
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
+from .status_bar_widget import StatusBarWidget
 from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
@@ -43,7 +44,11 @@ class AuraMainWindow(QMainWindow):
         self.controller = GUIController(self, self.event_bus, self.chat_layout, self.scroll_area)
 
         # Register elements that are ready immediately
-        self.controller.register_ui_elements(self.command_input, self.autocomplete_popup)
+        self.controller.register_ui_elements(
+            command_input=self.command_input,
+            autocomplete_popup=self.autocomplete_popup,
+            status_bar=self.status_bar  # Register the new status bar
+        )
         self._start_backend_setup()
 
     def _setup_ui(self):
@@ -73,10 +78,14 @@ class AuraMainWindow(QMainWindow):
         self.scroll_area.setWidget(chat_container)
         left_column_layout.addWidget(self.scroll_area)
 
+        # --- Status Bar --- (NEW WIDGET)
+        self.status_bar = StatusBarWidget()
+        left_column_layout.addWidget(self.status_bar)
+
         # --- Bottom Control Strip ---
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
-        self.control_strip.setFixedHeight(120)  # Reduced height after removing toggle
+        self.control_strip.setFixedHeight(120)
         strip_layout = QVBoxLayout(self.control_strip)
         strip_layout.setContentsMargins(10, 10, 10, 10)
         strip_layout.setSpacing(5)
@@ -155,9 +164,7 @@ class AuraMainWindow(QMainWindow):
             display_callback = self.controller.get_display_callback()
             config_manager = ConfigManager()
 
-            # Create FoundryManager without the event bus
             foundry_manager = FoundryManager()
-            # NOW, wire it up to the event bus
             self.event_bus.subscribe(ToolsModified, foundry_manager.handle_tools_modified)
 
             context_manager = ContextManager()

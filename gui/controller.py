@@ -13,6 +13,7 @@ from services import ProjectManager, MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
+from .status_bar_widget import StatusBarWidget
 from .utils import get_aura_banner
 from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
 from .command_input_widget import CommandInputWidget
@@ -43,7 +44,8 @@ class GUIController(QObject):
         self.node_viewer_window = None
         self.code_viewer_window = None
         self.mission_log_window = None
-        self.thinking_widget: Optional[ThinkingWidget] = None
+        self.thinking_widget: Optional[ThinkingWidget] = None # Will be removed soon
+        self.status_bar: Optional[StatusBarWidget] = None
 
         self.command_input: Optional[CommandInputWidget] = None
         self.autocomplete_popup: Optional[QLabel] = None
@@ -54,9 +56,10 @@ class GUIController(QObject):
         self.hide_thinking_signal.connect(self._hide_thinking)
         self.add_system_message_signal.connect(self._add_system_message)
 
-    def register_ui_elements(self, command_input, autocomplete_popup):
+    def register_ui_elements(self, command_input, autocomplete_popup, status_bar):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
+        self.status_bar = status_bar # <-- THE FIX IS HERE
 
     def wire_up_command_handler(self, handler: CommandHandler):
         """Receives the command handler from the backend thread and connects the UI."""
@@ -138,19 +141,17 @@ class GUIController(QObject):
 
     @Slot()
     def _show_thinking(self):
-        if self.thinking_widget: return
-        self.thinking_widget = ThinkingWidget()
-        self._insert_widget(self.thinking_widget)
-        self.thinking_widget.start_animation()
+        if self.status_bar:
+            self.status_bar.show_status("THINKING", "Awaiting response from LLM...", True)
 
     @Slot()
     def _hide_thinking(self):
-        if self.thinking_widget:
-            self.thinking_widget.stop_animation()
-            self.thinking_widget.deleteLater()
-            self.thinking_widget = None
+        if self.status_bar:
+            self.status_bar.show_status("IDLE", "Ready for input.", False)
+
 
     def _insert_widget(self, widget: QWidget):
+        # We no longer need to check for a thinking widget to remove
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
         self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
 
