@@ -24,6 +24,7 @@ class LLMProvider(ABC):
         mode: str,
         context: Optional[Dict[str, str]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        system_instruction_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get a response from the LLM, optionally with tool-calling capabilities.
@@ -33,6 +34,8 @@ class LLMProvider(ABC):
             mode: The interaction mode ('plan' or 'build').
             context: Optional dictionary with contextual info (e.g., file contents).
             tools: Optional list of tool definitions for the LLM.
+            system_instruction_override: Optional. A string to use as the system
+                                         prompt instead of the default for the mode.
 
         Returns:
             A dictionary with a standardized structure:

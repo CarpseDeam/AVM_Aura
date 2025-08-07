@@ -36,4 +36,3 @@ if __name__ == "__main__":
 
     logger.info("Aura GUI is running.")
     sys.exit(app.exec())
-

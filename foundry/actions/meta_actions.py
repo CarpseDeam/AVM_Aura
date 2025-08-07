@@ -7,10 +7,13 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any
 
+from event_bus import EventBus
+from events import ToolsModified
+
 logger = logging.getLogger(__name__)
 
 
-def create_new_tool(**kwargs) -> str:
+def create_new_tool(event_bus: EventBus, **kwargs) -> str:
     """
     Generates and writes a new blueprint file AND its corresponding action file.
     This function uses **kwargs to be robust against argument mismatches.
@@ -84,10 +87,13 @@ blueprint = Blueprint(
         logger.exception(error_message)
         return error_message
 
+    # Publish the event to notify the system that tools have changed.
+    event_bus.publish(ToolsModified())
+
     success_message = (
         f"SUCCESS: New tool '{tool_name}' created successfully!\\n"
         f"Generated blueprint: {blueprint_file_path}\\n"
         f"Generated action: {action_file_path}\\n"
-        f"Please restart Aura to load the new tool."
+        f"The new tool is now available for use."
     )
     return success_message

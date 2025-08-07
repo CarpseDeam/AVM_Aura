@@ -19,33 +19,14 @@ class PromptEngine:
         self.context_manager = context_manager
         logger.info("PromptEngine initialized.")
 
-    def create_prompt(
-            self,
-            user_prompt: str,
-            available_tools: Optional[List[Dict[str, Any]]] = None
-    ) -> str:
+    def create_architect_prompt(self, user_prompt: str) -> str:
         """
-        Builds a comprehensive prompt, layering mission context with general context.
-
-        Args:
-            user_prompt: The core text for the current task or question.
-            available_tools: A list of tool definitions to be included in the prompt text.
-
-        Returns:
-            The final, context-rich prompt string.
+        Builds a comprehensive prompt for the Architect, layering relevant context.
         """
-        logger.info("Creating a new prompt...")
+        logger.info("Creating a new Architect prompt...")
         context_parts = []
 
-        # 1. Add definitions of available tools for the Architect to see
-        if available_tools:
-            # We format this nicely for the LLM to read
-            tool_text = "\n".join([f"- `{tool['name']}`: {tool['description']}" for tool in available_tools])
-            context_parts.append("--- AVAILABLE TOOLS ---")
-            context_parts.append("You can use the following tools to construct your plan:")
-            context_parts.append(tool_text)
-
-        # 2. Add general context (RAG, open files)
+        # 1. Add general context (RAG, open files)
         relevant_docs = self.vector_context_service.query(user_prompt)
         if relevant_docs:
             context_parts.append("\n--- RELEVANT EXISTING CODE (from project knowledge base) ---")
@@ -61,12 +42,32 @@ class PromptEngine:
             for key, content in current_files_context.items():
                 context_parts.append(f"Content of file '{key}':\n```\n{content}\n```")
 
-        # 3. Assemble the final prompt with the user's high-level goal.
+        # 2. Assemble the final prompt with the user's high-level goal.
         context_parts.append("\n--- USER GOAL ---")
         context_parts.append(f"The user wants to achieve the following goal: '{user_prompt}'")
         context_parts.append(
-            "\nBased on this goal and the available tools and context, call the `submit_plan` tool now.")
+            "\nBased on this goal and the available context, your task is to generate a brief reasoning statement "
+            "followed by a comprehensive, step-by-step plan in a numbered list."
+        )
 
         final_prompt = "\n".join(context_parts)
-        logger.debug("Final prompt created with layered context and tool definitions.")
+        logger.debug("Final Architect prompt created with layered context.")
+        return final_prompt
+
+    def create_planner_prompt(self, task: str, available_tools: List[Dict[str, Any]]) -> str:
+        """
+        Builds a precise prompt for the Planner agent to convert a task into a tool call.
+        """
+        logger.info(f"Creating a new Planner prompt for task: '{task}'")
+
+        tools_json = json.dumps(available_tools, indent=2)
+
+        final_prompt = f"""--- AVAILABLE TOOLS ---
+{tools_json}
+
+--- TASK ---
+{task}
+
+--- YOUR RESPONSE ---
+"""
         return final_prompt

@@ -78,6 +78,9 @@ class ExecutorService:
         if action_id.startswith(("add_task", "mark_task", "get_mission")):
             resolved_params['mission_log_service'] = self.mission_log_service
 
+        if action_id == 'create_new_tool':
+            resolved_params['event_bus'] = self.event_bus
+
         return resolved_params
 
     def _execute_plan(self, plan: List[BlueprintInvocation]) -> None:

@@ -35,11 +35,15 @@ class GeminiProvider(LLMProvider):
         if not api_key:
             raise ValueError("Google API key is required for GeminiProvider.")
 
+        self.api_key = api_key
+        self.config = config
+
         try:
             genai.configure(api_key=api_key)
             self.model_name = config.get('gemini.model')
             self.plan_temperature = config.get('plan_temperature')
             self.build_temperature = config.get('build_temperature')
+
             logger.info(
                 f"GeminiProvider initialized for model: {self.model_name} with temps (Plan: {self.plan_temperature}, Build: {self.build_temperature}).")
         except Exception as e:
@@ -52,11 +56,15 @@ class GeminiProvider(LLMProvider):
             mode: str,
             context: Optional[Dict[str, str]] = None,
             tools: Optional[List[Dict[str, Any]]] = None,
+            system_instruction_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Sends the prompt to the Gemini API and returns a structured response dictionary.
         """
-        system_instruction = ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT
+        # Use the override if provided, otherwise fall back to the mode-based default.
+        system_instruction = system_instruction_override or (
+            ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT)
+
         temp = self.plan_temperature if mode == 'plan' else self.build_temperature
 
         final_prompt = prompt
@@ -69,11 +77,9 @@ class GeminiProvider(LLMProvider):
 
         try:
             generation_config = genai.GenerationConfig(temperature=temp)
-            model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction, generation_config=generation_config)
+            model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction,
+                                          generation_config=generation_config)
 
-            # --- THIS IS THE DEFINITIVE FIX ---
-            # Only include the 'tools' parameter in the API call if the list is not empty.
-            # Passing 'tools=[]' confuses the API, but omitting it correctly disables tool calling.
             if tools:
                 logger.debug(f"Making Gemini API call with {len(tools)} tools.")
                 response = model.generate_content(final_prompt, tools=tools)
@@ -81,8 +87,15 @@ class GeminiProvider(LLMProvider):
                 logger.debug("Making Gemini API call with NO tools.")
                 response = model.generate_content(final_prompt)
 
-
             structured_response = {"text": None, "tool_calls": []}
+
+            try:
+                if response.text:
+                    structured_response["text"] = response.text
+            except ValueError:
+                logger.debug("Response contained no direct text part (likely tool-call only).")
+                if not (response.candidates and response.candidates[0].content.parts):
+                    structured_response["text"] = "Warning: Could not extract text from Gemini response."
 
             if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
                 for part in response.candidates[0].content.parts:
@@ -95,15 +108,6 @@ class GeminiProvider(LLMProvider):
                             logger.info(f"Gemini response included a tool call: {fc.name}")
                         else:
                             logger.warning("Gemini API returned a malformed tool call with no name. Discarding.")
-
-            try:
-                if hasattr(response, "text") and response.text:
-                    structured_response["text"] = response.text
-            except ValueError as e:
-                logger.debug(f"Suppressed Gemini API ValueError - response was tool-call only: {e}")
-                if not structured_response["tool_calls"]:
-                    structured_response["text"] = f"Warning: Could not extract text from Gemini response. {e}"
-
 
             if response.prompt_feedback and response.prompt_feedback.block_reason:
                 reason = response.prompt_feedback.block_reason.name

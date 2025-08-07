@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from foundry.blueprints import Blueprint
+# from events import ToolsModified <-- REMOVED THIS LINE TO BREAK THE CYCLE
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +41,29 @@ class FoundryManager:
         self._blueprints: Dict[str, Blueprint] = {}
         self._actions: Dict[str, Callable[..., Any]] = {}
 
+        self.rescan_and_load()
+
+    def handle_tools_modified(self, event) -> None: # <-- REMOVED THE TYPE HINT
+        """Event handler to rescan tools when notified."""
+        logger.info("ToolsModified event received. Rescanning blueprints and actions...")
+        self.rescan_and_load()
+
+    def rescan_and_load(self) -> None:
+        """
+        Clears and re-loads all blueprints and actions from the filesystem.
+        This makes the Foundry dynamic and responsive to new tools being created.
+        """
+        # Clear existing dictionaries
+        self._blueprints.clear()
+        self._actions.clear()
+        logger.info("Cleared existing blueprints and actions for rescan.")
+
+        # Reload everything
         self._discover_and_load_actions()
         self._discover_and_load_blueprints()
 
         logger.info(
-            f"FoundryManager initialized with {len(self._blueprints)} blueprints and {len(self._actions)} actions.")
+            f"FoundryManager re-initialized with {len(self._blueprints)} blueprints and {len(self._actions)} actions.")
 
     def _add_blueprint(self, blueprint: Blueprint) -> None:
         if blueprint.action_function_name not in self._actions:
@@ -69,6 +88,10 @@ class FoundryManager:
                 if file_path.name.startswith("__"): continue
                 module_name = f"{package_name}.{file_path.stem}"
                 try:
+                    # The key to reloading is to invalidate Python's cache
+                    if module_name in inspect.sys.modules:
+                         importlib.reload(inspect.sys.modules[module_name])
+
                     module = importlib.import_module(module_name)
                     if hasattr(module, "blueprint") and isinstance(module.blueprint, Blueprint):
                         self._add_blueprint(module.blueprint)
@@ -92,6 +115,10 @@ class FoundryManager:
                 if file_path.name.startswith("__"): continue
                 module_name = f"{package_name}.{file_path.stem}"
                 try:
+                    # The key to reloading is to invalidate Python's cache
+                    if module_name in inspect.sys.modules:
+                        importlib.reload(inspect.sys.modules[module_name])
+
                     module = importlib.import_module(module_name)
                     for name, func in inspect.getmembers(module, inspect.isfunction):
                         if name in self._actions:

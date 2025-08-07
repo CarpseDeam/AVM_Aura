@@ -1,6 +1,7 @@
 # services/instruction_factory.py
 import json
 import logging
+import re
 from typing import Any, Dict, Optional, Union, List
 
 from proto.marshal.collections.maps import MapComposite
@@ -30,54 +31,54 @@ class InstructionFactory:
             return [self._deep_convert_proto_maps(item) for item in data]
         return data
 
-    def create_instruction(self, llm_response: Dict[str, Any]) -> Optional[
-        Union[BlueprintInvocation, List[BlueprintInvocation]]]:
+    def _extract_json_from_text(self, text: str) -> Optional[Dict]:
         """
-        Parses the entire raw LLM response object, checking for native tool calls
-        first, then falling back to parsing the text content as JSON.
+        Finds and parses a JSON object from a string, even if it's
+        embedded in markdown code blocks.
+        """
+        # Regex to find content within ```json ... ```
+        match = re.search(r'```json\s*([\s\S]+?)\s*```', text)
+        if match:
+            json_str = match.group(1).strip()
+        else:
+            # If no markdown block, assume the whole text is the JSON
+            json_str = text.strip()
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to decode JSON from extracted string: {json_str}")
+            return None
+
+    def create_single_invocation_from_data(self, llm_response: Dict[str, Any]) -> Optional[BlueprintInvocation]:
+        """
+        Parses an LLM response intended to contain a single tool call,
+        checking for native tool calls first, then falling back to parsing the text content as JSON.
         """
         # 1. Prioritize native tool calls from the API
         native_tool_calls = llm_response.get("tool_calls")
-        if native_tool_calls and isinstance(native_tool_calls, list):
-            logger.info("Processing native tool calls from LLM response.")
-            if len(native_tool_calls) == 1:
-                return self.create_single_invocation_from_data(native_tool_calls[0])
-            else:
-                return self._create_plan_from_data(native_tool_calls)
+        if native_tool_calls and isinstance(native_tool_calls, list) and len(native_tool_calls) > 0:
+            # We only expect one tool call from the Planner
+            logger.info("Processing native tool call from Planner LLM response.")
+            return self._parse_tool_call_dict(native_tool_calls[0])
 
         # 2. Fallback: Check if the text response is a JSON object
         text_response = llm_response.get("text")
         if text_response and isinstance(text_response, str):
-            try:
-                data = json.loads(text_response)
-                logger.info("Successfully parsed text response as JSON.")
-
-                # Check if the parsed JSON is a plan or a single tool call
-                if "plan" in data and isinstance(data.get("plan"), list):
-                    return self._create_plan_from_data(data["plan"])
-                elif "tool_name" in data:
-                    return self.create_single_invocation_from_data(data)
-
-            except json.JSONDecodeError:
+            data = self._extract_json_from_text(text_response)
+            if not data:
                 logger.warning("LLM text response was not valid JSON. Cannot create instruction.")
                 return None
+
+            logger.info("Successfully parsed text response as JSON.")
+            if "tool_name" in data:
+                return self._parse_tool_call_dict(data)
 
         # If neither path yielded an instruction, return None
         return None
 
-    def _create_plan_from_data(self, plan_data: List[Dict]) -> Optional[List[BlueprintInvocation]]:
-        plan_invocations: List[BlueprintInvocation] = []
-        logger.info(f"Validating {len(plan_data)}-step plan...")
-        for i, step in enumerate(plan_data):
-            invocation = self.create_single_invocation_from_data(step)
-            if not invocation:
-                logger.error(f"Invalid tool call in plan step {i + 1}: {step}")
-                return None
-            plan_invocations.append(invocation)
-        logger.info("Plan validated successfully.")
-        return plan_invocations
-
-    def create_single_invocation_from_data(self, data: Dict) -> Optional[BlueprintInvocation]:
+    def _parse_tool_call_dict(self, data: Dict) -> Optional[BlueprintInvocation]:
+        """Converts a dictionary into a BlueprintInvocation."""
         tool_name = data.get("tool_name")
         if not tool_name:
             logger.warning(f"Tool call data is missing 'tool_name': {data}")

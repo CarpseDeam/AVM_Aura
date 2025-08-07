@@ -145,3 +145,14 @@ class MissionDispatchRequest(Event):
     This signals the system to begin autonomously executing the tasks in the log.
     """
     pass
+
+
+@dataclass
+class ToolsModified(Event):
+    """
+    Published by an action (like create_new_tool) to signal that the
+    FoundryManager needs to rescan its available tools.
+    """
+    pass
+
+

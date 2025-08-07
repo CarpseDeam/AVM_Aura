@@ -19,7 +19,7 @@ from services import (
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
-from events import UserPromptEntered, UserCommandEntered
+from events import UserPromptEntered, UserCommandEntered, ToolsModified
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class AuraMainWindow(QMainWindow):
         # --- Bottom Control Strip ---
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
-        self.control_strip.setFixedHeight(120) # Reduced height after removing toggle
+        self.control_strip.setFixedHeight(120)  # Reduced height after removing toggle
         strip_layout = QVBoxLayout(self.control_strip)
         strip_layout.setContentsMargins(10, 10, 10, 10)
         strip_layout.setSpacing(5)
@@ -154,7 +154,12 @@ class AuraMainWindow(QMainWindow):
             logger.info("Setting up backend services...")
             display_callback = self.controller.get_display_callback()
             config_manager = ConfigManager()
+
+            # Create FoundryManager without the event bus
             foundry_manager = FoundryManager()
+            # NOW, wire it up to the event bus
+            self.event_bus.subscribe(ToolsModified, foundry_manager.handle_tools_modified)
+
             context_manager = ContextManager()
             vector_context_service = VectorContextService()
             project_manager = ProjectManager()
