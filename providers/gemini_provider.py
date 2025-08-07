@@ -7,11 +7,23 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
+from proto.marshal.collections.maps import MapComposite
 from .base import LLMProvider
 from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
 from services.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+
+def _deep_convert_proto_maps(data: Any) -> Any:
+    """Recursively converts MapComposite objects from the Gemini API into standard dicts."""
+    if isinstance(data, MapComposite):
+        return {k: _deep_convert_proto_maps(v) for k, v in data.items()}
+    if isinstance(data, dict):
+        return {k: _deep_convert_proto_maps(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_deep_convert_proto_maps(item) for item in data]
+    return data
 
 
 class GeminiProvider(LLMProvider):
@@ -58,7 +70,17 @@ class GeminiProvider(LLMProvider):
         try:
             generation_config = genai.GenerationConfig(temperature=temp)
             model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction, generation_config=generation_config)
-            response = model.generate_content(final_prompt, tools=tools)
+
+            # --- THIS IS THE DEFINITIVE FIX ---
+            # Only include the 'tools' parameter in the API call if the list is not empty.
+            # Passing 'tools=[]' confuses the API, but omitting it correctly disables tool calling.
+            if tools:
+                logger.debug(f"Making Gemini API call with {len(tools)} tools.")
+                response = model.generate_content(final_prompt, tools=tools)
+            else:
+                logger.debug("Making Gemini API call with NO tools.")
+                response = model.generate_content(final_prompt)
+
 
             structured_response = {"text": None, "tool_calls": []}
 
@@ -66,10 +88,8 @@ class GeminiProvider(LLMProvider):
                 for part in response.candidates[0].content.parts:
                     if hasattr(part, "function_call"):
                         fc = part.function_call
-                        # --- THIS IS THE FIX ---
-                        # Explicitly check if the function call has a name before processing.
                         if fc.name:
-                            arguments = dict(fc.args) if fc.args else {}
+                            arguments = _deep_convert_proto_maps(fc.args) if fc.args else {}
                             tool_call_dict = {"tool_name": fc.name, "arguments": arguments}
                             structured_response["tool_calls"].append(tool_call_dict)
                             logger.info(f"Gemini response included a tool call: {fc.name}")

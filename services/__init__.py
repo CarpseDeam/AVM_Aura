@@ -14,4 +14,3 @@ from .project_manager import ProjectManager
 from .mission_log_service import MissionLogService
 from .prompt_engine import PromptEngine
 from .instruction_factory import InstructionFactory
-from .mission_manager import MissionManager

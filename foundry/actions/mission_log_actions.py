@@ -1,14 +1,15 @@
 # foundry/actions/mission_log_actions.py
 import logging
+from typing import Optional, Dict
 from services.mission_log_service import MissionLogService
 
 logger = logging.getLogger(__name__)
 
 
-def add_task_to_mission_log(mission_log_service: MissionLogService, description: str) -> str:
-    """Action to add a new task to the Mission Log."""
+def add_task_to_mission_log(mission_log_service: MissionLogService, description: str, tool_call: Optional[Dict] = None) -> str:
+    """Action to add a new task to the Mission Log, with an optional machine-readable tool call."""
     try:
-        new_task = mission_log_service.add_task(description)
+        new_task = mission_log_service.add_task(description, tool_call)
         return f"Successfully added task {new_task['id']}: '{description}'"
     except Exception as e:
         logger.error(f"Error adding task to mission log: {e}", exc_info=True)

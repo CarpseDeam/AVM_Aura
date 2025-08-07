@@ -101,11 +101,10 @@ class GUIController(QObject):
                 self.hide_thinking_signal.emit()
         else:
             self.show_thinking_signal.emit()
-            is_build_mode = self.main_window.is_build_mode()
-
+            # auto_approve_plan is now always False, as planning is the only mode.
             event = UserPromptEntered(
                 prompt_text=input_text,
-                auto_approve_plan=is_build_mode
+                auto_approve_plan=False
             )
             threading.Thread(target=self._process_prompt_async, args=(event,), daemon=True).start()
 

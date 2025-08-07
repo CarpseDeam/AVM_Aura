@@ -1,10 +1,11 @@
 # services/llm_operator.py
 import logging
+import json
 from typing import Callable, Optional, List
 
 from event_bus import EventBus
 from events import (
-    ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered, PlanApproved, PlanDenied, BlueprintInvocation,
+    ActionReadyForExecution, PlanReadyForApproval, UserPromptEntered, PlanApproved, PlanDenied,
     DirectToolInvocationRequest
 )
 from providers import LLMProvider
@@ -17,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 class LLMOperator:
     """
-    Orchestrates LLM interactions by coordinating the prompt engine, LLM provider,
-    and instruction factory.
+    Orchestrates LLM interactions. It uses the Architect to generate a plan via the
+    `submit_plan` tool, which it intercepts to populate the Mission Log.
     """
 
     def __init__(
@@ -39,78 +40,101 @@ class LLMOperator:
         self.display_callback = display_callback
         self.max_retries = max_retries
         logger.info("LLMOperator initialized.")
-        self.event_bus.subscribe(PlanApproved, self.handle_plan_approved)
-        self.event_bus.subscribe(PlanDenied, self.handle_plan_denied)
+        # These are no longer needed as plan approval happens via Mission Log
+        # self.event_bus.subscribe(PlanApproved, self.handle_plan_approved)
+        # self.event_bus.subscribe(PlanDenied, self.handle_plan_denied)
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
             self.display_callback(message, tag)
 
+    def _summarize_tool_call(self, tool_call: dict) -> str:
+        """Creates a human-readable summary of a tool call."""
+        tool_name = tool_call.get('tool_name', 'unknown_tool')
+        args = tool_call.get('arguments', {})
+
+        summary = tool_name.replace('_', ' ').title()
+
+        path = args.get('path') or args.get('source_path')
+        if path:
+            summary += f" '{path}'"
+
+        desc = args.get('description')
+        if desc:
+            summary += f": {desc[:50]}..."
+
+        return summary
+
     def handle(self, event: UserPromptEntered) -> None:
-        is_agent_task = event.task_id is not None
-        mode = 'build' if event.auto_approve_plan else 'plan'
-        self._display(f"🧠 Thinking ({mode} mode)...", "system_message")
+        """
+        Handles a user prompt by generating a plan and populating the Mission Log.
+        The 'build' mode (auto_approve_plan=True) is no longer used for planning.
+        """
+        self._display("🧠 Architect is planning...", "system_message")
 
         try:
-            current_prompt = event.prompt_text if is_agent_task else self.prompt_engine.create_prompt(
-                user_prompt=event.prompt_text)
+            # We must pass all other tool definitions to the prompt so the Architect
+            # knows what tools it can include in its plan.
+            all_tools = self.foundry_manager.get_llm_tool_definitions()
+            prompt_tools = [t for t in all_tools if t.get("name") != 'submit_plan']
 
-            tool_definitions = None
-            if mode == 'build':
-                all_tools = self.foundry_manager.get_llm_tool_definitions()
-                if "ERROR REPORT" in current_prompt or "DEBUGGER REPORT" in current_prompt or "LINTING ERRORS" in current_prompt:
-                    tool_definitions = [t for t in all_tools if t.get("name") == "write_file"]
-                else:
-                    tool_definitions = [t for t in all_tools if 'mission_log' not in t.get("name")]
-            elif mode == 'plan':
-                architect_tools = ['add_task_to_mission_log', 'create_new_tool']
-                tool_definitions = [t for t in self.foundry_manager.get_llm_tool_definitions() if
-                                    t.get("name") in architect_tools]
+            prompt_with_tools = self.prompt_engine.create_prompt(
+                user_prompt=event.prompt_text,
+                available_tools=prompt_tools  # Pass tool info into the prompt text
+            )
 
-            response, instruction = None, None
+            # However, we only give the API ONE tool to actually call: `submit_plan`.
+            api_tools = [t for t in all_tools if t.get("name") == 'submit_plan']
+            if not api_tools:
+                self._display("❌ CRITICAL ERROR: The 'submit_plan' tool is not defined.", "avm_error")
+                return
+
+            response = None
             for attempt in range(self.max_retries + 1):
                 if attempt > 0:
-                    self._display(f"LLM response was invalid. Retrying ({attempt}/{self.max_retries})...",
+                    self._display(f"Architect response was invalid. Retrying ({attempt}/{self.max_retries})...",
                                   "avm_warning")
 
-                response = self.provider.get_response(prompt=current_prompt, mode=mode, tools=tool_definitions)
+                response = self.provider.get_response(prompt=prompt_with_tools, mode='plan', tools=api_tools)
 
-                if mode == 'build':
-                    instruction = self.instruction_factory.create_instruction(response.get("tool_calls"))
-                    if instruction:
-                        break
-                    current_prompt = f"Your previous response was not a valid JSON tool call. Please try again. Original request: {event.prompt_text}"
+                # Check if the response contains the specific tool call we're looking for
+                if response and response.get("tool_calls"):
+                    if any(tc.get("tool_name") == "submit_plan" for tc in response["tool_calls"]):
+                        break  # Success! We got the call we wanted.
+
+                prompt_with_tools = f"Your previous response was not a valid call to the `submit_plan` tool. Please try again, adhering strictly to the required format. Original request: {event.prompt_text}"
+
+            # Intercept and process the `submit_plan` call
+            submit_plan_call = next(
+                (tc for tc in response.get("tool_calls", []) if tc.get("tool_name") == "submit_plan"), None)
+
+            if submit_plan_call:
+                args = submit_plan_call.get("arguments", {})
+                reasoning = args.get("reasoning", "No reasoning provided.")
+                plan = args.get("plan", [])
+
+                self._display(f"💬 Architect's Plan:\n{reasoning}", "avm_response")
+
+                if plan and isinstance(plan, list):
+                    self._display(f"✅ Plan received. Populating Mission Log with {len(plan)} tasks...",
+                                  "system_message")
+                    for tool_call_dict in plan:
+                        params = {
+                            "description": self._summarize_tool_call(tool_call_dict),
+                            "tool_call": tool_call_dict
+                        }
+                        self.event_bus.publish(DirectToolInvocationRequest(
+                            tool_id='add_task_to_mission_log',
+                            params=params
+                        ))
                 else:
-                    break
-
-            if response.get("text"):
-                self._display(f"💬 Aura:\n{response['text']}", "avm_response")
-
-            if response.get("tool_calls"):
-                if mode == 'plan':
-                    for tool_call in response["tool_calls"]:
-                        invocation = self.instruction_factory.create_single_invocation_from_data(tool_call)
-                        if invocation:
-                            self.event_bus.publish(DirectToolInvocationRequest(tool_id=invocation.blueprint.id,
-                                                                               params=invocation.parameters))
-                elif mode == 'build' and instruction:
-                    if not event.auto_approve_plan and isinstance(instruction, list):
-                        self.event_bus.publish(PlanReadyForApproval(plan=instruction))
-                    else:
-                        self.event_bus.publish(ActionReadyForExecution(instruction=instruction, task_id=event.task_id))
-
-            if mode == 'build' and not instruction:
-                self._display(f"❌ Aura failed to generate a valid plan. Last response: {response.get('text')}",
-                              "avm_error")
+                    self._display("⚠️ Architect submitted a plan with an empty or invalid `plan` list.", "avm_warning")
+            else:
+                self._display(
+                    f"❌ Architect failed to call 'submit_plan' after retries. The system cannot proceed.",
+                    "avm_error"
+                )
 
         except Exception as e:
             logger.error(f"Error processing prompt in LLMOperator: {e}", exc_info=True)
             self._display(f"An unexpected error occurred: {e}", "avm_error")
-
-    def handle_plan_approved(self, event: PlanApproved):
-        logger.info(f"Plan approved by user with {len(event.plan)} steps, publishing for execution.")
-        self.event_bus.publish(ActionReadyForExecution(instruction=event.plan))
-
-    def handle_plan_denied(self, event: PlanDenied):
-        logger.info("Plan denied by user.")
-        self._display("Plan denied. Awaiting new instructions.", "system_message")

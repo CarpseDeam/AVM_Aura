@@ -30,7 +30,6 @@ class UserPromptEntered(Event):
 
     prompt_text: str
     auto_approve_plan: bool = False
-    task_id: Optional[int] = None  # For tracking agentic tasks
 
 
 @dataclass
@@ -56,7 +55,6 @@ class ActionReadyForExecution(Event):
     Event published when a structured action is parsed and ready for execution.
     """
     instruction: Union[BlueprintInvocation, RawCodeInstruction, List[BlueprintInvocation]]
-    task_id: Optional[int] = None  # For tracking agentic tasks
 
 
 @dataclass
@@ -147,14 +145,3 @@ class MissionDispatchRequest(Event):
     This signals the system to begin autonomously executing the tasks in the log.
     """
     pass
-
-
-@dataclass
-class AgentTaskCompleted(Event):
-    """
-    Published by the ExecutorService when a plan associated with an agentic task
-    has finished executing.
-    """
-    task_id: int
-    result: Optional[Any] = None
-    file_paths: Dict[str, str] = field(default_factory=dict)

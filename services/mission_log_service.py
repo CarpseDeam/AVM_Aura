@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from .project_manager import ProjectManager
 from event_bus import EventBus
-from events import MissionLogUpdated  # We'll create this event next
+from events import MissionLogUpdated
 
 logger = logging.getLogger(__name__)
 MISSION_LOG_FILENAME = "mission_log.json"
@@ -37,7 +37,6 @@ class MissionLogService:
             try:
                 with open(log_path, 'r', encoding='utf-8') as f:
                     self.tasks = json.load(f)
-                # Ensure next ID is higher than any existing ID
                 if self.tasks:
                     self._next_task_id = max(task.get('id', 0) for task in self.tasks) + 1
                 else:
@@ -68,15 +67,16 @@ class MissionLogService:
         except IOError as e:
             logger.error(f"Failed to save mission log to {log_path}: {e}")
 
-    def add_task(self, description: str) -> Dict[str, Any]:
-        """Adds a new task to the mission log."""
+    def add_task(self, description: str, tool_call: Optional[Dict] = None) -> Dict[str, Any]:
+        """Adds a new task to the mission log, optionally with its tool call."""
         if not description:
             raise ValueError("Task description cannot be empty.")
 
         new_task = {
             "id": self._next_task_id,
             "description": description,
-            "done": False
+            "done": False,
+            "tool_call": tool_call  # Store the machine-readable instruction
         }
         self.tasks.append(new_task)
         self._next_task_id += 1

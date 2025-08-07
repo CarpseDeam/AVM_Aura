@@ -15,7 +15,7 @@ from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService, PromptEngine, InstructionFactory, MissionManager
+    MissionLogService, PromptEngine, InstructionFactory
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -76,26 +76,10 @@ class AuraMainWindow(QMainWindow):
         # --- Bottom Control Strip ---
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
-        self.control_strip.setFixedHeight(150)
+        self.control_strip.setFixedHeight(120) # Reduced height after removing toggle
         strip_layout = QVBoxLayout(self.control_strip)
-        strip_layout.setContentsMargins(10, 5, 10, 10)
+        strip_layout.setContentsMargins(10, 10, 10, 10)
         strip_layout.setSpacing(5)
-        mode_toggle_layout = QHBoxLayout()
-        self.plan_button = QPushButton("Plan")
-        self.plan_button.setObjectName("ModeButton")
-        self.plan_button.setCheckable(True)
-        self.plan_button.setChecked(True)
-        self.build_button = QPushButton("Build")
-        self.build_button.setObjectName("ModeButton")
-        self.build_button.setCheckable(True)
-        self.mode_toggle_group = QButtonGroup(self)
-        self.mode_toggle_group.setExclusive(True)
-        self.mode_toggle_group.addButton(self.plan_button)
-        self.mode_toggle_group.addButton(self.build_button)
-        mode_toggle_layout.addWidget(self.plan_button)
-        mode_toggle_layout.addWidget(self.build_button)
-        mode_toggle_layout.addStretch(1)
-        strip_layout.addLayout(mode_toggle_layout)
 
         input_area_layout = QHBoxLayout()
         self.command_input = CommandInputWidget()
@@ -126,6 +110,11 @@ class AuraMainWindow(QMainWindow):
         project_button.clicked.connect(lambda: self.controller.handle_new_project_request())
         right_column_layout.addWidget(project_button)
 
+        mission_log_btn = QPushButton("Mission Log")
+        mission_log_btn.setObjectName("ToolButton")
+        mission_log_btn.clicked.connect(lambda: self.controller.toggle_mission_log())
+        right_column_layout.addWidget(mission_log_btn)
+
         right_column_layout.addStretch(1)
 
         node_viewer_btn = QPushButton("Node Viewer")
@@ -138,11 +127,6 @@ class AuraMainWindow(QMainWindow):
         code_viewer_btn.clicked.connect(lambda: self.controller.toggle_code_viewer())
         right_column_layout.addWidget(code_viewer_btn)
 
-        mission_log_btn = QPushButton("Mission Log")
-        mission_log_btn.setObjectName("ToolButton")
-        mission_log_btn.clicked.connect(lambda: self.controller.toggle_mission_log())
-        right_column_layout.addWidget(mission_log_btn)
-
         right_column_layout.addStretch(1)
 
         main_layout.addWidget(left_column_widget, 1)
@@ -154,9 +138,6 @@ class AuraMainWindow(QMainWindow):
         self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
         self.autocomplete_popup.setWordWrap(True)
         self.autocomplete_popup.hide()
-
-    def is_build_mode(self) -> bool:
-        return self.build_button.isChecked()
 
     def resizeEvent(self, event: QResizeEvent):
         """Reposition the autocomplete popup when the window is resized."""
@@ -181,23 +162,11 @@ class AuraMainWindow(QMainWindow):
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
 
-            # Create the PromptEngine here, as it's a shared dependency now
             prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
-
             instruction_factory = InstructionFactory(foundry_manager=foundry_manager)
-
-            # Update the MissionManager instantiation to include the prompt_engine
-            MissionManager(
-                event_bus=self.event_bus,
-                mission_log_service=mission_log_service,
-                project_manager=project_manager,
-                display_callback=display_callback,
-                prompt_engine=prompt_engine
-            )
 
             provider_name = config_manager.get("llm_provider")
             provider = None
-
             if provider_name == "ollama":
                 provider = OllamaProvider(config=config_manager)
             elif provider_name == "gemini":
@@ -211,7 +180,7 @@ class AuraMainWindow(QMainWindow):
                 provider=provider,
                 event_bus=self.event_bus,
                 foundry_manager=foundry_manager,
-                prompt_engine=prompt_engine,  # Pass the engine to the LLMOperator too
+                prompt_engine=prompt_engine,
                 instruction_factory=instruction_factory,
                 display_callback=display_callback
             )
@@ -219,7 +188,6 @@ class AuraMainWindow(QMainWindow):
             command_handler = CommandHandler(foundry_manager=foundry_manager, event_bus=self.event_bus,
                                              project_manager=project_manager, display_callback=display_callback,
                                              output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
-
             self.controller.wire_up_command_handler(command_handler)
 
             ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
