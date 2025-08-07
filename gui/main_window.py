@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QButtonGroup, QFrame, QScrollArea, QLabel, QSizePolicy
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QResizeEvent
 
 from .command_input_widget import CommandInputWidget
@@ -216,6 +216,7 @@ class AuraMainWindow(QMainWindow):
                 foundry_manager=foundry_manager,
                 mission_log_service=mission_log_service,
                 tool_runner_service=tool_runner_service,
+                project_manager=project_manager,
                 display_callback=display_callback
             )
 

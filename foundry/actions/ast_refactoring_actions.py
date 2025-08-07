@@ -6,8 +6,86 @@ logic to functions.
 """
 import ast
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def add_parameter_to_function(path: str, function_name: str, parameter_name: str, parameter_type: Optional[str] = None,
+                              default_value: Optional[str] = None) -> str:
+    """
+    Adds a new parameter to a function's signature using AST.
+
+    This function can handle adding parameters with or without default values,
+    and correctly places them in the function's signature.
+    """
+    logger.info(f"Adding parameter '{parameter_name}' to function '{function_name}' in file '{path}'")
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        return f"Error: File not found at '{path}'."
+    except Exception as e:
+        return f"Error reading file at '{path}': {e}"
+
+    try:
+        tree = ast.parse(content)
+        func_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                func_node = node
+                break
+
+        if not func_node:
+            return f"Error: Function '{function_name}' not found in '{path}'."
+
+        # Create the new argument
+        new_arg = ast.arg(arg=parameter_name, annotation=None)
+        if parameter_type:
+            new_arg.annotation = ast.Name(id=parameter_type, ctx=ast.Load())
+
+        # Check for existing parameter with the same name
+        for arg in func_node.args.args:
+            if arg.arg == parameter_name:
+                return f"Error: Parameter '{parameter_name}' already exists in function '{function_name}'."
+        for arg in func_node.args.kwonlyargs:
+            if arg.arg == parameter_name:
+                return f"Error: Parameter '{parameter_name}' already exists in function '{function_name}'."
+
+        if default_value is not None:
+            # Argument with a default value
+            try:
+                value_node = ast.Constant(value=ast.literal_eval(default_value))
+            except (ValueError, SyntaxError):
+                value_node = ast.Name(id=default_value, ctx=ast.Load())
+
+            # Keyword-only arguments are generally safer for new additions with defaults
+            func_node.args.kwonlyargs.append(new_arg)
+            func_node.args.kw_defaults.append(value_node)
+        else:
+            # Positional argument without a default value
+            # Must be inserted before any args that have defaults.
+            num_args = len(func_node.args.args)
+            num_defaults = len(func_node.args.defaults)
+            first_default_idx = num_args - num_defaults
+
+            func_node.args.args.insert(first_default_idx, new_arg)
+
+        ast.fix_missing_locations(tree)
+        new_code = ast.unparse(tree)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_code)
+
+        return f"Successfully added parameter '{parameter_name}' to function '{function_name}' in '{path}'."
+
+    except SyntaxError as e:
+        return f"Error: Syntax error in file '{path}'. Details: {e}"
+    except Exception as e:
+        error_message = f"An unexpected error occurred while adding parameter: {e}"
+        logger.exception(error_message)
+        return error_message
 
 
 def add_attribute_to_init(path: str, class_name: str, attribute_name: str, default_value: str) -> str:

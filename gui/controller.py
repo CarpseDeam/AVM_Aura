@@ -112,6 +112,7 @@ class GUIController(QObject):
         self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
 
+        # We no longer need the old thinking signals. The StatusUpdate event handles it.
         if input_text.startswith("/"):
             try:
                 parts = shlex.split(input_text[1:])
@@ -150,8 +151,12 @@ class GUIController(QObject):
         self._insert_widget(widget)
 
     def _insert_widget(self, widget: QWidget):
+        """Inserts a widget into the chat layout and ensures it's visible."""
+        # Insert the widget before the stretch item
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
-        QTimer.singleShot(0, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
+
+        # Use a singleShot timer to ensure the scroll happens after the layout is updated
+        QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(widget))
 
     def get_full_chat_text(self) -> str:
         text_parts = []
