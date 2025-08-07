@@ -57,7 +57,8 @@ class MissionLogService:
         """Saves the current list of tasks to disk."""
         log_path = self._get_log_path()
         if not log_path:
-            logger.warning("Cannot save mission log, no active project.")
+            # This is okay during the planning phase before a project is created.
+            logger.debug("Cannot save mission log, no active project path set yet.")
             return
 
         try:

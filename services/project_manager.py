@@ -78,11 +78,16 @@ class ProjectManager:
             logger.error(message, exc_info=True)
             return False, message
 
-    def resolve_path(self, relative_or_absolute_path: str) -> Path:
-        path_obj = Path(relative_or_absolute_path)
-        if not self.active_project_path or path_obj.is_absolute():
-            return path_obj.resolve()
-        return (self.active_project_path / path_obj).resolve()
+    def resolve_path(self, relative_path: str) -> Path:
+        """
+        Safely resolves a relative path within the active project's root.
+        Raises an error if no project is active.
+        """
+        if not self.active_project_path:
+            raise RuntimeError("Cannot resolve path: No active project is set.")
+
+        # Using resolve() is important to clean up paths like ".."
+        return (self.active_project_path / relative_path).resolve()
 
     def get_active_project_name(self) -> Optional[str]:
         if not self.active_project_path:

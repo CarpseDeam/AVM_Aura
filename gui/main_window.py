@@ -16,7 +16,7 @@ from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService, PromptEngine, InstructionFactory
+    MissionLogService, PromptEngine, InstructionFactory, ToolRunnerService, ConductorService
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -202,9 +202,31 @@ class AuraMainWindow(QMainWindow):
                                              output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
             self.controller.wire_up_command_handler(command_handler)
 
-            ExecutorService(event_bus=self.event_bus, context_manager=context_manager, foundry_manager=foundry_manager,
-                            vector_context_service=vector_context_service, project_manager=project_manager,
-                            mission_log_service=mission_log_service, display_callback=display_callback)
+            # --- Refactored Execution Services Instantiation ---
+            tool_runner_service = ToolRunnerService(
+                event_bus=self.event_bus,
+                context_manager=context_manager,
+                foundry_manager=foundry_manager,
+                project_manager=project_manager,
+                display_callback=display_callback
+            )
+
+            conductor_service = ConductorService(
+                event_bus=self.event_bus,
+                foundry_manager=foundry_manager,
+                mission_log_service=mission_log_service,
+                tool_runner_service=tool_runner_service,
+                display_callback=display_callback
+            )
+
+            ExecutorService(
+                event_bus=self.event_bus,
+                foundry_manager=foundry_manager,
+                conductor_service=conductor_service,
+                tool_runner_service=tool_runner_service,
+                vector_context_service=vector_context_service,
+                mission_log_service=mission_log_service
+            )
 
             self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
             self.event_bus.subscribe(UserCommandEntered, command_handler.handle)

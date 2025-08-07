@@ -4,7 +4,7 @@ import threading
 import shlex
 from typing import Optional, Callable
 
-from PySide6.QtCore import QObject, Signal, Slot, QPoint
+from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputDialog
 
 from event_bus import EventBus
@@ -112,7 +112,6 @@ class GUIController(QObject):
         self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
 
-        # We no longer need the old thinking signals. The StatusUpdate event handles it.
         if input_text.startswith("/"):
             try:
                 parts = shlex.split(input_text[1:])
@@ -152,8 +151,7 @@ class GUIController(QObject):
 
     def _insert_widget(self, widget: QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
-        # THIS IS THE FIX: After adding a widget, tell the scroll bar to go to the bottom.
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+        QTimer.singleShot(0, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
 
     def get_full_chat_text(self) -> str:
         text_parts = []
