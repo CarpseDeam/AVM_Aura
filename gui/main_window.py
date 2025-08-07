@@ -194,6 +194,7 @@ class AuraMainWindow(QMainWindow):
                 foundry_manager=foundry_manager,
                 prompt_engine=prompt_engine,
                 instruction_factory=instruction_factory,
+                mission_log_service=mission_log_service,
                 display_callback=display_callback
             )
 

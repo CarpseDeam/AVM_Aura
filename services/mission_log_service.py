@@ -101,3 +101,16 @@ class MissionLogService:
     def get_tasks(self) -> List[Dict[str, Any]]:
         """Returns a copy of the current tasks."""
         return self.tasks.copy()
+
+    def clear_pending_tasks(self) -> None:
+        """Removes all tasks that are not marked as 'done'."""
+        initial_count = len(self.tasks)
+        self.tasks = [task for task in self.tasks if task.get('done', False)]
+        cleared_count = initial_count - len(self.tasks)
+
+        if cleared_count > 0:
+            logger.info(f"Cleared {cleared_count} pending tasks from the mission log.")
+            self._save_log()
+            self.event_bus.publish(MissionLogUpdated(tasks=self.tasks))
+        else:
+            logger.info("No pending tasks to clear from the mission log.")

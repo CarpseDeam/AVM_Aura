@@ -12,6 +12,7 @@ from events import (
 from providers import LLMProvider
 from .prompt_engine import PromptEngine
 from .instruction_factory import InstructionFactory
+from .mission_log_service import MissionLogService
 from foundry import FoundryManager
 from prompts.translator import TRANSLATOR_SYSTEM_PROMPT
 
@@ -31,6 +32,7 @@ class LLMOperator:
             foundry_manager: FoundryManager,
             prompt_engine: PromptEngine,
             instruction_factory: InstructionFactory,
+            mission_log_service: MissionLogService,
             display_callback: Optional[Callable[[str, str], None]] = None,
             max_retries: int = 2
     ):
@@ -39,6 +41,7 @@ class LLMOperator:
         self.foundry_manager = foundry_manager
         self.prompt_engine = prompt_engine
         self.instruction_factory = instruction_factory
+        self.mission_log_service = mission_log_service
         self.display_callback = display_callback
         self.max_retries = max_retries
         logger.info("LLMOperator initialized with new Architect->Translator workflow.")
@@ -99,6 +102,11 @@ class LLMOperator:
         The core orchestration logic for the Architect -> Translator workflow.
         """
         try:
+            # --- NEW: Clear pending tasks if this is a self-correction run ---
+            if event.auto_approve_plan:
+                self._display("Clearing failed plan from Mission Log to make way for the fix...", "avm_info")
+                self.mission_log_service.clear_pending_tasks()
+
             # --- Step 1: Call the Architect for the high-level plan ---
             self.event_bus.publish(StatusUpdate("PLANNING", "Architect is formulating a plan...", True))
             architect_prompt = self.prompt_engine.create_architect_prompt(event.prompt_text)
