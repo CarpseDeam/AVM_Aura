@@ -365,3 +365,61 @@ def append_to_function(path: str, function_name: str, code_to_append: str) -> st
         error_message = f"An unexpected error occurred while appending to function: {e}"
         logger.exception(error_message)
         return error_message
+
+
+def replace_node_in_file(path: str, node_name: str, new_code: str) -> str:
+    """
+    Replaces a top-level function or class node in a file with new code.
+    """
+    logger.info(f"Attempting to replace node '{node_name}' in file '{path}'")
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        return f"Error: File not found at '{path}'."
+    except Exception as e:
+        return f"Error reading file at '{path}': {e}"
+
+    try:
+        # Parse the original file content and the new code snippet
+        tree = ast.parse(content)
+        new_code_tree = ast.parse(new_code)
+
+        # Ensure the new code contains one valid top-level node
+        if not new_code_tree.body or not isinstance(new_code_tree.body[0], (ast.FunctionDef, ast.ClassDef)):
+            return f"Error: The provided `new_code` does not contain a single, valid top-level function or class definition."
+
+        new_node = new_code_tree.body[0]
+
+        # Check if the new node's name matches the target node_name
+        if new_node.name != node_name:
+            return f"Error: The name of the node in `new_code` ('{new_node.name}') does not match the `node_name` to be replaced ('{node_name}')."
+
+        # Find the node to replace in the original tree
+        node_replaced = False
+        for i, existing_node in enumerate(tree.body):
+            if isinstance(existing_node, (ast.FunctionDef, ast.ClassDef)) and existing_node.name == node_name:
+                tree.body[i] = new_node
+                node_replaced = True
+                break
+
+        if not node_replaced:
+            return f"Error: Node '{node_name}' not found as a top-level function or class in '{path}'."
+
+        # Unparse the modified tree and write it back to the file
+        new_content = ast.unparse(tree)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+        success_message = f"Successfully replaced node '{node_name}' in '{path}'."
+        logger.info(success_message)
+        return success_message
+
+    except SyntaxError as e:
+        return f"Error: Syntax error in file '{path}' or in the provided `new_code`. Details: {e}"
+    except Exception as e:
+        error_message = f"An unexpected error occurred while replacing node: {e}"
+        logger.exception(error_message)
+        return error_message

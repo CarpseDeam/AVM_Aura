@@ -9,7 +9,6 @@ import requests
 from typing import Any, Dict, List, Optional
 
 from .base import LLMProvider
-from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
 from services.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -29,32 +28,32 @@ class OllamaProvider(LLMProvider):
         logger.info(
             f"OllamaProvider initialized for model '{self.model_name}' at {self.api_url} with temps (Plan: {self.plan_temperature}, Build: {self.build_temperature})")
 
-    def _create_system_prompt(self, mode: str, context: Optional[Dict[str, str]], tools: Optional[List[Dict[str, Any]]]) -> str:
-        role_prompt = ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT
-        prompt_parts = [role_prompt]
-        if context:
-            context_block = "\n".join([f"Content of file '{k}':\n```\n{v}\n```" for k, v in context.items()])
-            prompt_parts.append(f"--- CONTEXT ---\n{context_block}\n--- END CONTEXT ---")
-        if tools:
-            tool_definitions = json.dumps(tools, indent=2)
-            tool_block = f"Here are the available tools you can call in your JSON response:\n{tool_definitions}"
-            prompt_parts.append(tool_block)
-        return "\n\n".join(prompt_parts)
-
     def get_response(
             self,
             prompt: str,
             mode: str,
             context: Optional[Dict[str, str]] = None,
             tools: Optional[List[Dict[str, Any]]] = None,
+            system_instruction_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Sends the prompt to the Ollama /api/generate endpoint and returns a structured response.
         """
+        if not system_instruction_override:
+            raise ValueError("A system_instruction_override must be provided by the calling service.")
+        system_prompt = system_instruction_override
+
         temp = self.plan_temperature if mode == 'plan' else self.build_temperature
-        system_prompt = self._create_system_prompt(mode, context, tools)
-        payload = {"model": self.model_name, "prompt": prompt, "system": system_prompt, "stream": False, "options": {"temperature": temp}}
-        is_json_mode = mode == 'build' or (mode == 'plan' and tools)
+
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "system": system_prompt,
+            "stream": False,
+            "options": {"temperature": temp}
+        }
+
+        is_json_mode = mode == 'build'
         if is_json_mode:
             payload["format"] = "json"
 
@@ -72,11 +71,9 @@ class OllamaProvider(LLMProvider):
             if is_json_mode:
                 try:
                     data = json.loads(raw_response)
-                    # For plan mode, we look for a text explanation inside the JSON
                     if mode == 'plan' and 'reasoning' in data:
                         structured_response['text'] = data.pop('reasoning')
 
-                    # The remaining data is assumed to be a tool call or plan
                     if "tool_name" in data:
                         structured_response["tool_calls"].append(data)
                     elif "plan" in data and isinstance(data['plan'], list):

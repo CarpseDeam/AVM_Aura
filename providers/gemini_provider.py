@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 import google.generativeai as genai
 from proto.marshal.collections.maps import MapComposite
 from .base import LLMProvider
-from prompts import ARCHITECT_SYSTEM_PROMPT, OPERATOR_SYSTEM_PROMPT
 from services.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -61,9 +60,9 @@ class GeminiProvider(LLMProvider):
         """
         Sends the prompt to the Gemini API and returns a structured response dictionary.
         """
-        # Use the override if provided, otherwise fall back to the mode-based default.
-        system_instruction = system_instruction_override or (
-            ARCHITECT_SYSTEM_PROMPT if mode == 'plan' else OPERATOR_SYSTEM_PROMPT)
+        if not system_instruction_override:
+            raise ValueError("A system_instruction_override must be provided by the calling service.")
+        system_instruction = system_instruction_override
 
         temp = self.plan_temperature if mode == 'plan' else self.build_temperature
 

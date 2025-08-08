@@ -17,3 +17,5 @@ from .instruction_factory import InstructionFactory
 from .tool_runner_service import ToolRunnerService
 from .conductor_service import ConductorService
 from .sandbox_manager import SandboxManager
+from .architect_service import ArchitectService
+from .technician_service import TechnicianService

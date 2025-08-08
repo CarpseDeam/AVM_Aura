@@ -1,50 +1,39 @@
 # services/llm_operator.py
 import logging
-import json
-import re
 import threading
-from typing import Callable, Optional, List
+from typing import Callable, Optional
 
 from event_bus import EventBus
 from events import (
     UserPromptEntered, DirectToolInvocationRequest, StatusUpdate
 )
-from providers import LLMProvider
-from .prompt_engine import PromptEngine
-from .instruction_factory import InstructionFactory
+from .architect_service import ArchitectService
+from .technician_service import TechnicianService
 from .mission_log_service import MissionLogService
-from foundry import FoundryManager
-from prompts.translator import TRANSLATOR_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
 
 class LLMOperator:
     """
-    Orchestrates LLM interactions using a two-step "Architect -> Translator" process
-    to generate robust, step-by-step plans for the Mission Log.
+    Acts as the "Foreman", orchestrating the workflow between the Architect,
+    Technician, and MissionLog services to populate the Mission Log.
     """
 
     def __init__(
             self,
-            provider: LLMProvider,
             event_bus: EventBus,
-            foundry_manager: FoundryManager,
-            prompt_engine: PromptEngine,
-            instruction_factory: InstructionFactory,
+            architect_service: ArchitectService,
+            technician_service: TechnicianService,
             mission_log_service: MissionLogService,
             display_callback: Optional[Callable[[str, str], None]] = None,
-            max_retries: int = 2
     ):
-        self.provider = provider
         self.event_bus = event_bus
-        self.foundry_manager = foundry_manager
-        self.prompt_engine = prompt_engine
-        self.instruction_factory = instruction_factory
+        self.architect_service = architect_service
+        self.technician_service = technician_service
         self.mission_log_service = mission_log_service
         self.display_callback = display_callback
-        self.max_retries = max_retries
-        logger.info("LLMOperator initialized with new Architect->Translator workflow.")
+        logger.info("LLMOperator (Foreman) initialized.")
 
     def _display(self, message: str, tag: str) -> None:
         if self.display_callback:
@@ -56,41 +45,19 @@ class LLMOperator:
         args = tool_call.get('arguments', {})
         if not isinstance(args, dict): args = {}
 
-        # Start with the formatted tool name
         summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
-
-        # Add primary identifier like path or name
         path = args.get('path') or args.get('source_path')
         if path:
             summary += f": '{path}'"
         elif 'project_name' in args:
             summary += f": '{args['project_name']}'"
 
-        # Add a snippet of the content if relevant
         content_keys = ['content', 'function_code', 'class_code', 'command']
         for key in content_keys:
             if key in args:
                 summary += f" with `{str(args[key])[:40].strip()}...`"
-                break  # Only show the first content-like key
-
+                break
         return summary
-
-    def _extract_plan_from_text(self, text: str) -> (str, List[str]):
-        """Parses the Architect's response to separate reasoning from the numbered plan."""
-        reasoning = text
-        plan_items = []
-
-        # The regex now looks for one or more digits, a dot or parenthesis, and optional whitespace.
-        list_start_match = re.search(r'^\s*\d+[.)]\s+', text, re.MULTILINE)
-
-        if list_start_match:
-            list_start_index = list_start_match.start()
-            reasoning = text[:list_start_index].strip()
-            plan_text = text[list_start_index:]
-            # This regex is more robust to variations in list formatting.
-            plan_items = re.findall(r'^\s*\d+[.)]\s*(.*)', plan_text, re.MULTILINE)
-
-        return reasoning, [item.strip() for item in plan_items if item.strip()]
 
     def handle(self, event: UserPromptEntered) -> None:
         """Handles the user prompt by running the full planning workflow in a background thread."""
@@ -99,65 +66,44 @@ class LLMOperator:
 
     def _handle_prompt_thread(self, event: UserPromptEntered):
         """
-        The core orchestration logic for the Architect -> Translator workflow.
+        The core orchestration logic for the Architect -> Technician workflow.
         """
         try:
-            # --- NEW: Clear pending tasks if this is a self-correction run ---
             if event.auto_approve_plan:
                 self._display("Clearing failed plan from Mission Log to make way for the fix...", "avm_info")
                 self.mission_log_service.clear_pending_tasks()
 
-            # --- Step 1: Call the Architect for the high-level plan ---
-            self.event_bus.publish(StatusUpdate("PLANNING", "Architect is formulating a plan...", True))
-            architect_prompt = self.prompt_engine.create_architect_prompt(event.prompt_text)
-            architect_response = self.provider.get_response(prompt=architect_prompt, mode='plan', tools=None)
-            architect_text = architect_response.get("text")
-
-            if not architect_text:
-                self._display("❌ Architect failed to provide a plan.", "avm_error")
-                self.event_bus.publish(StatusUpdate("FAIL", "Architect failed to respond.", False))
-                return
-
-            reasoning, plan_steps = self._extract_plan_from_text(architect_text)
+            # 1. Delegate to the ArchitectService to get the high-level plan
+            reasoning, plan_steps = self.architect_service.get_plan(event.prompt_text)
 
             if not plan_steps:
-                self._display("⚠️ Architect provided reasoning but no actionable plan.", "avm_warning")
-                self._display(f"💬 Architect's Response:\n{reasoning}", "avm_response")
-                self.event_bus.publish(StatusUpdate("IDLE", "Ready for input.", False))
-                return
+                logger.warning("Architect service did not return any plan steps. Aborting.")
+                return # Error messages are handled by the service itself
 
-            self._display(f"💬 Architect's Plan:\n{reasoning}", "avm_response")
-
-            # --- Step 2: Loop through the plan, calling the Translator for each step ---
-            all_tools = self.foundry_manager.get_llm_tool_definitions()
+            # 2. Loop through the plan, delegating each step to the TechnicianService
             total_steps = len(plan_steps)
-
-            for i, step_text in enumerate(plan_steps):
+            for i, task in enumerate(plan_steps):
                 self.event_bus.publish(StatusUpdate(
-                    "PLANNING", f"Translator converting step...", True, progress=i + 1, total=total_steps
+                    "PLANNING", f"Technician converting task: '{task[:50]}...'", True, progress=i + 1, total=total_steps
                 ))
-                self._display(f"    - Step {i + 1}/{total_steps}: `{step_text}`", "system_message")
+                self._display(f"    - Task {i + 1}/{total_steps}: `{task}`", "system_message")
 
-                translator_prompt = self.prompt_engine.create_translator_prompt(step_text, all_tools)
-                translator_response = self.provider.get_response(
-                    prompt=translator_prompt, mode='build', tools=all_tools,
-                    system_instruction_override=TRANSLATOR_SYSTEM_PROMPT
-                )
-                instruction = self.instruction_factory.create_single_invocation_from_data(translator_response)
+                invocations = self.technician_service.get_tool_invocations(task)
 
-                if instruction:
-                    # Successfully translated step into a tool call
-                    tool_call_dict = {"tool_name": instruction.blueprint.id, "arguments": instruction.parameters}
-                    params = {"description": self._summarize_tool_call(tool_call_dict), "tool_call": tool_call_dict}
+                if not invocations:
+                    error_message = f"❌ Technician failed to convert task {i + 1}. Aborting plan."
+                    self._display(error_message, "avm_error")
+                    self.event_bus.publish(StatusUpdate("FAIL", f"Technician failed on task {i + 1}.", False))
+                    return
+
+                # 3. Add the successfully translated invocations to the Mission Log
+                for invocation in invocations:
+                    tool_call_dict = {"tool_name": invocation.blueprint.id, "arguments": invocation.parameters}
+                    summary = self._summarize_tool_call(tool_call_dict)
+                    params = {"description": summary, "tool_call": tool_call_dict}
                     self.event_bus.publish(DirectToolInvocationRequest(
                         tool_id='add_task_to_mission_log', params=params
                     ))
-                else:
-                    # Failed to translate the step, abort the entire plan.
-                    error_message = f"❌ Translator failed to convert step {i + 1}. Aborting plan.\nResponse: {translator_response.get('text', 'No text in response.')}"
-                    self._display(error_message, "avm_error")
-                    self.event_bus.publish(StatusUpdate("FAIL", f"Translator failed on step {i + 1}.", False))
-                    return
 
             self.event_bus.publish(StatusUpdate("IDLE", "Mission Log is ready for dispatch.", False))
 

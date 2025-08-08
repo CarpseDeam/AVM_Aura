@@ -55,11 +55,11 @@ class PromptEngine:
         logger.debug("Final Architect prompt created with layered context.")
         return final_prompt
 
-    def create_translator_prompt(self, task: str, available_tools: List[Dict[str, Any]]) -> str:
+    def create_technician_prompt(self, task: str, available_tools: List[Dict[str, Any]]) -> str:
         """
-        Builds a precise prompt for the Translator agent to convert a task into a tool call.
+        Builds a precise prompt for the Technician agent to convert a task into a tool call plan.
         """
-        logger.info(f"Creating a new Translator prompt for task: '{task}'")
+        logger.info(f"Creating a new Technician prompt for task: '{task}'")
 
         tools_json = json.dumps(available_tools, indent=2)
 

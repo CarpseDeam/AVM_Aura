@@ -92,27 +92,37 @@ The plan must end with a step to verify the fix (e.g., by re-running the test th
 
         sandbox_manager = None
         try:
-            tasks = self.mission_log_service.get_tasks()
-            pending_tasks = [t for t in tasks if not t.get('done')]
-            if not pending_tasks:
+            initial_tasks = self.mission_log_service.get_tasks()
+            initial_pending_count = len([t for t in initial_tasks if not t.get('done')])
+            if initial_pending_count == 0:
                 self._display("✅ Mission Log is empty. Nothing to execute.", "system_message")
                 return
 
-            self._display(f"🚀 Mission dispatch acknowledged. Executing {len(pending_tasks)} tasks...", "system_message")
-            self.event_bus.publish(StatusUpdate("EXECUTING", f"Mission started with {len(pending_tasks)} tasks", True, progress=0, total=len(pending_tasks)))
+            self._display(f"🚀 Mission dispatch acknowledged. Executing {initial_pending_count} tasks...", "system_message")
+            self.event_bus.publish(StatusUpdate("EXECUTING", f"Mission started with {initial_pending_count} tasks", True, progress=0, total=initial_pending_count))
 
-            for i, task in enumerate(pending_tasks):
-                # --- NEW: Create a fresh sandbox for EACH step ---
+            completed_in_run = 0
+            while True:
+                tasks = self.mission_log_service.get_tasks()
+                pending_tasks = [t for t in tasks if not t.get('done')]
+
+                if not pending_tasks:
+                    self._display("🎉 Mission Accomplished! All tasks completed successfully.", "system_message")
+                    break
+
+                task = pending_tasks[0]
+                completed_in_run += 1
+
                 sandbox_manager = SandboxManager(project_path=self.project_manager.active_project_path)
                 sandbox_path = sandbox_manager.create()
-                self._display(f"--- Executing Task {i + 1}/{len(pending_tasks)}: {task['description']} ---", "avm_executing")
-                self.event_bus.publish(StatusUpdate("EXECUTING", f"Task: {task['description']}", True, progress=i + 1, total=len(pending_tasks)))
+                self._display(f"--- Executing Task {completed_in_run}/{initial_pending_count}: {task['description']} ---", "avm_executing")
+                self.event_bus.publish(StatusUpdate("EXECUTING", f"Task: {task['description']}", True, progress=completed_in_run, total=initial_pending_count))
 
                 tool_call_dict = task.get("tool_call")
                 if not tool_call_dict:
                     self._display(f"⚠️ Skipping task {task['id']} ('{task['description']}') as it has no executable tool call.", "avm_warning")
                     self.mission_log_service.mark_task_as_done(task['id'])
-                    sandbox_manager.cleanup() # Clean up the unused sandbox
+                    sandbox_manager.cleanup()
                     continue
 
                 blueprint = self.foundry_manager.get_blueprint(tool_call_dict['tool_name'])
@@ -122,7 +132,6 @@ The plan must end with a step to verify the fix (e.g., by re-running the test th
                 invocation = BlueprintInvocation(blueprint=blueprint, parameters=tool_call_dict.get('arguments', {}))
                 result = self.tool_runner_service.run_tool(invocation, sandbox_path=sandbox_path)
 
-                # Check for failure
                 is_failure = (isinstance(result, str) and ("Error" in result or "failed" in result)) or \
                              (isinstance(result, dict) and result.get("status") in ["failure", "error"])
 
@@ -130,24 +139,17 @@ The plan must end with a step to verify the fix (e.g., by re-running the test th
                     self._initiate_self_correction(invocation, result)
                     raise RuntimeError(f"Task {task['id']} failed. Self-correction initiated.")
                 else:
-                    # --- NEW: Commit after EACH successful step ---
                     self._display(f"✅ Step successful. Committing changes...", "avm_info")
                     sandbox_manager.commit()
                     self.mission_log_service.mark_task_as_done(task['id'])
                     self.event_bus.publish(RefreshFileTreeRequest())
-                    # Clean up the sandbox for this step
                     sandbox_manager.cleanup()
                     sandbox_manager = None
-
-
-            # If we get here, all tasks succeeded.
-            self._display("🎉 Mission Accomplished! All tasks completed successfully.", "system_message")
 
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)
             self._display(f"❌ Mission aborted due to an error: {e}", "avm_error")
         finally:
-            # Final cleanup just in case of an unexpected exit
             if sandbox_manager:
                 sandbox_manager.cleanup()
             self.is_mission_active = False

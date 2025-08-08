@@ -16,7 +16,8 @@ from event_bus import EventBus
 from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService, PromptEngine, InstructionFactory, ToolRunnerService, ConductorService
+    MissionLogService, PromptEngine, InstructionFactory, ToolRunnerService,
+    ConductorService, ArchitectService, TechnicianService
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -188,12 +189,25 @@ class AuraMainWindow(QMainWindow):
             else:
                 raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
 
-            llm_operator = LLMOperator(
+            # --- Refactored Service Instantiation ---
+            architect_service = ArchitectService(
                 provider=provider,
+                prompt_engine=prompt_engine,
                 event_bus=self.event_bus,
-                foundry_manager=foundry_manager,
+                display_callback=display_callback
+            )
+
+            technician_service = TechnicianService(
+                provider=provider,
                 prompt_engine=prompt_engine,
                 instruction_factory=instruction_factory,
+                foundry_manager=foundry_manager
+            )
+
+            llm_operator = LLMOperator(
+                event_bus=self.event_bus,
+                architect_service=architect_service,
+                technician_service=technician_service,
                 mission_log_service=mission_log_service,
                 display_callback=display_callback
             )
@@ -203,7 +217,6 @@ class AuraMainWindow(QMainWindow):
                                              output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
             self.controller.wire_up_command_handler(command_handler)
 
-            # --- Refactored Execution Services Instantiation ---
             tool_runner_service = ToolRunnerService(
                 event_bus=self.event_bus,
                 context_manager=context_manager,

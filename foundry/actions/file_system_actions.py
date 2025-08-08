@@ -27,6 +27,29 @@ def write_file(path: str, content: str) -> str:
         return error_message
 
 
+def append_to_file(path: str, content: str) -> str:
+    """Appends content to the end of a specified file."""
+    try:
+        logger.info(f"Attempting to append to file: {path}")
+        path_obj = Path(path)
+        if not path_obj.is_file():
+            return f"Error: File not found at path '{path}'. Cannot append."
+
+        with path_obj.open('a', encoding='utf-8') as f:
+            # Prepend a newline if the file doesn't end with one, ensuring separation
+            if path_obj.read_text(encoding='utf-8') and not path_obj.read_text(encoding='utf-8').endswith('\n'):
+                f.write('\n')
+            bytes_written = f.write(content)
+
+        success_message = f"Successfully appended {bytes_written} bytes to {path}"
+        logger.info(success_message)
+        return success_message
+    except Exception as e:
+        error_message = f"An unexpected error occurred while appending to file {path}: {e}"
+        logger.exception(error_message)
+        return error_message
+
+
 def read_file(path: str) -> str:
     """Reads the content of a specified file."""
     try:
