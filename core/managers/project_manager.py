@@ -1,10 +1,13 @@
+# core/managers/project_manager.py
 import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List
 
-from core.git_manager import GitManager
-from core.venv_manager import VenvManager
+from .git_manager import GitManager
+from .venv_manager import VenvManager
+from event_bus import EventBus
+from events import ProjectCreated
 
 
 class ProjectManager:
@@ -12,9 +15,10 @@ class ProjectManager:
     Manages project lifecycles by coordinating Git and Venv managers.
     This class handles the high-level state of the active project.
     """
-    def __init__(self, workspace_path: str = "projects"):
+    def __init__(self, event_bus: EventBus, workspace_path: str = "projects"):
         self.workspace_root = Path(workspace_path).resolve()
         self.workspace_root.mkdir(exist_ok=True)
+        self.event_bus = event_bus
 
         self.active_project_path: Optional[Path] = None
         self.git_manager: Optional[GitManager] = None
@@ -73,6 +77,10 @@ class ProjectManager:
             self.clear_active_project()
             return None
 
+        self.event_bus.emit(
+            "project_created",
+            ProjectCreated(project_name=project_name, project_path=str(self.active_project_path))
+        )
         print(f"[ProjectManager] Successfully created new project: {project_path}")
         return str(project_path)
 
@@ -97,6 +105,10 @@ class ProjectManager:
         if not self.venv_manager.is_active:
             print("[ProjectManager] Warning: No virtual environment found. Please run install command.")
 
+        self.event_bus.emit(
+            "project_created",
+            ProjectCreated(project_name=self.active_project_name, project_path=str(self.active_project_path))
+        )
         print(f"[ProjectManager] Project loaded: {self.active_project_path}")
         return str(self.active_project_path)
 

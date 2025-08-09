@@ -1,3 +1,4 @@
+# services/action_service.py
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -27,56 +28,36 @@ class ActionService:
         self.task_manager = task_manager
         print("[ActionService] Initialized")
 
-    def handle_new_project(self):
+    def handle_new_project(self, project_name: str):
         project_manager = self.service_manager.project_manager
-        rag_manager = self.service_manager.rag_manager
         app_state_service = self.service_manager.app_state_service
-        lsp_client = self.service_manager.lsp_client_service
-        if not all([project_manager, rag_manager, app_state_service, lsp_client]): return
+        if not all([project_manager, app_state_service]): return
 
-        project_path_str = project_manager.new_project("New_Aura_Project")
+        project_path_str = project_manager.new_project(project_name)
         if not project_path_str:
-            QMessageBox.critical(self.window_manager.get_main_window(), "Project Creation Failed",
-                                 "Could not initialize project.")
+            if self.window_manager and self.window_manager.get_main_window():
+                QMessageBox.critical(self.window_manager.get_main_window(), "Project Creation Failed",
+                                     "Could not initialize project.")
             return
 
-        project_path = Path(project_path_str)
-        asyncio.create_task(rag_manager.switch_project_context(project_path))
         app_state_service.set_app_state(AppState.MODIFY, project_manager.active_project_name)
-        asyncio.create_task(lsp_client.initialize_session())
-
-        if self.window_manager:
-            chat_interface = self.window_manager.get_main_window().chat_interface
-            if chat_interface:
-                chat_interface.set_project_manager(project_manager)
-                chat_interface.load_project_session()
 
         if project_manager.git_manager:
             self.event_bus.emit("branch_updated", project_manager.git_manager.get_active_branch_name())
 
     def handle_load_project(self):
         project_manager = self.service_manager.project_manager
-        rag_manager = self.service_manager.rag_manager
         app_state_service = self.service_manager.app_state_service
-        lsp_client = self.service_manager.lsp_client_service
-        if not all([project_manager, rag_manager, app_state_service, lsp_client]): return
+        if not all([project_manager, app_state_service]): return
 
-        path = QFileDialog.getExistingDirectory(self.window_manager.get_main_window(), "Load Project",
+        main_win = self.window_manager.get_main_window() if self.window_manager else None
+        path = QFileDialog.getExistingDirectory(main_win, "Load Project",
                                                 str(project_manager.workspace_root))
         if path:
             project_path_str = project_manager.load_project(path)
             if project_path_str:
-                project_path = Path(project_path_str)
-                asyncio.create_task(rag_manager.switch_project_context(project_path))
                 project_manager.begin_modification_session()
                 app_state_service.set_app_state(AppState.MODIFY, project_manager.active_project_name)
-                asyncio.create_task(lsp_client.initialize_session())
-
-                if self.window_manager:
-                    chat_interface = self.window_manager.get_main_window().chat_interface
-                    if chat_interface:
-                        chat_interface.set_project_manager(project_manager)
-                        chat_interface.load_project_session()
 
                 if project_manager.git_manager:
                     self.event_bus.emit("branch_updated", project_manager.git_manager.get_active_branch_name())
@@ -93,7 +74,10 @@ class ActionService:
         if app_state_service: app_state_service.set_app_state(AppState.BOOTSTRAP)
 
         if self.window_manager and self.window_manager.get_main_window():
-            self.window_manager.get_main_window().chat_interface.clear_chat("New session started.")
+            controller = self.window_manager.get_main_window().get_controller()
+            if controller:
+                # This needs a method on the controller to clear the chat.
+                pass
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "ActionService", level, message)

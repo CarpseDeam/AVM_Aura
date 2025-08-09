@@ -1,10 +1,10 @@
 # gui/main_window.py
 import logging
-import threading
 import os
+from pathlib import Path
+
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QButtonGroup, QFrame, QScrollArea, QLabel, QSizePolicy
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QLabel, QSizePolicy, QPushButton
 )
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QResizeEvent
@@ -13,44 +13,32 @@ from .command_input_widget import CommandInputWidget
 from .controller import GUIController
 from .status_bar_widget import StatusBarWidget
 from event_bus import EventBus
-from services import (
-    LLMOperator, CommandHandler, ExecutorService, ConfigManager,
-    ContextManager, VectorContextService, format_as_box, ProjectManager,
-    MissionLogService, PromptEngine, InstructionFactory, ToolRunnerService,
-    ConductorService, ArchitectService, TechnicianService, PlanRefinerService
-)
-from foundry import FoundryManager
-from providers import GeminiProvider, OllamaProvider
-from events import UserPromptEntered, UserCommandEntered, ToolsModified
 
 logger = logging.getLogger(__name__)
 
 
 class AuraMainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, event_bus: EventBus, project_root: Path):
         super().__init__()
         self.setWindowTitle("Aura - Command Deck")
         self.setGeometry(100, 100, 1200, 800)
+        self.event_bus = event_bus
 
-        icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'Ava_icon.ico')
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        icon_path = project_root / "assets" / "Ava_icon.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         else:
             logger.warning(f"Window icon not found at {icon_path}")
 
-        self.event_bus = EventBus()
-        self.controller = None
-
         self._setup_ui()
         self.controller = GUIController(self, self.event_bus, self.chat_layout, self.scroll_area)
-
-        # Register elements that are ready immediately
         self.controller.register_ui_elements(
             command_input=self.command_input,
             autocomplete_popup=self.autocomplete_popup,
-            status_bar=self.status_bar  # Register the new status bar
+            status_bar=self.status_bar
         )
-        self._start_backend_setup()
+        self.controller.post_welcome_message()
+        self._apply_stylesheet()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -59,7 +47,6 @@ class AuraMainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- Left Column: Chat and Controls ---
         left_column_widget = QWidget()
         left_column_layout = QVBoxLayout(left_column_widget)
         left_column_layout.setContentsMargins(0, 0, 0, 0)
@@ -79,11 +66,10 @@ class AuraMainWindow(QMainWindow):
         self.scroll_area.setWidget(chat_container)
         left_column_layout.addWidget(self.scroll_area)
 
-        # --- Status Bar --- (NEW WIDGET)
         self.status_bar = StatusBarWidget()
-        left_column_layout.addWidget(self.status_bar)
+        self.setStatusBar(self.status_bar)
 
-        # --- Bottom Control Strip ---
+
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
         self.control_strip.setFixedHeight(120)
@@ -107,7 +93,6 @@ class AuraMainWindow(QMainWindow):
         strip_layout.addLayout(input_area_layout, 1)
         left_column_layout.addWidget(self.control_strip)
 
-        # --- Right Column: Tool Bar ---
         right_column_widget = QWidget()
         right_column_widget.setObjectName("ToolBar")
         right_column_widget.setFixedWidth(160)
@@ -120,12 +105,22 @@ class AuraMainWindow(QMainWindow):
         project_button.clicked.connect(lambda: self.controller.handle_new_project_request())
         right_column_layout.addWidget(project_button)
 
-        mission_log_btn = QPushButton("Mission Log")
+        load_project_button = QPushButton("Load Project")
+        load_project_button.setObjectName("ToolButton")
+        load_project_button.clicked.connect(lambda: self.controller.handle_load_project_request())
+        right_column_layout.addWidget(load_project_button)
+
+        mission_log_btn = QPushButton("Agent TODO")
         mission_log_btn.setObjectName("ToolButton")
         mission_log_btn.clicked.connect(lambda: self.controller.toggle_mission_log())
         right_column_layout.addWidget(mission_log_btn)
 
         right_column_layout.addStretch(1)
+
+        model_config_button = QPushButton("Configure Models")
+        model_config_button.setObjectName("ToolButton")
+        model_config_button.clicked.connect(lambda: self.event_bus.emit("configure_models_requested"))
+        right_column_layout.addWidget(model_config_button)
 
         node_viewer_btn = QPushButton("Node Viewer")
         node_viewer_btn.setObjectName("ToolButton")
@@ -137,12 +132,9 @@ class AuraMainWindow(QMainWindow):
         code_viewer_btn.clicked.connect(lambda: self.controller.toggle_code_viewer())
         right_column_layout.addWidget(code_viewer_btn)
 
-        right_column_layout.addStretch(1)
-
         main_layout.addWidget(left_column_widget, 1)
         main_layout.addWidget(right_column_widget)
 
-        # --- Autocomplete Popup ---
         self.autocomplete_popup = QLabel(self.command_input)
         self.autocomplete_popup.setObjectName("AutoCompletePopup")
         self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
@@ -150,110 +142,77 @@ class AuraMainWindow(QMainWindow):
         self.autocomplete_popup.hide()
 
     def resizeEvent(self, event: QResizeEvent):
-        """Reposition the autocomplete popup when the window is resized."""
         super().resizeEvent(event)
-        if self.controller:
+        if hasattr(self, 'controller') and self.controller:
             self.controller.reposition_autocomplete_popup()
 
-    def _start_backend_setup(self):
-        self.controller.post_welcome_message()
-        threading.Thread(target=self._setup_backend_services, daemon=True).start()
+    def get_controller(self) -> GUIController:
+        return self.controller
 
-    def _setup_backend_services(self):
-        try:
-            logger.info("Setting up backend services...")
-            display_callback = self.controller.get_display_callback()
-            config_manager = ConfigManager()
-
-            foundry_manager = FoundryManager()
-            self.event_bus.subscribe(ToolsModified, foundry_manager.handle_tools_modified)
-
-            context_manager = ContextManager()
-            vector_context_service = VectorContextService()
-
-            # --- THE FIX ---
-            # Pass the event_bus to the ProjectManager constructor.
-            project_manager = ProjectManager(event_bus=self.event_bus)
-
-            mission_log_service = MissionLogService(project_manager=project_manager, event_bus=self.event_bus)
-            self.controller.set_project_manager(project_manager)
-            self.controller.set_mission_log_service(mission_log_service)
-
-            prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
-            instruction_factory = InstructionFactory(foundry_manager=foundry_manager)
-            plan_refiner_service = PlanRefinerService()
-
-            provider_name = config_manager.get("llm_provider")
-            provider = None
-            if provider_name == "ollama":
-                provider = OllamaProvider(config=config_manager)
-            elif provider_name == "gemini":
-                api_key = os.getenv("GOOGLE_API_KEY")
-                if not api_key: raise ValueError("GOOGLE_API_KEY environment variable not set.")
-                provider = GeminiProvider(api_key=api_key, config=config_manager)
-            else:
-                raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
-
-            # --- Refactored Service Instantiation ---
-            architect_service = ArchitectService(
-                provider=provider,
-                prompt_engine=prompt_engine,
-                event_bus=self.event_bus,
-                display_callback=display_callback
-            )
-
-            technician_service = TechnicianService(
-                provider=provider,
-                prompt_engine=prompt_engine,
-                instruction_factory=instruction_factory,
-                foundry_manager=foundry_manager
-            )
-
-            llm_operator = LLMOperator(
-                event_bus=self.event_bus,
-                architect_service=architect_service,
-                technician_service=technician_service,
-                mission_log_service=mission_log_service,
-                plan_refiner_service=plan_refiner_service,
-                display_callback=display_callback
-            )
-
-            command_handler = CommandHandler(foundry_manager=foundry_manager, event_bus=self.event_bus,
-                                             project_manager=project_manager, display_callback=display_callback,
-                                             output_log_text_fetcher=lambda: self.controller.get_full_chat_text())
-            self.controller.wire_up_command_handler(command_handler)
-
-            tool_runner_service = ToolRunnerService(
-                event_bus=self.event_bus,
-                context_manager=context_manager,
-                foundry_manager=foundry_manager,
-                project_manager=project_manager,
-                display_callback=display_callback
-            )
-
-            conductor_service = ConductorService(
-                event_bus=self.event_bus,
-                foundry_manager=foundry_manager,
-                mission_log_service=mission_log_service,
-                tool_runner_service=tool_runner_service,
-                project_manager=project_manager,
-                display_callback=display_callback
-            )
-
-            ExecutorService(
-                event_bus=self.event_bus,
-                foundry_manager=foundry_manager,
-                conductor_service=conductor_service,
-                tool_runner_service=tool_runner_service,
-                vector_context_service=vector_context_service,
-                mission_log_service=mission_log_service
-            )
-
-            self.event_bus.subscribe(UserPromptEntered, llm_operator.handle)
-            self.event_bus.subscribe(UserCommandEntered, command_handler.handle)
-            logger.info("Backend services initialized and ready.")
-            display_callback("System online. All services ready.", "system_message")
-        except Exception as e:
-            logger.error(f"Failed to initialize backend services: {e}", exc_info=True)
-            error_msg = format_as_box("FATAL ERROR", f"Could not initialize backend: {e}")
-            display_callback(error_msg, "avm_error")
+    def _apply_stylesheet(self):
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #1a1a1a;
+                color: #d4d4d4;
+                font-family: "JetBrains Mono", "Consolas", monospace;
+                font-size: 14px;
+            }
+            #ScrollArea {
+                background-color: #0d0d0d;
+                border: none;
+            }
+            #ControlStrip {
+                background-color: #1a1a1a;
+                border-top: 1px solid #333333;
+            }
+            #CommandInput {
+                background-color: #2a2a2a;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 5px;
+                font-size: 15px;
+            }
+            QTextEdit::placeholderText { color: #777777; }
+            #SendButton {
+                background-color: #FFB74D;
+                color: #0d0d0d;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            #SendButton:hover { background-color: #FFA726; }
+            #ToolBar {
+                background-color: #1c1c1c;
+                border-left: 1px solid #333333;
+            }
+            #ToolButton {
+                background-color: #2a2a2a;
+                color: #cccccc;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 12px;
+                font-weight: bold;
+            }
+            #ToolButton:hover {
+                background-color: #3a3a3a;
+                color: #FFB74D;
+                border-color: #FFB74D;
+            }
+            #SystemMessage {
+                color: #888888;
+                font-style: italic;
+                padding: 5px 10px;
+            }
+            #WelcomeBanner {
+                color: #FFB74D;
+                font-family: "Courier New", monospace;
+                font-size: 12px;
+                line-height: 1.0;
+                padding-bottom: 10px;
+            }
+            #AutoCompletePopup {
+                background-color: #2a2a2a;
+                border: 1px solid #444444;
+                color: #d4d4d4;
+                padding: 5px;
+            }
+        """)

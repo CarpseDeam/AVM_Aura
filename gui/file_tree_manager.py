@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint
 
-from services import ProjectManager
+from core.project_manager import ProjectManager
 from event_bus import EventBus
 from events import DirectToolInvocationRequest
 

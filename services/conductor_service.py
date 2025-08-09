@@ -3,7 +3,6 @@ import threading
 from typing import Callable, Optional
 
 from event_bus import EventBus
-from events import StatusUpdate, RefreshFileTreeRequest
 from services.mission_log_service import MissionLogService
 from services.tool_runner_service import ToolRunnerService
 from foundry import BlueprintInvocation
@@ -74,7 +73,6 @@ class ConductorService:
                     raise RuntimeError(f"Task {task['id']} failed. Aborting mission.")
                 else:
                     self.mission_log_service.mark_task_as_done(task['id'])
-                    self.event_bus.emit(RefreshFileTreeRequest())
 
             print("[ConductorService] Mission Accomplished! All tasks completed successfully.")
             self.event_bus.emit("agent_status_changed", "Aura", "Mission Accomplished!", "fa5s.rocket")

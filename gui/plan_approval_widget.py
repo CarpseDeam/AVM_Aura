@@ -4,7 +4,6 @@ from typing import List
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPainter, QColor, QPen
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +13,6 @@ class PlanApprovalWidget(QFrame):
     A custom widget for displaying a proposed plan and providing Approve/Deny buttons.
     It's designed to be embedded directly into the main chat log.
     """
-    # Define signals that will be emitted when the user interacts with the widget.
-    # We pass the original plan list back on approval.
     plan_approved = Signal(list)
     plan_denied = Signal()
 
@@ -25,37 +22,31 @@ class PlanApprovalWidget(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setObjectName("PlanApprovalWidget")
 
-        # Main layout for the entire widget
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(2, 2, 2, 2)  # Margins for the border
+        main_layout.setContentsMargins(2, 2, 2, 2)
 
-        # A container for the content, to allow for a drawn border
         content_frame = QFrame(self)
         content_frame.setObjectName("PlanContentFrame")
         main_layout.addWidget(content_frame)
 
         layout = QVBoxLayout(content_frame)
-        layout.setContentsMargins(15, 10, 15, 10)  # Padding inside the border
+        layout.setContentsMargins(15, 10, 15, 10)
         layout.setSpacing(10)
 
-        # --- Header ---
         header_label = QLabel("[TRANSMISSION RECEIVED: PLANNING PROPOSAL]")
         header_label.setObjectName("PlanHeader")
         layout.addWidget(header_label)
 
-        # --- Plan Steps ---
         plan_text = "Aura has formulated the following plan:\n\n"
         for i, step in enumerate(plan):
             tool_name = step.blueprint.id
             params = step.parameters
-            # Simple, readable description of the step
             plan_text += f"  {i + 1}. {tool_name}({', '.join(f'{k}={v}' for k, v in params.items())})\n"
         plan_label = QLabel(plan_text)
         plan_label.setWordWrap(True)
         plan_label.setObjectName("PlanStepsLabel")
         layout.addWidget(plan_label)
 
-        # --- Confirmation and Buttons ---
         confirmation_label = QLabel("Do you approve this course of action?")
         confirmation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(confirmation_label)
@@ -96,9 +87,8 @@ class PlanApprovalWidget(QFrame):
         self.deny_button.setEnabled(False)
         self.approve_button.setText("[ APPROVED ]")
         self.deny_button.setText("[ DENIED ]")
-        # Update style to reflect disabled state
-        self.approve_button.setStyleSheet("color: #006400; border: none;")  # Dark Green
-        self.deny_button.setStyleSheet("color: #8B0000; border: none;")  # Dark Red
+        self.approve_button.setStyleSheet("color: #006400; border: none;")
+        self.deny_button.setStyleSheet("color: #8B0000; border: none;")
 
     def _apply_stylesheet(self):
         """Keep styles encapsulated within the widget."""

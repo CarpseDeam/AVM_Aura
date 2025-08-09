@@ -3,7 +3,7 @@
 Contains actions related to project management.
 """
 import logging
-from services.project_manager import ProjectManager
+from core.project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
 

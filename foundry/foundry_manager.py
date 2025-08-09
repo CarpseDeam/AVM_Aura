@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from foundry.blueprints import Blueprint
-# from events import ToolsModified <-- REMOVED THIS LINE TO BREAK THE CYCLE
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class FoundryManager:
 
         self.rescan_and_load()
 
-    def handle_tools_modified(self, event) -> None: # <-- REMOVED THE TYPE HINT
+    def handle_tools_modified(self, event) -> None:
         """Event handler to rescan tools when notified."""
         logger.info("ToolsModified event received. Rescanning blueprints and actions...")
         self.rescan_and_load()

@@ -1,3 +1,4 @@
+# core/application.py
 import asyncio
 import sys
 from pathlib import Path
@@ -8,10 +9,10 @@ from core.managers import (
     WindowManager,
     EventCoordinator,
     WorkflowManager,
-    TaskManager
+    TaskManager,
+    ProjectManager
 )
-from core.plugins.plugin_manager import PluginManager
-from core.project_manager import ProjectManager
+from services import CommandHandler
 
 
 class Application:
@@ -30,13 +31,13 @@ class Application:
         print(f"[Application] Initializing with project_root: {self.project_root}")
 
         self.event_bus = EventBus()
-        self.project_manager = ProjectManager()
-        self.plugin_manager = PluginManager(self.event_bus, self.project_root)
+        self.project_manager = ProjectManager(self.event_bus)
         self.window_manager = WindowManager(self.event_bus, self.project_manager)
         self.service_manager = ServiceManager(self.event_bus, self.project_root)
         self.task_manager = TaskManager(self.event_bus)
         self.workflow_manager = WorkflowManager(self.event_bus)
         self.event_coordinator = EventCoordinator(self.event_bus)
+        self.command_handler: CommandHandler | None = None
         self._initialization_complete = False
         self._connect_events()
 
@@ -45,18 +46,15 @@ class Application:
         self.event_bus.subscribe("open_code_viewer_requested", self.window_manager.show_code_viewer)
         self.event_bus.subscribe("project_root_selected", self.project_manager.load_project)
         self.event_bus.subscribe("application_shutdown", lambda: asyncio.create_task(self.shutdown()))
+        # The command handler will listen for user commands
+        self.event_bus.subscribe("user_command_entered", lambda event: self.command_handler.handle(event))
+
 
     async def initialize_async(self):
         """Perform async initialization of components."""
         print("[Application] Starting async initialization...")
         try:
-            self.service_manager.plugin_manager = self.plugin_manager
-            # --- NEW: Ensure ServiceManager is given to PluginManager ---
-            self.plugin_manager.set_service_manager(self.service_manager)
-            # --- END NEW ---
-
             self.service_manager.initialize_core_components(self.project_root, self.project_manager)
-            await self.service_manager.initialize_plugins()
             self.service_manager.initialize_services()
 
             # Launch all background servers
@@ -67,7 +65,19 @@ class Application:
                 self.service_manager,
                 self.project_root
             )
-            self.update_sidebar_plugin_status()
+
+            # --- Wire up the CommandHandler ---
+            controller = self.window_manager.get_main_window().get_controller()
+            self.command_handler = CommandHandler(
+                foundry_manager=self.service_manager.get_foundry_manager(),
+                event_bus=self.event_bus,
+                project_manager=self.project_manager,
+                display_callback=controller.get_display_callback(),
+                output_log_text_fetcher=controller.get_full_chat_text
+            )
+            controller.wire_up_command_handler(self.command_handler)
+            # --- End CommandHandler wiring ---
+
             self.task_manager.set_managers(self.service_manager, self.window_manager)
             self.workflow_manager.set_managers(self.service_manager, self.window_manager, self.task_manager)
             self.event_coordinator.set_managers(self.service_manager, self.window_manager, self.task_manager, self.workflow_manager)
@@ -79,24 +89,6 @@ class Application:
             import traceback
             traceback.print_exc(file=sys.stderr)
             raise
-
-    def update_sidebar_plugin_status(self):
-        """Gets plugin status from the manager and tells the sidebar to update."""
-        if not self.plugin_manager or not self.window_manager: return
-        try:
-            enabled_plugins = self.plugin_manager.config.get_enabled_plugins()
-            status = "off"
-            if enabled_plugins:
-                all_plugins_info = self.plugin_manager.get_all_plugins_info()
-                status = "ok"
-                for plugin in all_plugins_info:
-                    if plugin['name'] in enabled_plugins and plugin.get('state') != 'started':
-                        status = "error"; break
-            main_window = self.window_manager.get_main_window()
-            if main_window and hasattr(main_window, 'sidebar'):
-                main_window.sidebar.update_plugin_status(status)
-        except Exception as e:
-            print(f"[Application] Error updating sidebar plugin status: {e}")
 
     def show(self):
         self.window_manager.show_main_window()

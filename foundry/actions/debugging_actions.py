@@ -11,7 +11,7 @@ import pprint
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from services.project_context import ProjectContext
+from core.managers import ProjectContext
 
 logger = logging.getLogger(__name__)
 

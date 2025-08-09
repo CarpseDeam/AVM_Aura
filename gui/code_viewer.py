@@ -6,9 +6,9 @@ from PySide6.QtCore import Qt
 
 from .editor_manager import EditorManager
 from .file_tree_manager import FileTreeManager
-from services import ProjectManager
+from core.managers import ProjectManager
 from event_bus import EventBus
-from events import RefreshFileTreeRequest  # <-- THE MAIN FIX!
+from events import RefreshFileTree
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class CodeViewerWindow(QMainWindow):
     The main code viewing and interaction window, with a file tree and editor tabs.
     """
 
-    def __init__(self, project_manager: ProjectManager, event_bus: EventBus):
+    def __init__(self, event_bus: EventBus, project_manager: ProjectManager):
         super().__init__()
         self.project_manager = project_manager
         self.event_bus = event_bus
@@ -26,7 +26,10 @@ class CodeViewerWindow(QMainWindow):
         self.setGeometry(150, 150, 1200, 800)
 
         self._init_ui()
-        self.event_bus.subscribe(RefreshFileTreeRequest, self.refresh_file_tree)
+        self.event_bus.subscribe("refresh_file_tree", self.refresh_file_tree)
+        self.event_bus.subscribe("display_file_in_editor",
+                                 lambda event: self.display_file(event.file_path, event.file_content))
+
 
     def _init_ui(self):
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -51,8 +54,10 @@ class CodeViewerWindow(QMainWindow):
     def load_project(self, project_path_str: str):
         self.file_tree_manager.load_project(Path(project_path_str))
         self.setWindowTitle(f"Aura - Code Viewer - [{Path(project_path_str).name}]")
+        self.editor_manager.clear_all_tabs()
+        self.editor_manager.reset_to_welcome_screen()
 
-    def refresh_file_tree(self, _event: RefreshFileTreeRequest): # <-- Linter fix
+    def refresh_file_tree(self, _event: RefreshFileTree):
         logger.info("Received request to refresh file tree.")
         if self.project_manager.active_project_path:
             self.load_project(str(self.project_manager.active_project_path))
@@ -78,10 +83,15 @@ class CodeViewerWindow(QMainWindow):
         if widget_to_remove:
             widget_to_remove.deleteLater()
         if self.editor_manager.tab_widget.count() == 0:
-            self.editor_manager.reset_to_welcome_screen() # <-- Linter fix
+            self.editor_manager.reset_to_welcome_screen()
 
     def show_window(self):
         if not self.isVisible():
             self.show()
         self.activateWindow()
         self.raise_()
+
+    def prepare_for_new_project_session(self):
+        self.editor_manager.clear_all_tabs()
+        self.file_tree_manager.tree_widget.clear()
+        self.setWindowTitle("Aura - Code Viewer")

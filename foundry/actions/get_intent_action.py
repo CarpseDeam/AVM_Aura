@@ -1,7 +1,7 @@
 # foundry/actions/get_intent_action.py
 import logging
 from pathlib import Path
-from services.project_context import ProjectContext
+from core.managers import ProjectContext
 
 logger = logging.getLogger(__name__)
 

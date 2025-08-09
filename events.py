@@ -1,13 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from foundry import Blueprint
-
-
-@dataclass
-class BlueprintInvocation:
-    """Represents a specific invocation of a tool based on a Blueprint."""
-    blueprint: Blueprint
-    parameters: Dict[str, Any]
 
 
 # --- Core Application & User Input Events ---
@@ -81,6 +73,11 @@ class MissionDispatchRequest:
     """Published by the Mission Log UI when the user clicks 'Dispatch'."""
     pass
 
+@dataclass
+class MissionLogUpdated:
+    """Published by the MissionLogService when tasks are added, removed, or changed."""
+    tasks: List[Dict[str, Any]]
+
 # --- Tool & Foundry Events ---
 
 @dataclass
@@ -88,6 +85,11 @@ class DirectToolInvocationRequest:
     """For directly calling a tool, bypassing the AI workflow (e.g., from a context menu)."""
     tool_id: str
     params: Dict[str, Any]
+
+@dataclass
+class ToolsModified:
+    """Published by the create_new_tool action to signal a need for a tool rescan."""
+    pass
 
 # --- GUI & Window Management Events ---
 
@@ -113,6 +115,12 @@ class LogMessageReceived:
 class BranchUpdated:
     """Published by the ProjectManager when the Git branch changes."""
     branch_name: str
+
+@dataclass
+class ProjectCreated:
+    """Published by the ProjectManager when a new project is created and becomes active."""
+    project_name: str
+    project_path: str
 
 # --- LSP & Editor Events ---
 

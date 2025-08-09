@@ -1,4 +1,4 @@
-# services/project_context.py
+# core/managers/project_context.py
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional

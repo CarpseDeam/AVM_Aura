@@ -1,3 +1,4 @@
+# prompts/architect.py
 import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 

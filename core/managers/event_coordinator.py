@@ -1,3 +1,4 @@
+# core/managers/event_coordinator.py
 import asyncio
 from event_bus import EventBus
 from core.managers.service_manager import ServiceManager
@@ -32,29 +33,17 @@ class EventCoordinator:
         self._wire_ui_events()
         self._wire_ai_workflow_events()
         self._wire_execution_events()
-        self._wire_plugin_events()
         self._wire_chat_session_events()
         self._wire_status_bar_events()
-        self._wire_lsp_events()
         print("[EventCoordinator] All events wired successfully.")
-
-    def _wire_lsp_events(self):
-        if not self.window_manager: return
-        code_viewer = self.window_manager.get_code_viewer()
-        if not code_viewer or not hasattr(code_viewer, 'editor_manager'): return
-
-        editor_manager = code_viewer.editor_manager
-        self.event_bus.subscribe("lsp_diagnostics_received", editor_manager.handle_diagnostics)
-        print("[EventCoordinator] LSP events wired.")
 
     def _wire_status_bar_events(self):
         if not self.window_manager: return
         main_window = self.window_manager.get_main_window()
         if not main_window: return
 
-        status_bar = main_window.statusBar()
-        if status_bar and hasattr(status_bar, 'update_agent_status'):
-            self.event_bus.subscribe("agent_status_changed", status_bar.update_agent_status)
+        if hasattr(main_window, 'status_bar') and main_window.status_bar:
+             self.event_bus.subscribe("agent_status_changed", main_window.status_bar.update_agent_status)
         else:
             print("[EventCoordinator] Warning: StatusBar not found or is missing 'update_agent_status' method.")
 
@@ -81,14 +70,6 @@ class EventCoordinator:
             lambda: asyncio.create_task(self.window_manager.show_model_config_dialog())
         )
 
-        rag_manager = self.service_manager.rag_manager
-        if rag_manager:
-            self.event_bus.subscribe("add_knowledge_requested", rag_manager.open_add_knowledge_dialog)
-            self.event_bus.subscribe("add_active_project_to_rag_requested", rag_manager.ingest_active_project)
-            self.event_bus.subscribe("add_global_knowledge_requested", rag_manager.open_add_global_knowledge_dialog)
-
-        self.event_bus.subscribe("plugin_management_requested", self.window_manager.show_plugin_management_dialog)
-
         self.event_bus.subscribe("show_log_viewer_requested", self.window_manager.show_log_viewer)
 
     def _wire_ai_workflow_events(self):
@@ -101,8 +82,4 @@ class EventCoordinator:
 
     def _wire_execution_events(self):
         # Handled by services directly
-        pass
-
-    def _wire_plugin_events(self):
-        # Can be implemented later
         pass

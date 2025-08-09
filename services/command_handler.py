@@ -6,7 +6,7 @@ from foundry import FoundryManager
 from .view_formatter import format_as_box
 from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
 from event_bus import EventBus
-from .project_manager import ProjectManager
+from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +91,19 @@ class CommandHandler:
         self.event_bus.publish(
             UserPromptEntered(
                 prompt_text=self.last_aura_response,
-                auto_approve_plan=True
+                conversation_history=[]
             )
         )
 
     def _handle_list_files(self, args: list):
         list_files_action = self.foundry.get_action("list_files")
         relative_path = args[0] if args else "."
-        resolved_path = self.project_manager.resolve_path(relative_path)
+        if not self.project_manager.active_project_path:
+            self.display(format_as_box("Error", "No active project."), "avm_error")
+            return
+        resolved_path = self.project_manager.active_project_path / relative_path
         result = list_files_action(path=str(resolved_path))
-        display_path = self.project_manager.get_active_project_name() or "Current Directory"
+        display_path = self.project_manager.active_project_name or "Current Directory"
         if relative_path != ".":
             display_path = f"{display_path}/{relative_path}"
         formatted_output = format_as_box(f"Directory Listing: {display_path}", result)
@@ -113,7 +116,10 @@ class CommandHandler:
             return
         read_file_action = self.foundry.get_action("read_file")
         relative_path = args[0]
-        resolved_path = self.project_manager.resolve_path(relative_path)
+        if not self.project_manager.active_project_path:
+            self.display(format_as_box("Error", "No active project."), "avm_error")
+            return
+        resolved_path = self.project_manager.active_project_path / relative_path
         content = read_file_action(path=str(resolved_path))
         if content.strip().startswith("Error:"):
             self.display(format_as_box(f"Error reading file", content), "avm_error")
@@ -128,7 +134,10 @@ class CommandHandler:
             return
         lint_action = self.foundry.get_action("lint_file")
         relative_path = args[0]
-        resolved_path = self.project_manager.resolve_path(relative_path)
+        if not self.project_manager.active_project_path:
+            self.display(format_as_box("Error", "No active project."), "avm_error")
+            return
+        resolved_path = self.project_manager.active_project_path / relative_path
         result = lint_action(path=str(resolved_path))
         formatted_output = format_as_box(f"Lint Report: {relative_path}", result)
         self.display(formatted_output, "avm_output")

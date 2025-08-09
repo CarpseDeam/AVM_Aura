@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from .project_manager import ProjectManager
+from core.managers import ProjectManager
 from event_bus import EventBus
 from events import MissionLogUpdated, ProjectCreated
 
@@ -22,9 +22,7 @@ class MissionLogService:
         self.event_bus = event_bus
         self.tasks: List[Dict[str, Any]] = []
         self._next_task_id = 1
-        # --- THE FIX ---
-        # Subscribe to the ProjectCreated event to reset state
-        self.event_bus.subscribe(ProjectCreated, self.handle_project_created)
+        self.event_bus.subscribe("project_created", self.handle_project_created)
         logger.info("MissionLogService initialized.")
 
     def handle_project_created(self, event: ProjectCreated):
@@ -49,7 +47,7 @@ class MissionLogService:
                     self._next_task_id = max(task.get('id', 0) for task in self.tasks) + 1
                 else:
                     self._next_task_id = 1
-                logger.info(f"Successfully loaded Mission Log for '{self.project_manager.get_active_project_name()}'")
+                logger.info(f"Successfully loaded Mission Log for '{self.project_manager.active_project_name}'")
             except (json.JSONDecodeError, IOError) as e:
                 logger.error(f"Failed to load or parse mission log at {log_path}: {e}")
                 self.tasks = []
@@ -65,12 +63,9 @@ class MissionLogService:
         """Saves the current list of tasks to disk."""
         log_path = self._get_log_path()
         if not log_path:
-            # This is okay during the planning phase before a project is created.
             logger.debug("Cannot save mission log, no active project path set yet.")
             return
 
-        # --- THE FIX ---
-        # Ensure parent directory exists before writing
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -89,7 +84,7 @@ class MissionLogService:
             "id": self._next_task_id,
             "description": description,
             "done": False,
-            "tool_call": tool_call  # Store the machine-readable instruction
+            "tool_call": tool_call
         }
         self.tasks.append(new_task)
         self._next_task_id += 1

@@ -1,3 +1,4 @@
+# core/managers/git_manager.py
 import os
 import shutil
 from pathlib import Path

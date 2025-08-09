@@ -3,10 +3,8 @@ import logging
 from typing import Callable, Optional
 
 from event_bus import EventBus
-from events import (
-    BlueprintInvocation, DirectToolInvocationRequest, MissionDispatchRequest, ProjectCreated
-)
-from foundry import FoundryManager
+from events import DirectToolInvocationRequest, MissionDispatchRequest, ProjectCreated
+from foundry import FoundryManager, BlueprintInvocation
 from .mission_log_service import MissionLogService
 from .conductor_service import ConductorService
 from .tool_runner_service import ToolRunnerService

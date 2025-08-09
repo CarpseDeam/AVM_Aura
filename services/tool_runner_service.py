@@ -1,10 +1,14 @@
+# services/tool_runner_service.py
 import logging
 from pathlib import Path
 from typing import Optional, Any
+import inspect
 
 from event_bus import EventBus
 from foundry import FoundryManager, BlueprintInvocation
-from core.project_manager import ProjectManager
+from core.managers import ProjectManager, ProjectContext
+from services.mission_log_service import MissionLogService
+from services.vector_context_service import VectorContextService
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +24,22 @@ class ToolRunnerService:
             event_bus: EventBus,
             foundry_manager: FoundryManager,
             project_manager: ProjectManager,
+            mission_log_service: MissionLogService,
+            vector_context_service: Optional[VectorContextService] = None,
     ):
         self.event_bus = event_bus
         self.foundry_manager = foundry_manager
         self.project_manager = project_manager
+        self.mission_log_service = mission_log_service
+        self.vector_context_service = vector_context_service
+
         self.PATH_PARAM_KEYS = ['path', 'source_path', 'destination_path', 'requirements_path']
+        self.SERVICE_MAP = {
+            'project_manager': self.project_manager,
+            'mission_log_service': self.mission_log_service,
+            'vector_context_service': self.vector_context_service,
+            'event_bus': self.event_bus,
+        }
         logger.info("ToolRunnerService initialized.")
 
     def run_tool_by_dict(self, tool_call_dict: dict) -> Optional[Any]:
@@ -52,7 +67,7 @@ class ToolRunnerService:
             return error_msg
 
         try:
-            prepared_params = self._prepare_parameters(action_id, invocation.parameters)
+            prepared_params = self._prepare_parameters(action_function, invocation.parameters)
             result = action_function(**prepared_params)
 
             print(f"✅ Result from {action_id}: {result}")
@@ -64,28 +79,27 @@ class ToolRunnerService:
             print(error_msg)
             return error_msg
 
-    def _prepare_parameters(self, action_id: str, action_params: dict) -> dict:
-        """Resolves file paths and injects necessary context."""
+    def _prepare_parameters(self, action_function: callable, action_params: dict) -> dict:
+        """Resolves file paths and injects necessary context and services."""
         resolved_params = action_params.copy()
 
-        # Inject project manager for tools that need it
-        if action_id == 'create_project':
-            resolved_params['project_manager'] = self.project_manager
-            return resolved_params
-
-        base_path: Optional[Path] = None
-        if self.project_manager.is_project_active():
-            base_path = self.project_manager.active_project_path
-
+        # --- Path Resolution ---
+        base_path: Optional[Path] = self.project_manager.active_project_path
         if base_path:
             for key in self.PATH_PARAM_KEYS:
                 if key in resolved_params and isinstance(resolved_params.get(key), str):
-                    # This prevents re-resolving an already absolute path
                     if not Path(resolved_params[key]).is_absolute():
                         resolved_params[key] = str((base_path / resolved_params[key]).resolve())
 
-        # Inject execution context for tools that need it (e.g., run_shell_command)
-        if self.project_manager.is_venv_active:
-            resolved_params['project_context'] = self.project_manager.get_venv_info()
+        # --- Service and Context Injection ---
+        required_params = inspect.signature(action_function).parameters
+        for param_name in required_params:
+            if param_name in self.SERVICE_MAP and param_name not in resolved_params:
+                # Ensure service exists before injecting
+                if self.SERVICE_MAP[param_name] is not None:
+                    resolved_params[param_name] = self.SERVICE_MAP[param_name]
+            elif param_name == 'project_context' and 'project_context' not in resolved_params:
+                if self.project_manager.active_project_path:
+                    resolved_params['project_context'] = self.project_manager.active_project_context
 
         return resolved_params

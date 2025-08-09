@@ -10,7 +10,7 @@ def add_task_to_mission_log(mission_log_service: MissionLogService, description:
     """Action to add a new task to the Mission Log, with an optional machine-readable tool call."""
     try:
         new_task = mission_log_service.add_task(description, tool_call)
-        return f"Successfully added task {new_task['id']}: '{description}'"
+        return f"Successfully added task {new_task['id']}: '{description}' to the Agent TODO list."
     except Exception as e:
         logger.error(f"Error adding task to mission log: {e}", exc_info=True)
         return f"Error: Could not add task. {e}"
@@ -29,9 +29,9 @@ def get_mission_log(mission_log_service: MissionLogService) -> str:
     """Action to retrieve the current mission log."""
     tasks = mission_log_service.get_tasks()
     if not tasks:
-        return "The Mission Log is currently empty."
+        return "The Agent TODO list is currently empty."
 
-    log_str = "Current Mission Log:\n"
+    log_str = "Current Agent TODO:\n"
     for task in tasks:
         status = "[x]" if task['done'] else "[ ]"
         log_str += f"- {status} ID {task['id']}: {task['description']}\n"

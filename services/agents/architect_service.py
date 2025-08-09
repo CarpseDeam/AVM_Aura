@@ -1,3 +1,4 @@
+# services/agents/architect_service.py
 from __future__ import annotations
 import json
 import re
@@ -15,23 +16,20 @@ class ArchitectService:
         self.service_manager = service_manager
         self.event_bus = service_manager.event_bus
         self.llm_client = service_manager.get_llm_client()
-        self.rag_manager = service_manager.get_rag_manager()
 
     async def generate_plan(self, prompt: str, existing_files: Optional[Dict[str, str]] = None) -> Optional[Dict]:
         """
         Generates a structured plan for either a new project or modifying an existing one.
         """
         self.log("info", "Architect phase started.")
-        rag_context = await self.rag_manager.rag_service.query(prompt)
 
         if existing_files:
             plan_prompt = MODIFICATION_PLANNER_PROMPT.format(
                 prompt=prompt,
-                rag_context=rag_context,
                 full_code_context=json.dumps(existing_files, indent=2)
             )
         else:
-            plan_prompt = HIERARCHICAL_PLANNER_PROMPT.format(prompt=prompt, rag_context=rag_context)
+            plan_prompt = HIERARCHICAL_PLANNER_PROMPT.format(prompt=prompt)
 
         return await self._get_plan_from_llm(plan_prompt)
 

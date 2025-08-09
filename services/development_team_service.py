@@ -1,5 +1,5 @@
+# services/development_team_service.py
 from __future__ import annotations
-import json
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
@@ -52,7 +52,7 @@ class DevelopmentTeamService:
         # 3. Finalizer Phase
         self.event_bus.emit("agent_status_changed", "Finalizer", "Creating execution plan...", "fa5s.clipboard-list")
         tool_plan = await self.finalizer.create_tool_plan(generated_files, existing_files, plan.get('dependencies', []))
-        if not tool_plan:
+        if tool_plan is None:
             self.handle_error("Finalizer", "Failed to create an executable tool plan.")
             return
 
@@ -73,7 +73,7 @@ class DevelopmentTeamService:
 
         # The creative prompt doesn't need the full project context, just the conversation.
         aura_prompt = CREATIVE_ASSISTANT_PROMPT.format(
-            conversation_history="\n".join([f"{msg['role']}: {msg['text']}" for msg in conversation_history]),
+            conversation_history="\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history]),
             user_idea=user_idea
         )
 

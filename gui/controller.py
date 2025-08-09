@@ -1,6 +1,5 @@
 # gui/controller.py
 import logging
-import threading
 import shlex
 from typing import Optional, Callable
 
@@ -9,9 +8,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 
 from event_bus import EventBus
 from events import (
-    UserPromptEntered, UserCommandEntered, DirectToolInvocationRequest, StatusUpdate
+    UserPromptEntered, UserCommandEntered
 )
-from services import ProjectManager, MissionLogService, CommandHandler
+from core.managers import ProjectManager
+from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
@@ -38,8 +38,7 @@ class GUIController(QObject):
         self.chat_layout = chat_layout
         self.scroll_area = scroll_area
 
-        # Subscribe to the new StatusUpdate event
-        self.event_bus.subscribe(StatusUpdate, self.on_status_update)
+        self.event_bus.subscribe("agent_status_changed", self.on_status_update)
 
         self.project_manager: Optional[ProjectManager] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -64,24 +63,17 @@ class GUIController(QObject):
         self.autocomplete_popup = autocomplete_popup
         self.status_bar = status_bar
 
-    def on_status_update(self, event: StatusUpdate):
+    def on_status_update(self, agent_name: str, status_text: str, icon_name: str):
         """Event handler that receives status updates from any thread."""
-        # Emit the signal to pass the data to the main UI thread safely
-        self.update_status_signal.emit(event.status, event.activity, event.animate, event.progress, event.total)
+        animate = "..." in status_text
+        self.update_status_signal.emit(agent_name, status_text, animate, None, None)
 
     @Slot(str, str, bool, object, object)
     def _on_update_status(self, status: str, activity: str, animate: bool, progress: Optional[int], total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
         if not self.status_bar:
             return
-
-        # Format a progress string if progress data is available
-        progress_text = ""
-        if progress is not None and total is not None:
-            progress_text = f"[{progress}/{total}] "
-
-        full_activity_text = f"{progress_text}{activity}"
-        self.status_bar.show_status(status, full_activity_text, animate)
+        self.status_bar.show_status(status, activity, animate)
 
 
     def wire_up_command_handler(self, handler: CommandHandler):
@@ -112,7 +104,6 @@ class GUIController(QObject):
         self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
 
-        # We no longer need the old thinking signals. The StatusUpdate event handles it.
         if input_text.startswith("/"):
             try:
                 parts = shlex.split(input_text[1:])
@@ -123,9 +114,8 @@ class GUIController(QObject):
         else:
             event = UserPromptEntered(
                 prompt_text=input_text,
-                auto_approve_plan=False
+                conversation_history=[]
             )
-            # We fire off the event immediately, no need for a separate thread here
             self.event_bus.publish(event)
 
     def post_welcome_message(self):
@@ -151,11 +141,7 @@ class GUIController(QObject):
         self._insert_widget(widget)
 
     def _insert_widget(self, widget: QWidget):
-        """Inserts a widget into the chat layout and ensures it's visible."""
-        # Insert the widget before the stretch item
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
-
-        # Use a singleShot timer to ensure the scroll happens after the layout is updated
         QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(widget))
 
     def get_full_chat_text(self) -> str:
@@ -200,10 +186,11 @@ class GUIController(QObject):
         )
         if ok and project_name:
             logger.info(f"User requested to create a new project: '{project_name}'")
-            self.event_bus.publish(DirectToolInvocationRequest(
-                tool_id='create_project',
-                params={'project_name': project_name}
-            ))
+            self.event_bus.emit("new_project_requested", project_name)
+
+    def handle_load_project_request(self):
+        logger.info("User requested to load a project.")
+        self.event_bus.emit("load_project_requested")
 
     def toggle_node_viewer(self):
         if self.node_viewer_window is None or not self.node_viewer_window.isVisible():
@@ -213,13 +200,7 @@ class GUIController(QObject):
             self.node_viewer_window.activateWindow()
 
     def toggle_code_viewer(self):
-        if self.project_manager is None:
-            self.add_system_message_signal.emit("Project system is not ready yet.")
-            return
-        if self.code_viewer_window is None or not self.code_viewer_window.isVisible():
-            self.code_viewer_window = CodeViewerWindow(project_manager=self.project_manager, event_bus=self.event_bus)
-        self.code_viewer_window.show()
-        self.code_viewer_window.activateWindow()
+        self.event_bus.emit("open_code_viewer_requested")
 
     def toggle_mission_log(self):
         if self.mission_log_service is None:

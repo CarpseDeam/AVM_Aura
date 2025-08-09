@@ -6,8 +6,7 @@ from typing import Any, Dict, Optional, Union, List
 
 from proto.marshal.collections.maps import MapComposite
 
-from events import BlueprintInvocation
-from foundry import FoundryManager
+from foundry import FoundryManager, BlueprintInvocation
 
 logger = logging.getLogger(__name__)
 

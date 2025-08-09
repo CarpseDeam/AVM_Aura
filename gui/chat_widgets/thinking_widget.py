@@ -28,6 +28,7 @@ class ThinkingWidget(QWidget):
 
         self.animation_step = 0
         self.bar_width = 40
+        self._apply_stylesheet()
 
     def start_animation(self):
         """Starts the animation timer."""
@@ -47,3 +48,17 @@ class ThinkingWidget(QWidget):
 
         bar = f"[{filled_chars}{empty_chars}]"
         self.bar_label.setText(bar)
+
+    def _apply_stylesheet(self):
+        self.setStyleSheet("""
+            #ThinkingWidget {
+                background-color: transparent;
+            }
+            #ThinkingLabel {
+                color: #888888;
+            }
+            #ThinkingBar {
+                color: #FFB74D;
+                font-family: "Courier New", monospace;
+            }
+        """)

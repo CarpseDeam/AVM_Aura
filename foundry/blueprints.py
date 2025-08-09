@@ -15,12 +15,14 @@ class Blueprint:
     id: str
     description: str
     parameters: Dict[str, Any]
-
-    # --- MODIFIED: Store the function's name as a string, not a direct reference ---
     action_function_name: str
-
     template: str = ""
 
+@dataclass
+class BlueprintInvocation:
+    """Represents a specific invocation of a tool based on a Blueprint."""
+    blueprint: Blueprint
+    parameters: Dict[str, Any]
 
 @dataclass
 class RawCodeInstruction:

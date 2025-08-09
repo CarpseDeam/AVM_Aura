@@ -7,7 +7,6 @@ from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
 logger = logging.getLogger(__name__)
 
 
-# --- Custom Checkbox Widget ---
 class TaskCheckbox(QWidget):
     """A custom-painted, retro-styled checkbox."""
     stateChanged = Signal(bool)
@@ -24,23 +23,22 @@ class TaskCheckbox(QWidget):
     def setChecked(self, checked: bool):
         if self._checked != checked:
             self._checked = checked
-            self.update()  # Trigger a repaint
+            self.update()
             self.stateChanged.emit(self._checked)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        rect = self.rect().adjusted(2, 2, -2, -2)  # Add padding
-        pen = QPen(QColor("#FFB74D"))  # Amber
+        rect = self.rect().adjusted(2, 2, -2, -2)
+        pen = QPen(QColor("#FFB74D"))
         pen.setWidth(2)
         painter.setPen(pen)
 
         if self._checked:
             painter.setBrush(QColor("#FFB74D"))
             painter.drawRect(rect)
-            # Draw a simple checkmark
-            pen.setColor(QColor("#0d0d0d"))  # Dark background color
+            pen.setColor(QColor("#0d0d0d"))
             painter.setPen(pen)
             painter.drawLine(rect.left() + 3, rect.center().y(), rect.center().x(), rect.bottom() - 3)
             painter.drawLine(rect.center().x(), rect.bottom() - 3, rect.right() - 3, rect.top() + 3)
@@ -53,10 +51,9 @@ class TaskCheckbox(QWidget):
         super().mousePressEvent(event)
 
 
-# --- The Main Task Widget ---
 class TaskWidget(QWidget):
-    """A widget representing a single task in the Mission Log."""
-    task_state_changed = Signal(int, bool)  # task_id, is_done
+    """A widget representing a single task in the Agent TODO list."""
+    task_state_changed = Signal(int, bool)
 
     def __init__(self, task_id: int, description: str, is_done: bool, parent=None):
         super().__init__(parent)
@@ -89,6 +86,6 @@ class TaskWidget(QWidget):
         self.description_label.setFont(font)
 
         if is_done:
-            self.description_label.setStyleSheet("color: #888888;")  # Muted grey
+            self.description_label.setStyleSheet("color: #888888;")
         else:
-            self.description_label.setStyleSheet("color: #FFB74D;")  # Amber
+            self.description_label.setStyleSheet("color: #FFB74D;")

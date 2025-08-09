@@ -19,15 +19,14 @@ logger = logging.getLogger(__name__)
 
 class MissionLogWindow(QMainWindow):
     """
-    A pop-out window to display and manage the project's Mission Log.
+    A pop-out window to display and manage the project's Agent TODO list.
     """
-    # Signal to safely update the UI from another thread
     update_tasks_signal = Signal(list)
 
     def __init__(self, event_bus: EventBus):
         super().__init__()
         self.event_bus = event_bus
-        self.setWindowTitle("Aura - Mission Log")
+        self.setWindowTitle("Aura - Agent TODO")
         self.setGeometry(200, 200, 400, 600)
         self.setMinimumSize(350, 400)
 
@@ -38,15 +37,11 @@ class MissionLogWindow(QMainWindow):
         self.task_widgets: Dict[int, TaskWidget] = {}
         self._init_ui()
 
-        # Connect the signal to the slot that updates the UI
         self.update_tasks_signal.connect(self.handle_task_update)
-
-        # Subscribe the event handler that will emit the signal
         self.event_bus.subscribe(MissionLogUpdated, self.on_mission_log_updated)
 
     def on_mission_log_updated(self, event: MissionLogUpdated):
         """Event handler that receives updates from any thread."""
-        # Emit the signal to pass the data to the main UI thread safely
         self.update_tasks_signal.emit(event.tasks)
 
     def _init_ui(self):
@@ -54,39 +49,13 @@ class MissionLogWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         central_widget.setObjectName("MissionLog")
-        central_widget.setStyleSheet("""
-            #MissionLog { background-color: #0d0d0d; }
-            QLineEdit {
-                background-color: #2a2a2a;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 8px;
-                color: #FFB74D;
-                font-size: 14px;
-            }
-            #AddTaskButton {
-                background-color: #2a2a2a; color: #FFB74D; font-weight: bold;
-                border: 1px solid #444; border-radius: 4px; padding: 8px;
-            }
-            #AddTaskButton:hover { background-color: #3a3a3a; border-color: #FFB74D; }
-            #DispatchButton {
-                background-color: #FFB74D; color: #0d0d0d; font-weight: bold;
-                border-radius: 4px; padding: 10px; font-size: 15px; margin-top: 5px;
-            }
-            #DispatchButton:hover { background-color: #FFA726; }
-            #ToggleCompletedButton {
-                background-color: transparent; border: 1px solid #333; color: #888;
-                text-align: left; padding: 5px; margin-top: 10px; border-radius: 3px;
-            }
-            #SeparatorLine { color: #333; }
-        """)
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(10)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        scroll_area.setObjectName("ScrollArea")
         scroll_content_widget = QWidget()
         scroll_area.setWidget(scroll_content_widget)
         self.scroll_content_layout = QVBoxLayout(scroll_content_widget)
@@ -107,8 +76,8 @@ class MissionLogWindow(QMainWindow):
         self.toggle_completed_button.setObjectName("ToggleCompletedButton")
         self.toggle_completed_button.setCheckable(True)
         self.toggle_completed_button.clicked.connect(self._on_toggle_completed)
-        font = self.toggle_completed_button.font();
-        font.setBold(True);
+        font = self.toggle_completed_button.font()
+        font.setBold(True)
         self.toggle_completed_button.setFont(font)
         self.scroll_content_layout.addWidget(self.toggle_completed_button)
 
@@ -143,6 +112,8 @@ class MissionLogWindow(QMainWindow):
         self.completed_tasks_container.hide()
         self.separator.hide()
         self.toggle_completed_button.hide()
+
+        self._apply_stylesheet()
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -215,3 +186,32 @@ class MissionLogWindow(QMainWindow):
             self.show()
         self.activateWindow()
         self.raise_()
+
+    def _apply_stylesheet(self):
+        self.setStyleSheet("""
+            #MissionLog { background-color: #0d0d0d; }
+            #ScrollArea { border: none; }
+            QLineEdit {
+                background-color: #2a2a2a;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 8px;
+                color: #FFB74D;
+                font-size: 14px;
+            }
+            #AddTaskButton {
+                background-color: #2a2a2a; color: #FFB74D; font-weight: bold;
+                border: 1px solid #444; border-radius: 4px; padding: 8px;
+            }
+            #AddTaskButton:hover { background-color: #3a3a3a; border-color: #FFB74D; }
+            #DispatchButton {
+                background-color: #FFB74D; color: #0d0d0d; font-weight: bold;
+                border-radius: 4px; padding: 10px; font-size: 15px; margin-top: 5px;
+            }
+            #DispatchButton:hover { background-color: #FFA726; }
+            #ToggleCompletedButton {
+                background-color: transparent; border: 1px solid #333; color: #888;
+                text-align: left; padding: 5px; margin-top: 10px; border-radius: 3px;
+            }
+            #SeparatorLine { color: #333; }
+        """)

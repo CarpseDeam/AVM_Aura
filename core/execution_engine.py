@@ -1,9 +1,10 @@
+# core/execution_engine.py
 import asyncio
 import os
 import subprocess
 import sys
 from pathlib import Path
-from core.project_manager import ProjectManager
+from core.managers import ProjectManager
 
 
 class ExecutionResult:

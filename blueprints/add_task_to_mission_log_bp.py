@@ -6,7 +6,7 @@ params = {
     "properties": {
         "description": {
             "type": "string",
-            "description": "A clear, concise, user-facing description of the task to be added to the mission log.",
+            "description": "A clear, concise, user-facing description of the task to be added to the Agent TODO list.",
         },
         "tool_call": {
             "type": "object",
@@ -18,7 +18,7 @@ params = {
 
 blueprint = Blueprint(
     id="add_task_to_mission_log",
-    description="Adds a new task to the project's shared to-do list (the Mission Log). Can include the underlying tool call for autonomous execution.",
+    description="Adds a new task to the project's shared to-do list (the Agent TODO). Can include the underlying tool call for autonomous execution.",
     parameters=params,
     action_function_name="add_task_to_mission_log"
 )

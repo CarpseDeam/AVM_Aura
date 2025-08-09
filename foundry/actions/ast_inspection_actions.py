@@ -9,13 +9,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_generated_code(code_ast: ast.Module) -> str:
+def get_generated_code() -> str:
     """Unparses a complete AST module into a Python code string."""
     logger.info("Unparsing the current AST to generate code string.")
     try:
-        ast.fix_missing_locations(code_ast)
-        # --- FIX --- Ensure this tool also returns a markdown block
-        return f"Generated Code:\n```python\n{ast.unparse(code_ast)}\n```"
+        # This tool is a remnant of an older, AST-based generation pipeline.
+        # In the new file-based pipeline, it doesn't have a direct code AST to process.
+        # Returning a helpful message in the correct format.
+        return f"Generated Code:\n```python\n# This tool is part of the new file-based generation pipeline.\n# Use 'read_file' or 'list_files' to inspect results.\n```"
     except Exception as e:
         return f"An unexpected error occurred while unparsing the AST: {e}"
 

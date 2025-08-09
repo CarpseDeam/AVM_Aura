@@ -3,7 +3,7 @@ import logging
 import subprocess
 import shlex
 import os
-from services.project_context import ProjectContext
+from core.managers import ProjectContext
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,8 @@
+# core/managers/window_manager.py
 from pathlib import Path
-from gui.main_window import MainWindow
+from gui.main_window import AuraMainWindow
 from gui.code_viewer import CodeViewerWindow
 from gui.model_config_dialog import ModelConfigurationDialog
-from gui.plugin_management_dialog import PluginManagementDialog
 from gui.log_viewer import LogViewerWindow
 
 from event_bus import EventBus
@@ -23,13 +23,12 @@ class WindowManager:
         self.project_manager = project_manager
 
         # Main windows
-        self.main_window: MainWindow = None
+        self.main_window: AuraMainWindow = None
         self.code_viewer: CodeViewerWindow = None
         self.log_viewer: LogViewerWindow = None
 
         # Dialogs
         self.model_config_dialog: ModelConfigurationDialog = None
-        self.plugin_management_dialog: PluginManagementDialog = None
 
         print("[WindowManager] Initialized")
 
@@ -37,15 +36,11 @@ class WindowManager:
         """Initialize all GUI windows."""
         print("[WindowManager] Initializing windows...")
 
-        lsp_client_service = service_manager.get_lsp_client_service()
-        plugin_manager = service_manager.get_plugin_manager()
-
-        self.main_window = MainWindow(self.event_bus, project_root)
-        self.code_viewer = CodeViewerWindow(self.event_bus, self.project_manager, lsp_client_service)
+        self.main_window = AuraMainWindow(self.event_bus, project_root)
+        self.code_viewer = CodeViewerWindow(self.event_bus, self.project_manager)
         self.log_viewer = LogViewerWindow(self.event_bus)
 
         self.model_config_dialog = ModelConfigurationDialog(llm_client, self.main_window)
-        self.plugin_management_dialog = PluginManagementDialog(plugin_manager, self.event_bus, self.main_window)
 
         print("[WindowManager] Windows initialized")
 
@@ -61,7 +56,7 @@ class WindowManager:
             self.prepare_code_viewer_for_new_project()
 
     # --- Window Getters ---
-    def get_main_window(self) -> MainWindow:
+    def get_main_window(self) -> AuraMainWindow:
         return self.main_window
 
     def get_code_viewer(self) -> CodeViewerWindow:
@@ -84,9 +79,6 @@ class WindowManager:
             await self.model_config_dialog.populate_models_async()
             self.model_config_dialog.populate_settings()
             self.model_config_dialog.show()
-
-    def show_plugin_management_dialog(self):
-        if self.plugin_management_dialog: self.plugin_management_dialog.exec()
 
     def show_log_viewer(self):
         if self.log_viewer: self.log_viewer.show()
