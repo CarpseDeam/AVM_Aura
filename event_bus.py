@@ -1,49 +1,34 @@
-"""
-Provide a central mechanism for decoupled communication between application components
-via a publish-subscribe model.
-"""
-import logging
+import asyncio
+import inspect
 from collections import defaultdict
-from typing import Callable, Type, List, Any
 
-from events import Event
-
-logger = logging.getLogger(__name__)
 
 class EventBus:
-    """A simple event bus for decoupled communication."""
+    """A simple, in-process event bus for decoupling components, with async support."""
 
-    def __init__(self) -> None:
-        """Initializes the listener registry."""
-        self.listeners: defaultdict[Type[Event], List[Callable[[Event], Any]]] = defaultdict(list)
+    def __init__(self):
+        self._subscribers = defaultdict(list)
 
-    def subscribe(self, event_type: Type[Event], handler: Callable[[Event], Any]) -> None:
+    def subscribe(self, event_name: str, callback):
+        print(f"[EventBus] Subscribing '{getattr(callback, '__name__', 'lambda')}' to event '{event_name}'")
+        self._subscribers[event_name].append(callback)
+
+    def emit(self, event_name: str, *args, **kwargs):
         """
-        Subscribe a handler to a specific event type.
-
-        Args:
-            event_type: The class of the event to listen for.
-            handler: The callable function to execute when the event is published.
+        Emits an event, calling all subscribed callbacks with the given arguments.
+        Correctly handles both synchronous and asynchronous (coroutine) callbacks.
         """
-        logger.debug(f"Subscribing handler '{handler.__name__}' to event '{event_type.__name__}'")
-        self.listeners[event_type].append(handler)
+        if event_name != "log_message_received": # Avoid spamming the log
+             print(f"[EventBus] Emitting event '{event_name}'")
 
-    def publish(self, event: Event) -> None:
-        """
-        Publish an event, calling all subscribed handlers.
-
-        Args:
-            event: The event instance to publish.
-        """
-        event_type = type(event)
-        logger.info(f"Publishing event: {event_type.__name__} with data: {event}")
-        if event_type in self.listeners:
-            for handler in self.listeners[event_type]:
+        if event_name in self._subscribers:
+            for callback in self._subscribers[event_name]:
                 try:
-                    logger.debug(f"Calling handler '{handler.__name__}' for event '{event_type.__name__}'")
-                    handler(event)
+                    if inspect.iscoroutinefunction(callback):
+                        asyncio.create_task(callback(*args, **kwargs))
+                    else:
+                        callback(*args, **kwargs)
                 except Exception as e:
-                    logger.error(
-                        f"Error executing handler {handler.__name__} for event {event_type.__name__}: {e}",
-                        exc_info=True
-                    )
+                    import traceback
+                    print(f"[EventBus] Error in callback for event '{event_name}': {e}")
+                    traceback.print_exc()

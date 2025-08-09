@@ -1,29 +1,29 @@
-# --- AVM Project Requirements ---
-
-# For the modern GUI
-Pyside6
-
-# For rich text formatting in the backend/console
-rich
-
-# For parsing the config.yaml file
-PyYAML
-
-# For making HTTP requests in the Ollama provider
-requests
-
-# For the Google Gemini provider API
-google-generativeai
-
-# For linting Python code
-pycodestyle
-
-# For running automated tests
-pytest
-
-# For syntax highlighting
+PySide6
+qasync
+qtawesome
 Pygments
+unidiff
+aiohttp
+GitPython
+openai
+anthropic
+google-generativeai
+googleapis-common-protos
+proto-plus
+protobuf
+grpcio
+Pillow
 
-# For Vector DB / RAG
+# RAG & Vector DB
 chromadb
 sentence-transformers
+langchain-community
+
+# Web Server for local APIs
+fastapi
+uvicorn[standard]
+python-dotenv
+aiohttp
+
+
+python-lsp-server[all]
