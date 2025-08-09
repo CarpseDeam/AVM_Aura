@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 from .project_context import ProjectContext
+from event_bus import EventBus
+from events import ProjectCreated
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,8 @@ class ProjectManager:
     Manages the workspace, active project, and its execution context.
     """
 
-    def __init__(self):
+    def __init__(self, event_bus: EventBus):
+        self.event_bus = event_bus
         self.root_path = Path(PROJECTS_ROOT_DIR).resolve()
         self.root_path.mkdir(exist_ok=True)
         self.active_project_path: Optional[Path] = None
@@ -71,6 +74,16 @@ class ProjectManager:
 
             self.active_project_path = new_project_path.resolve()
             self._update_project_context()
+
+            # --- THE FIX ---
+            # Announce the creation so other services can react.
+            self.event_bus.publish(
+                ProjectCreated(
+                    project_name=project_name,
+                    project_path=str(self.active_project_path)
+                )
+            )
+
             logger.info(message)
             return True, message
         except Exception as e:

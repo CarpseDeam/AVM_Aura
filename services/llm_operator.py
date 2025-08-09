@@ -10,6 +10,8 @@ from events import (
 from .architect_service import ArchitectService
 from .technician_service import TechnicianService
 from .mission_log_service import MissionLogService
+from .plan_refiner_service import PlanRefinerService
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +28,14 @@ class LLMOperator:
             architect_service: ArchitectService,
             technician_service: TechnicianService,
             mission_log_service: MissionLogService,
+            plan_refiner_service: PlanRefinerService,
             display_callback: Optional[Callable[[str, str], None]] = None,
     ):
         self.event_bus = event_bus
         self.architect_service = architect_service
         self.technician_service = technician_service
         self.mission_log_service = mission_log_service
+        self.plan_refiner_service = plan_refiner_service
         self.display_callback = display_callback
         logger.info("LLMOperator (Foreman) initialized.")
 
@@ -44,6 +48,11 @@ class LLMOperator:
         tool_name = tool_call.get('tool_name', 'unknown_tool')
         args = tool_call.get('arguments', {})
         if not isinstance(args, dict): args = {}
+
+        # This tool is special and its replacement (`write_file`) is more descriptive
+        if tool_name == 'add_dependency_to_requirements':
+            dep = args.get('dependency', 'unspecified')
+            return f"Add Dependency: '{dep}'"
 
         summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
         path = args.get('path') or args.get('source_path')
@@ -74,15 +83,24 @@ class LLMOperator:
                 self.mission_log_service.clear_pending_tasks()
 
             # 1. Delegate to the ArchitectService to get the high-level plan
-            reasoning, plan_steps = self.architect_service.get_plan(event.prompt_text)
+            architect_response_text = self.architect_service.get_plan(event.prompt_text)
 
-            if not plan_steps:
-                logger.warning("Architect service did not return any plan steps. Aborting.")
+            if not architect_response_text:
+                logger.warning("Architect service did not return any text. Aborting.")
                 return # Error messages are handled by the service itself
 
-            # 2. Loop through the plan, delegating each step to the TechnicianService
-            total_steps = len(plan_steps)
-            for i, task in enumerate(plan_steps):
+            # --- NEW: Refine the plan before execution ---
+            # The refiner now takes the entire raw text response to parse correctly.
+            refined_plan = self.plan_refiner_service.refine(architect_response_text)
+
+            if not refined_plan:
+                self._display("⚠️ Architect provided reasoning but no actionable plan was found after refinement.", "avm_warning")
+                self.event_bus.publish(StatusUpdate("IDLE", "Ready for input.", False))
+                return
+
+            # 2. Loop through the REFINED plan, delegating each step to the TechnicianService
+            total_steps = len(refined_plan)
+            for i, task in enumerate(refined_plan):
                 self.event_bus.publish(StatusUpdate(
                     "PLANNING", f"Technician converting task: '{task[:50]}...'", True, progress=i + 1, total=total_steps
                 ))

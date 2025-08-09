@@ -19,3 +19,4 @@ from .conductor_service import ConductorService
 from .sandbox_manager import SandboxManager
 from .architect_service import ArchitectService
 from .technician_service import TechnicianService
+from .plan_refiner_service import PlanRefinerService

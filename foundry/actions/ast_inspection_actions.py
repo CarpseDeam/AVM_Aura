@@ -93,7 +93,6 @@ def get_code_for(path: str, function_name: str) -> str:
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == function_name:
                 source_code = ast.unparse(node)
                 logger.info(f"Successfully extracted source code for '{function_name}'.")
-                # --- FIX --- Wrap the output in a markdown code block
                 return f"Source code for '{function_name}' from '{path}':\n```python\n{source_code}\n```"
 
         not_found_msg = f"Error: Node '{function_name}' not found as a top-level function or class in '{path}'."

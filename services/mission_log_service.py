@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from .project_manager import ProjectManager
 from event_bus import EventBus
-from events import MissionLogUpdated
+from events import MissionLogUpdated, ProjectCreated
 
 logger = logging.getLogger(__name__)
 MISSION_LOG_FILENAME = "mission_log.json"
@@ -22,7 +22,15 @@ class MissionLogService:
         self.event_bus = event_bus
         self.tasks: List[Dict[str, Any]] = []
         self._next_task_id = 1
+        # --- THE FIX ---
+        # Subscribe to the ProjectCreated event to reset state
+        self.event_bus.subscribe(ProjectCreated, self.handle_project_created)
         logger.info("MissionLogService initialized.")
+
+    def handle_project_created(self, event: ProjectCreated):
+        """Resets and loads the log when a new project becomes active."""
+        logger.info(f"ProjectCreated event received. Resetting and loading mission log for '{event.project_name}'.")
+        self.load_log_for_active_project()
 
     def _get_log_path(self) -> Optional[Path]:
         """Gets the path to the mission log file for the active project."""
@@ -60,6 +68,10 @@ class MissionLogService:
             # This is okay during the planning phase before a project is created.
             logger.debug("Cannot save mission log, no active project path set yet.")
             return
+
+        # --- THE FIX ---
+        # Ensure parent directory exists before writing
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with open(log_path, 'w', encoding='utf-8') as f:

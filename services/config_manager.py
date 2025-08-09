@@ -12,11 +12,10 @@ logger = logging.getLogger(__name__)
 
 CONFIG_FILE_PATH = "config.yaml"
 
-# --- MODIFIED: Added execution_mode to the default config ---
 DEFAULT_CONFIG = {
     'llm_provider': 'gemini',
-    'temperature': 0.1,
-    'execution_mode': 'interactive',  # 'interactive' or 'auto_approve'
+    'plan_temperature': 0.6,
+    'build_temperature': 0.1,
     'ollama': {
         'model': 'Qwen3-coder',
         'host': 'http://localhost:11434'

@@ -72,9 +72,7 @@ class ExecutorService:
 
     def _handle_project_created(self, event: ProjectCreated):
         """Handles post-project creation tasks, like indexing."""
-        logger.info(f"ProjectCreated event caught by dispatcher. Loading mission log and auto-indexing.")
-        # Load the (likely empty) mission log for the new project
-        self.mission_log_service.load_log_for_active_project()
+        logger.info(f"ProjectCreated event caught by dispatcher. Auto-indexing project.")
 
         # Trigger the indexing via a direct tool call
         self.event_bus.publish(DirectToolInvocationRequest(

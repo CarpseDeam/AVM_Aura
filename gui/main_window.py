@@ -17,7 +17,7 @@ from services import (
     LLMOperator, CommandHandler, ExecutorService, ConfigManager,
     ContextManager, VectorContextService, format_as_box, ProjectManager,
     MissionLogService, PromptEngine, InstructionFactory, ToolRunnerService,
-    ConductorService, ArchitectService, TechnicianService
+    ConductorService, ArchitectService, TechnicianService, PlanRefinerService
 )
 from foundry import FoundryManager
 from providers import GeminiProvider, OllamaProvider
@@ -170,13 +170,18 @@ class AuraMainWindow(QMainWindow):
 
             context_manager = ContextManager()
             vector_context_service = VectorContextService()
-            project_manager = ProjectManager()
+
+            # --- THE FIX ---
+            # Pass the event_bus to the ProjectManager constructor.
+            project_manager = ProjectManager(event_bus=self.event_bus)
+
             mission_log_service = MissionLogService(project_manager=project_manager, event_bus=self.event_bus)
             self.controller.set_project_manager(project_manager)
             self.controller.set_mission_log_service(mission_log_service)
 
             prompt_engine = PromptEngine(vector_context_service=vector_context_service, context_manager=context_manager)
             instruction_factory = InstructionFactory(foundry_manager=foundry_manager)
+            plan_refiner_service = PlanRefinerService()
 
             provider_name = config_manager.get("llm_provider")
             provider = None
@@ -209,6 +214,7 @@ class AuraMainWindow(QMainWindow):
                 architect_service=architect_service,
                 technician_service=technician_service,
                 mission_log_service=mission_log_service,
+                plan_refiner_service=plan_refiner_service,
                 display_callback=display_callback
             )
 

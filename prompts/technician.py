@@ -25,13 +25,11 @@ When the task involves writing Python code (for 'content', 'function_code', etc.
 3.  **TYPE HINTING IS REQUIRED:** All function arguments and return values MUST include modern Python type hints.
 
 **TOOL USAGE STRATEGY & CRITICAL RULES:**
+- **MANAGING DEPENDENCIES:** To add a project dependency, you MUST use the `add_dependency_to_requirements` tool. It is safe to use this tool multiple times as it will not create duplicates. DO NOT use `write_file` to manage `requirements.txt`.
 - **DO NOT OVERWRITE FILES:** The `write_file` tool DESTROYS existing content. Only use it for the very first time you create a file. To add to an existing file, you MUST use `add_function_to_file`, `add_class_to_file`, or `append_to_file`.
 - **Use `append_to_file` for Standalone Code:** To add non-function, non-class code blocks (like `if __name__ == '__main__':`) to a file, you MUST use the `append_to_file` tool.
 - **File Paths:** All file paths (`path`, `source_path`, etc.) are relative to the project's root. DO NOT include the project name.
 - **Efficient File Creation:** For a new file, the first step MUST be `write_file` with the initial, complete content (e.g., imports and the first function/class).
-- **Dependencies:** If the task requires a library (e.g., `requests`), you MUST include two steps in your plan:
-    1. A `write_file` call to create/update `requirements.txt`.
-    2. A `pip_install` call. This tool automatically handles the virtual environment.
 - **Testing:** When asked to write a test, you MUST use the `run_tests` tool at the end of your plan to verify the test passes.
 
 **EXAMPLE 1: Adding a `main` block**

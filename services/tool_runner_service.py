@@ -6,7 +6,8 @@ from typing import Callable, Optional, Any
 
 from event_bus import EventBus
 from events import (
-    BlueprintInvocation, PauseExecutionForUserInput, ProjectCreated,
+    BlueprintInvocation,
+    PauseExecutionForUserInput,
     DisplayFileInEditor, RefreshFileTreeRequest
 )
 from foundry import FoundryManager
@@ -166,11 +167,8 @@ class ToolRunnerService:
             if "Successfully" in result and action_id in self.FS_MODIFYING_ACTIONS:
                 self.event_bus.publish(RefreshFileTreeRequest())
 
-            if action_id == "create_project" and "Successfully created" in result:
-                project_name = invocation.parameters['project_name']
-                project_path = str(self.project_manager.active_project_path)
-                self.project_manager._update_project_context()
-                self.event_bus.publish(ProjectCreated(project_name=project_name, project_path=project_path))
+            # ProjectCreated event is now published by the ProjectManager itself
+            # This simplifies the logic here.
 
             elif action_id == "run_shell_command" and 'venv' in invocation.parameters.get('command', ''):
                 self.project_manager._update_project_context()
