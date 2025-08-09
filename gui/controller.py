@@ -1,7 +1,7 @@
 # gui/controller.py
 import logging
 import shlex
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputDialog
@@ -10,7 +10,6 @@ from event_bus import EventBus
 from events import (
     UserPromptEntered, UserCommandEntered
 )
-from core.managers import ProjectManager
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
@@ -19,6 +18,9 @@ from .status_bar_widget import StatusBarWidget
 from .utils import get_aura_banner
 from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
 from .command_input_widget import CommandInputWidget
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ class GUIController(QObject):
 
         self.event_bus.subscribe("agent_status_changed", self.on_status_update)
 
-        self.project_manager: Optional[ProjectManager] = None
+        self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
         self.command_handler: Optional[CommandHandler] = None
 
@@ -81,7 +83,7 @@ class GUIController(QObject):
         if self.command_input:
             self.command_input.textChanged.connect(self.on_text_changed)
 
-    def set_project_manager(self, pm: ProjectManager):
+    def set_project_manager(self, pm: "ProjectManager"):
         self.project_manager = pm
 
     def set_mission_log_service(self, mls: MissionLogService):

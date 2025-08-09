@@ -18,7 +18,7 @@ class ModelConfigurationDialog(QDialog):
         self.setWindowTitle("Configure AI Models")
         self.setMinimumWidth(500)
 
-        self.roles = ["architect", "coder", "chat", "reviewer", "finalizer"]
+        self.roles = ["architect", "coder", "tester", "chat", "reviewer", "finalizer"]
         self.model_combos: dict[str, QComboBox] = {}
         self.temp_spins: dict[str, QDoubleSpinBox] = {}
         self.available_models = {}

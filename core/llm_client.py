@@ -32,6 +32,7 @@ class LLMClient:
             self.role_assignments = {
                 "architect": "google/gemini-2.5-pro",
                 "coder": "google/gemini-2.5-pro",
+                "tester": "deepseek/deepseek-coder",
                 "chat": "deepseek/deepseek-chat",
                 "reviewer": "deepseek/deepseek-reasoner",
                 "finalizer": "anthropic/claude-sonnet-4-20250514"
@@ -40,7 +41,7 @@ class LLMClient:
 
         # Ensure all roles have a default temperature
         default_temperatures = {
-            "architect": 0.35, "coder": 0.16, "chat": 0.7,
+            "architect": 0.35, "coder": 0.16, "tester": 0.1, "chat": 0.7,
             "reviewer": 0.2, "finalizer": 0.1
         }
         for role in self.role_assignments.keys():

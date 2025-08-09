@@ -27,6 +27,15 @@ class VenvManager:
         return python_exe if python_exe.exists() else None
 
     @property
+    def pip_path(self) -> Optional[Path]:
+        """Returns the path to the pip executable within the venv."""
+        python_exe = self.python_path
+        if not python_exe:
+            return None
+        pip_exe = python_exe.parent / "pip.exe" if sys.platform == "win32" else python_exe.parent / "pip"
+        return pip_exe if pip_exe.exists() else None
+
+    @property
     def is_active(self) -> bool:
         """Checks if the virtual environment is correctly set up."""
         return self.python_path is not None

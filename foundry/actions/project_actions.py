@@ -3,7 +3,7 @@
 Contains actions related to project management.
 """
 import logging
-from core.project_manager import ProjectManager
+from core.managers.project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,5 +20,8 @@ def create_project(project_manager: ProjectManager, project_name: str) -> str:
         A string indicating the result of the operation.
     """
     logger.info(f"Executing create_project action with name: {project_name}")
-    success, message = project_manager.create_project(project_name)
-    return message
+    path = project_manager.new_project(project_name)
+    if path:
+        return f"Successfully created new project at: {path}"
+    else:
+        return "Failed to create new project."

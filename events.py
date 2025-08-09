@@ -14,6 +14,12 @@ class UserPromptEntered:
     code_context: Optional[Dict[str, str]] = None
 
 @dataclass
+class UserCommandEntered:
+    """Published when the user submits a slash command."""
+    command: str
+    args: List[str]
+
+@dataclass
 class InteractionModeChangeRequested:
     """Published when the user clicks the Plan/Build mode toggle."""
     new_mode: Any # Should be InteractionMode enum
@@ -121,20 +127,3 @@ class ProjectCreated:
     """Published by the ProjectManager when a new project is created and becomes active."""
     project_name: str
     project_path: str
-
-# --- LSP & Editor Events ---
-
-@dataclass
-class LSPDiagnosticsReceived:
-    """Published by the LSPClientService when it receives diagnostics from the server."""
-    uri: str
-    diagnostics: List[Dict[str, Any]]
-
-# --- Plugin Events ---
-
-@dataclass
-class PluginStateChanged:
-    """Published by the PluginManager when a plugin's state changes."""
-    plugin_name: str
-    old_state: Any
-    new_state: Any

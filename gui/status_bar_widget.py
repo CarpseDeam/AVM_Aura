@@ -1,11 +1,12 @@
 # gui/status_bar_widget.py
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy
+from PySide6.QtWidgets import QStatusBar, QHBoxLayout, QLabel, QSizePolicy
 from PySide6.QtCore import QTimer, Qt
 
 
-class StatusBarWidget(QFrame):
+class StatusBarWidget(QStatusBar):
     """
     A persistent status bar for displaying Aura's current state and activity.
+    Inherits from QStatusBar to be compatible with QMainWindow.
     """
 
     def __init__(self, parent=None):
@@ -14,24 +15,25 @@ class StatusBarWidget(QFrame):
         self.setFixedHeight(30)
         self.setVisible(False)  # Hidden by default
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
-        layout.setSpacing(10)
+        # QStatusBar doesn't use a layout, so we add widgets directly
+        # with addWidget or addPermanentWidget. We'll add them and
+        # they will be arranged from left to right.
 
         self.status_label = QLabel("[ IDLE ]")
         self.status_label.setObjectName("StatusLabel")
+        self.addWidget(self.status_label)
 
         self.activity_label = QLabel("Waiting for input...")
         self.activity_label.setObjectName("ActivityLabel")
-        self.activity_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # The 'stretch' parameter in addWidget will make it take up available space
+        self.addWidget(self.activity_label, 1)
 
         self.bar_label = QLabel("")
         self.bar_label.setObjectName("ThinkingBar")
-        self.bar_label.setFixedWidth(250)  # Give it a fixed width
+        self.bar_label.setFixedWidth(250)
+        # Use addPermanentWidget to align it to the right
+        self.addPermanentWidget(self.bar_label)
 
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.activity_label, 1)  # Let this stretch
-        layout.addWidget(self.bar_label)
 
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
@@ -81,20 +83,23 @@ class StatusBarWidget(QFrame):
         self.stop_animation()
 
     def _apply_stylesheet(self):
+        # Apply styles to the StatusBar itself and its children
         self.setStyleSheet("""
-            #StatusBar {
+            QStatusBar#StatusBar {
                 background-color: #101010;
                 border-top: 1px solid #333333;
             }
-            #StatusLabel {
+            QLabel#StatusLabel {
                 font-weight: bold;
                 color: #FFB74D;
+                padding-left: 10px;
             }
-            #ActivityLabel {
+            QLabel#ActivityLabel {
                 color: #bbbbbb;
             }
-            #ThinkingBar {
+            QLabel#ThinkingBar {
                 color: #FFB74D;
                 font-family: "Courier New", monospace;
+                padding-right: 10px;
             }
         """)

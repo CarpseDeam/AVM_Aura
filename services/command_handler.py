@@ -1,12 +1,14 @@
 # services/command_handler.py
 import logging
 import re
-from typing import Callable, Dict
+from typing import Callable, Dict, TYPE_CHECKING
 from foundry import FoundryManager
 from .view_formatter import format_as_box
 from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
 from event_bus import EventBus
-from core.managers import ProjectManager
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ class CommandHandler:
     """
 
     def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
-                 project_manager: ProjectManager, display_callback, output_log_text_fetcher: Callable[[], str]):
+                 project_manager: "ProjectManager", display_callback, output_log_text_fetcher: Callable[[], str]):
         self.foundry = foundry_manager
         self.event_bus = event_bus
         self.project_manager = project_manager
@@ -44,8 +46,7 @@ class CommandHandler:
     def _update_last_aura_response(self):
         """Scan the log to find the last message from Aura."""
         full_text = self.output_log_text_fetcher()
-        # PROACTIVE FIX: Updated regex to match the new '[ Aura ]' box format.
-        matches = list(re.finditer(r'\[ Aura \]\n(.*?)$', full_text, re.S | re.M))
+        matches = list(re.finditer(r'\[ Aura \]\n(.*?)\s*$', full_text, re.S | re.M))
         if matches:
             self.last_aura_response = matches[-1].group(1).strip()
             logger.info(f"Captured last Aura response for /build command.")

@@ -1,14 +1,16 @@
 # services/tool_runner_service.py
 import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 import inspect
 
 from event_bus import EventBus
 from foundry import FoundryManager, BlueprintInvocation
-from core.managers import ProjectManager, ProjectContext
 from services.mission_log_service import MissionLogService
 from services.vector_context_service import VectorContextService
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager, ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ class ToolRunnerService:
             self,
             event_bus: EventBus,
             foundry_manager: FoundryManager,
-            project_manager: ProjectManager,
+            project_manager: "ProjectManager",
             mission_log_service: MissionLogService,
             vector_context_service: Optional[VectorContextService] = None,
     ):

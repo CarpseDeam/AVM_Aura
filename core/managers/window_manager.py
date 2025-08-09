@@ -1,5 +1,6 @@
 # core/managers/window_manager.py
 from pathlib import Path
+from typing import TYPE_CHECKING
 from gui.main_window import AuraMainWindow
 from gui.code_viewer import CodeViewerWindow
 from gui.model_config_dialog import ModelConfigurationDialog
@@ -7,9 +8,11 @@ from gui.log_viewer import LogViewerWindow
 
 from event_bus import EventBus
 from core.llm_client import LLMClient
-from core.project_manager import ProjectManager
-from core.managers.service_manager import ServiceManager
 from core.app_state import AppState
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
+    from core.managers.service_manager import ServiceManager
 
 
 class WindowManager:
@@ -18,7 +21,7 @@ class WindowManager:
     Single responsibility: Window lifecycle and access management.
     """
 
-    def __init__(self, event_bus: EventBus, project_manager: ProjectManager):
+    def __init__(self, event_bus: EventBus, project_manager: "ProjectManager"):
         self.event_bus = event_bus
         self.project_manager = project_manager
 
@@ -32,7 +35,7 @@ class WindowManager:
 
         print("[WindowManager] Initialized")
 
-    def initialize_windows(self, llm_client: LLMClient, service_manager: ServiceManager, project_root: Path):
+    def initialize_windows(self, llm_client: LLMClient, service_manager: "ServiceManager", project_root: Path):
         """Initialize all GUI windows."""
         print("[WindowManager] Initializing windows...")
 

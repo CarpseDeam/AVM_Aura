@@ -4,7 +4,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from core.managers import ProjectManager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 
 class ExecutionResult:
@@ -23,7 +26,7 @@ class ExecutionEngine:
     directory, using the project's own virtual environment if it exists.
     """
 
-    def __init__(self, project_manager: ProjectManager):
+    def __init__(self, project_manager: 'ProjectManager'):
         """The engine is initialized with a reference to the central ProjectManager."""
         self.project_manager = project_manager
 

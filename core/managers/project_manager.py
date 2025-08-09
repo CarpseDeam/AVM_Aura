@@ -6,6 +6,7 @@ from typing import Optional, Dict, List
 
 from .git_manager import GitManager
 from .venv_manager import VenvManager
+from .project_context import ProjectContext
 from event_bus import EventBus
 from events import ProjectCreated
 
@@ -43,9 +44,25 @@ class ProjectManager:
         return self.venv_manager.python_path if self.venv_manager else None
 
     @property
+    def venv_pip_path(self) -> Optional[Path]:
+        """Delegates getting the venv pip path."""
+        return self.venv_manager.pip_path if self.venv_manager else None
+
+    @property
     def is_venv_active(self) -> bool:
         """Delegates checking the venv status."""
         return self.venv_manager.is_active if self.venv_manager else False
+
+    @property
+    def active_project_context(self) -> Optional[ProjectContext]:
+        """Constructs a snapshot of the current project's context."""
+        if not self.active_project_path:
+            return None
+        return ProjectContext(
+            project_root=self.active_project_path,
+            venv_python_path=self.venv_python_path,
+            venv_pip_path=self.venv_pip_path
+        )
 
     def get_venv_info(self) -> dict:
         """Delegates getting venv info."""
@@ -172,16 +189,6 @@ class ProjectManager:
         if self.git_manager:
             return self.git_manager.create_folder(relative_parent_dir_str, new_folder_name_str)
         return False, "Git not available.", None
-
-    def move_item(self, relative_item_path_str: str, relative_target_dir_str: str, new_name_str: Optional[str] = None) -> tuple[bool, str, Optional[str]]:
-        if self.git_manager:
-            return self.git_manager.move_item(relative_item_path_str, relative_target_dir_str, new_name_str)
-        return False, "Git not available.", None
-
-    def copy_external_items(self, source_abs_paths: List[str], target_project_rel_dir: str) -> tuple[bool, str, List[Dict[str, str]]]:
-        if self.git_manager:
-            return self.git_manager.copy_external_items(source_abs_paths, target_project_rel_dir)
-        return False, "Git not available.", []
 
     def stage_file(self, relative_path_str: str) -> tuple[bool, str]:
         if self.git_manager:

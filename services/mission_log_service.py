@@ -2,11 +2,13 @@
 import logging
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from core.managers import ProjectManager
 from event_bus import EventBus
 from events import MissionLogUpdated, ProjectCreated
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 MISSION_LOG_FILENAME = "mission_log.json"
@@ -17,7 +19,7 @@ class MissionLogService:
     Manages the state of the Mission Log (to-do list) for the active project.
     """
 
-    def __init__(self, project_manager: ProjectManager, event_bus: EventBus):
+    def __init__(self, project_manager: "ProjectManager", event_bus: EventBus):
         self.project_manager = project_manager
         self.event_bus = event_bus
         self.tasks: List[Dict[str, Any]] = []

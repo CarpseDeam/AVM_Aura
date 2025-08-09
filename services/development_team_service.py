@@ -1,10 +1,13 @@
 # services/development_team_service.py
 from __future__ import annotations
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
 from prompts import CREATIVE_ASSISTANT_PROMPT
 from services.agents import ArchitectService, GenerationCoordinator, ReviewerService, FinalizerAgent
+from services.agents.tester_agent import TesterAgent
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -26,12 +29,13 @@ class DevelopmentTeamService:
         # Initialize the agent team
         self.architect = ArchitectService(service_manager)
         self.coordinator = GenerationCoordinator(service_manager)
+        self.tester = TesterAgent(service_manager)
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
         self.finalizer = FinalizerAgent(service_manager)
 
     async def run_build_workflow(self, prompt: str, existing_files: Optional[Dict[str, str]] = None):
         """
-        Executes the full build pipeline: Plan -> Code -> Review -> Finalize -> Log.
+        Executes the full build pipeline: Plan -> Code -> Test -> Review -> Finalize -> Log.
         """
         self.log("info", f"Build workflow initiated for prompt: '{prompt[:50]}...'")
 
@@ -49,14 +53,29 @@ class DevelopmentTeamService:
             self.handle_error("Coder", "Code generation failed to produce files.")
             return
 
-        # 3. Finalizer Phase
+        # 3. Tester Phase
+        self.event_bus.emit("agent_status_changed", "Tester", "Writing tests...", "fa5s.vial")
+        test_files = {}
+        for filename, content in generated_files.items():
+            if filename.endswith(".py") and not filename.startswith("test_"):
+                test_filename = f"test_{Path(filename).name}"
+                test_code = await self.tester.generate_tests_for_file(content, filename)
+                if test_code:
+                    test_files[test_filename] = test_code
+
+        # Merge test files with the main generated files
+        generated_files.update(test_files)
+        if test_files:
+            self.log("success", f"TesterAgent generated {len(test_files)} test file(s).")
+
+        # 4. Finalizer Phase
         self.event_bus.emit("agent_status_changed", "Finalizer", "Creating execution plan...", "fa5s.clipboard-list")
         tool_plan = await self.finalizer.create_tool_plan(generated_files, existing_files, plan.get('dependencies', []))
         if tool_plan is None:
             self.handle_error("Finalizer", "Failed to create an executable tool plan.")
             return
 
-        # 4. Populate Mission Log
+        # 5. Populate Mission Log
         self.mission_log_service.clear_pending_tasks()
         for tool_call in tool_plan:
             summary = self._summarize_tool_call(tool_call)

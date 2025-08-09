@@ -9,6 +9,7 @@ from .task_manager import TaskManager
 from .project_manager import ProjectManager
 from .git_manager import GitManager
 from .venv_manager import VenvManager
+from .project_context import ProjectContext
 
 __all__ = [
     'ServiceManager',
@@ -17,6 +18,7 @@ __all__ = [
     'WorkflowManager',
     'TaskManager',
     'ProjectManager',
+    'ProjectContext',
     'GitManager',
     'VenvManager'
 ]

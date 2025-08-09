@@ -1,6 +1,6 @@
 from event_bus import EventBus
 from core.llm_client import LLMClient
-from prompts import REFINEMENT_PROMPT
+from prompts.reviewer import INTELLIGENT_FIXER_PROMPT
 
 class ReviewerService:
     def __init__(self, event_bus: EventBus, llm_client: LLMClient):
@@ -14,7 +14,7 @@ class ReviewerService:
         Uses an LLM with FOCUSED project context and git diff for the first fix attempt.
         """
         self.log("info", "Reviewer analyzing error with focused context.")
-        prompt = REFINEMENT_PROMPT.format(
+        prompt = INTELLIGENT_FIXER_PROMPT.format(
             full_code_context=full_code_context,
             error_report=error_report,
             git_diff=git_diff

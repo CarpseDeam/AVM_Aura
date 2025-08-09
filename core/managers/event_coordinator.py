@@ -35,6 +35,7 @@ class EventCoordinator:
         self._wire_execution_events()
         self._wire_chat_session_events()
         self._wire_status_bar_events()
+        self._wire_foundry_events()
         print("[EventCoordinator] All events wired successfully.")
 
     def _wire_status_bar_events(self):
@@ -43,7 +44,7 @@ class EventCoordinator:
         if not main_window: return
 
         if hasattr(main_window, 'status_bar') and main_window.status_bar:
-             self.event_bus.subscribe("agent_status_changed", main_window.status_bar.update_agent_status)
+             self.event_bus.subscribe("agent_status_changed", main_window.status_bar.show_status)
         else:
             print("[EventCoordinator] Warning: StatusBar not found or is missing 'update_agent_status' method.")
 
@@ -83,3 +84,9 @@ class EventCoordinator:
     def _wire_execution_events(self):
         # Handled by services directly
         pass
+
+    def _wire_foundry_events(self):
+        """Connects events related to the tool system."""
+        foundry_manager = self.service_manager.get_foundry_manager()
+        if foundry_manager:
+            self.event_bus.subscribe("tools_modified", foundry_manager.handle_tools_modified)

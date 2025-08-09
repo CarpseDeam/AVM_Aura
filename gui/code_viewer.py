@@ -1,14 +1,17 @@
 # gui/code_viewer.py
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox, QSplitter
 from PySide6.QtCore import Qt
 
 from .editor_manager import EditorManager
 from .file_tree_manager import FileTreeManager
-from core.managers import ProjectManager
 from event_bus import EventBus
 from events import RefreshFileTree
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,7 @@ class CodeViewerWindow(QMainWindow):
     The main code viewing and interaction window, with a file tree and editor tabs.
     """
 
-    def __init__(self, event_bus: EventBus, project_manager: ProjectManager):
+    def __init__(self, event_bus: EventBus, project_manager: "ProjectManager"):
         super().__init__()
         self.project_manager = project_manager
         self.event_bus = event_bus

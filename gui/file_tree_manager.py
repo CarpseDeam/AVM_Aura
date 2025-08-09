@@ -1,7 +1,7 @@
 # gui/file_tree_manager.py
 import logging
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QStyle, QWidget, QVBoxLayout, QMenu,
@@ -9,9 +9,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint
 
-from core.project_manager import ProjectManager
 from event_bus import EventBus
 from events import DirectToolInvocationRequest
+
+if TYPE_CHECKING:
+    from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ class FileTreeManager:
     Manages the file tree widget, populating it from the project directory
     and providing a context menu for file operations.
     """
-    def __init__(self, project_manager: ProjectManager, event_bus: EventBus):
+    def __init__(self, project_manager: "ProjectManager", event_bus: EventBus):
         self.project_manager = project_manager
         self.event_bus = event_bus
         self.on_file_selected_callback: Optional[Callable[[Path], None]] = None
