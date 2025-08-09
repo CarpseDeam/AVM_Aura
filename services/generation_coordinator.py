@@ -80,7 +80,6 @@ class GenerationCoordinator:
                 purpose=file_info.get("purpose", ""),
                 original_code_section=original_code_section,
                 file_plan_json=json.dumps(plan, indent=2),
-                symbol_index_json="{}", # Placeholder for future symbol index
                 code_context_json=code_context_json,
             )
         else:

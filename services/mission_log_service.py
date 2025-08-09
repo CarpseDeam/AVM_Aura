@@ -59,7 +59,7 @@ class MissionLogService:
             self.tasks = []
             self._next_task_id = 1
 
-        self.event_bus.publish(MissionLogUpdated(tasks=self.tasks))
+        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
 
     def _save_log(self):
         """Saves the current list of tasks to disk."""
@@ -91,7 +91,7 @@ class MissionLogService:
         self.tasks.append(new_task)
         self._next_task_id += 1
         self._save_log()
-        self.event_bus.publish(MissionLogUpdated(tasks=self.tasks))
+        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
         logger.info(f"Added task {new_task['id']}: '{description}'")
         return new_task
 
@@ -101,7 +101,7 @@ class MissionLogService:
             if task.get('id') == task_id:
                 task['done'] = True
                 self._save_log()
-                self.event_bus.publish(MissionLogUpdated(tasks=self.tasks))
+                self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
                 logger.info(f"Marked task {task_id} as done.")
                 return True
         logger.warning(f"Attempted to mark non-existent task {task_id} as done.")
@@ -120,6 +120,6 @@ class MissionLogService:
         if cleared_count > 0:
             logger.info(f"Cleared {cleared_count} pending tasks from the mission log.")
             self._save_log()
-            self.event_bus.publish(MissionLogUpdated(tasks=self.tasks))
+            self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
         else:
             logger.info("No pending tasks to clear from the mission log.")

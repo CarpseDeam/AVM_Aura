@@ -58,7 +58,7 @@ class Application:
             self.service_manager.initialize_services()
 
             # Launch all background servers
-            self.service_manager.launch_background_servers()
+            await self.service_manager.launch_background_servers()
 
             self.window_manager.initialize_windows(
                 self.service_manager.get_llm_client(),
@@ -76,6 +76,8 @@ class Application:
                 output_log_text_fetcher=controller.get_full_chat_text
             )
             controller.wire_up_command_handler(self.command_handler)
+            controller.set_project_manager(self.project_manager)
+            controller.set_mission_log_service(self.service_manager.mission_log_service)
             # --- End CommandHandler wiring ---
 
             self.task_manager.set_managers(self.service_manager, self.window_manager)

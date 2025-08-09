@@ -1,3 +1,4 @@
+# core/managers/workflow_manager.py
 from typing import Optional, Dict
 
 from event_bus import EventBus
@@ -6,6 +7,7 @@ from core.interaction_mode import InteractionMode
 from core.managers.service_manager import ServiceManager
 from core.managers.window_manager import WindowManager
 from core.managers.task_manager import TaskManager
+from events import UserPromptEntered
 
 
 class WorkflowManager:
@@ -27,10 +29,15 @@ class WorkflowManager:
         self.task_manager = task_manager
         self.event_bus.subscribe("execution_failed", self.handle_execution_failed)
 
-    def handle_user_request(self, prompt: str, conversation_history: list,
-                            image_bytes: Optional[bytes] = None, image_media_type: Optional[str] = None,
-                            code_context: Optional[Dict[str, str]] = None):
+    def handle_user_request(self, event: UserPromptEntered):
         """The central router for all user chat input."""
+        # Unpack from event
+        prompt = event.prompt_text
+        conversation_history = event.conversation_history
+        image_bytes = event.image_bytes
+        image_media_type = event.image_media_type
+        code_context = event.code_context
+
         stripped_prompt = prompt.strip()
         if not stripped_prompt and not image_bytes and not code_context:
             return

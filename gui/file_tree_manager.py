@@ -125,20 +125,20 @@ class FileTreeManager:
         name, ok = QInputDialog.getText(self._widget, "New File", "Enter file name:")
         if ok and name:
             new_path = target_dir / name
-            self.event_bus.publish(DirectToolInvocationRequest('write_file', {'path': str(new_path), 'content': ''}))
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest('write_file', {'path': str(new_path), 'content': ''}))
 
     def _handle_new_folder(self, target_dir: Path):
         name, ok = QInputDialog.getText(self._widget, "New Folder", "Enter folder name:")
         if ok and name:
             new_path = target_dir / name
-            self.event_bus.publish(DirectToolInvocationRequest('create_directory', {'path': str(new_path)}))
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest('create_directory', {'path': str(new_path)}))
 
     def _handle_rename(self, old_path: Path):
         old_name = old_path.name
         new_name, ok = QInputDialog.getText(self._widget, "Rename", "Enter new name:", text=old_name)
         if ok and new_name and new_name != old_name:
             new_path = old_path.with_name(new_name)
-            self.event_bus.publish(DirectToolInvocationRequest('move_file', {'source_path': str(old_path), 'destination_path': str(new_path)}))
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest('move_file', {'source_path': str(old_path), 'destination_path': str(new_path)}))
 
     def _handle_delete(self, path_to_delete: Path, is_dir: bool):
         reply = QMessageBox.question(self._widget, "Confirm Delete",
@@ -147,4 +147,4 @@ class FileTreeManager:
                                      QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             tool_id = 'delete_directory' if is_dir else 'delete_file'
-            self.event_bus.publish(DirectToolInvocationRequest(tool_id, {'path': str(path_to_delete)}))
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest(tool_id, {'path': str(path_to_delete)}))

@@ -4,7 +4,7 @@ import re
 from typing import Callable, Dict, TYPE_CHECKING
 from foundry import FoundryManager
 from .view_formatter import format_as_box
-from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered
+from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered, UserCommandEntered
 from event_bus import EventBus
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ class CommandHandler:
             self.last_aura_response = ""
             logger.warning("Could not find a previous 'Aura' response to use for /build.")
 
-    def handle(self, event):
+    def handle(self, event: UserCommandEntered):
         self._update_last_aura_response()
 
         command = event.command.lower()
@@ -88,13 +88,11 @@ class CommandHandler:
             return
 
         self.display(f"▶️ Sending last prompt to Build Mode...", "system_message")
-
-        self.event_bus.publish(
-            UserPromptEntered(
-                prompt_text=self.last_aura_response,
-                conversation_history=[]
-            )
+        event = UserPromptEntered(
+            prompt_text=self.last_aura_response,
+            conversation_history=[]
         )
+        self.event_bus.emit("user_request_submitted", event)
 
     def _handle_list_files(self, args: list):
         list_files_action = self.foundry.get_action("list_files")
@@ -125,7 +123,7 @@ class CommandHandler:
         if content.strip().startswith("Error:"):
             self.display(format_as_box(f"Error reading file", content), "avm_error")
             return
-        self.event_bus.publish(DisplayFileInEditor(file_path=str(resolved_path), file_content=content))
+        self.event_bus.emit("display_file_in_editor", DisplayFileInEditor(file_path=str(resolved_path), file_content=content))
         self.display(f"Opened `{relative_path}` in Code Viewer.", "system_message")
 
     def _handle_lint(self, args: list):
@@ -149,7 +147,7 @@ class CommandHandler:
                          "avm_error")
             return
         self.display("Starting project re-indexing...", "system_message")
-        self.event_bus.publish(DirectToolInvocationRequest(tool_id='index_project_context', params={
+        self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest(tool_id='index_project_context', params={
             'path': str(self.project_manager.active_project_path)}))
 
     def _handle_help(self):

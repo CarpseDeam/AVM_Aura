@@ -38,7 +38,7 @@ class MissionLogWindow(QMainWindow):
         self._init_ui()
 
         self.update_tasks_signal.connect(self.handle_task_update)
-        self.event_bus.subscribe(MissionLogUpdated, self.on_mission_log_updated)
+        self.event_bus.subscribe("mission_log_updated", self.on_mission_log_updated)
 
     def on_mission_log_updated(self, event: MissionLogUpdated):
         """Event handler that receives updates from any thread."""
@@ -156,7 +156,7 @@ class MissionLogWindow(QMainWindow):
     def _on_add_task(self):
         description = self.add_task_input.text().strip()
         if description:
-            self.event_bus.publish(DirectToolInvocationRequest(
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest(
                 tool_id='add_task_to_mission_log',
                 params={'description': description}
             ))
@@ -164,11 +164,11 @@ class MissionLogWindow(QMainWindow):
 
     def _on_dispatch(self):
         logger.info("Dispatch Aura button clicked. Publishing MissionDispatchRequest.")
-        self.event_bus.publish(MissionDispatchRequest())
+        self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
 
     def _on_task_state_changed(self, task_id: int, is_done: bool):
         if is_done:
-            self.event_bus.publish(DirectToolInvocationRequest(
+            self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest(
                 tool_id='mark_task_as_done',
                 params={'task_id': task_id}
             ))

@@ -1,7 +1,7 @@
 # gui/controller.py
 import logging
 import shlex
-from typing import Optional, Callable, TYPE_CHECKING
+from typing import Optional, Callable, TYPE_CHECKING, List, Dict, Any
 
 from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputDialog
@@ -110,15 +110,16 @@ class GUIController(QObject):
             try:
                 parts = shlex.split(input_text[1:])
                 command, args = parts[0], parts[1:]
-                self.event_bus.publish(UserCommandEntered(command=command, args=args))
+                event = UserCommandEntered(command=command, args=args)
+                self.event_bus.emit("user_command_entered", event)
             except Exception as e:
                 self.add_system_message_signal.emit(f"Error parsing command: {e}")
         else:
             event = UserPromptEntered(
                 prompt_text=input_text,
-                conversation_history=[]
+                conversation_history=self.get_conversation_history()
             )
-            self.event_bus.publish(event)
+            self.event_bus.emit("user_request_submitted", event)
 
     def post_welcome_message(self):
         banner_widget = QLabel(f"<pre>{get_aura_banner()}</pre>System online. Waiting for command...")
@@ -145,6 +146,16 @@ class GUIController(QObject):
     def _insert_widget(self, widget: QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, widget)
         QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(widget))
+
+    def get_conversation_history(self) -> List[Dict[str, Any]]:
+        history = []
+        for i in range(self.chat_layout.count()):
+            widget = self.chat_layout.itemAt(i).widget()
+            if isinstance(widget, UserMessageWidget):
+                history.append({"role": "user", "content": widget.message_label.text()})
+            elif isinstance(widget, AIMessageWidget):
+                history.append({"role": "model", "content": widget.message_label.text()})
+        return history
 
     def get_full_chat_text(self) -> str:
         text_parts = []

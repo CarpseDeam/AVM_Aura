@@ -88,7 +88,7 @@ blueprint = Blueprint(
         return error_message
 
     # Publish the event to notify the system that tools have changed.
-    event_bus.publish(ToolsModified())
+    event_bus.emit("tools_modified", ToolsModified())
 
     success_message = (
         f"SUCCESS: New tool '{tool_name}' created successfully!\\n"

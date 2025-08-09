@@ -73,7 +73,7 @@ class ServiceManager:
 
         self.log_to_event_bus("info", "[ServiceManager] Services initialized")
 
-    def launch_background_servers(self):
+    async def launch_background_servers(self):
         python_executable_to_use: str
         cwd_for_servers: Path
         log_dir_for_servers: Path
@@ -106,6 +106,11 @@ class ServiceManager:
                 self.log_to_event_bus("info", f"LLM Server process started with PID: {self.llm_server_process.pid}")
             except Exception as e:
                 self.log_to_event_bus("error", f"Failed to launch LLM server: {e}\n{traceback.format_exc()}")
+
+        self.log_to_event_bus("info", "Waiting for background servers to initialize...")
+        await asyncio.sleep(3) # Give servers time to start up.
+        self.log_to_event_bus("info", "Resuming main application initialization.")
+
 
     def terminate_background_servers(self):
         """Terminates all managed background server processes."""
