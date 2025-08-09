@@ -29,20 +29,20 @@ async def main_async_logic(app_instance, root_path: Path):
     shutdown_future = asyncio.get_event_loop().create_future()
     shutdown_in_progress = False
 
-    async def on_about_to_quit():
+    async def start_shutdown():
         nonlocal shutdown_in_progress
         if shutdown_in_progress: return
         shutdown_in_progress = True
-        print("[main] Application is about to quit. Starting graceful shutdown...")
+        print("[main] Shutdown requested. Starting graceful shutdown...")
         if aura_app:
             await aura_app.shutdown()
         if not shutdown_future.done(): shutdown_future.set_result(True)
         print("[main] Graceful shutdown complete.")
 
-    app_instance.aboutToQuit.connect(lambda: asyncio.create_task(on_about_to_quit()))
-
     try:
         aura_app = Application(project_root=root_path)
+        aura_app.event_bus.subscribe("application_shutdown", lambda: asyncio.create_task(start_shutdown()))
+
         await aura_app.initialize_async()
         if aura_app.is_fully_initialized():
             aura_app.show()
@@ -62,13 +62,18 @@ async def main_async_logic(app_instance, root_path: Path):
         except Exception as msg_e:
             print(f"Could not show error message box: {msg_e}", file=sys.stderr)
     finally:
-        print("[main] Main async logic has finished. Exiting.")
+        print("[main] Main async logic has finished. Quitting application.")
         QTimer.singleShot(100, app_instance.quit)
 
 
 if __name__ == "__main__":
     setup_exception_hook()
     app = QApplication(sys.argv)
+
+    # We take manual control of when the application quits.
+    # The main window closing will emit a signal, but not kill the app.
+    # Our shutdown logic will call app.quit() when it's done.
+    app.setQuitOnLastWindowClosed(False)
 
     app.setApplicationName("Aura")
     app.setOrganizationName("Aura")

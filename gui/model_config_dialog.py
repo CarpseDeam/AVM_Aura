@@ -9,6 +9,7 @@ from core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+
 class ModelConfigurationDialog(QDialog):
     """A dialog for configuring LLM model assignments and temperatures for different roles."""
 
@@ -60,11 +61,18 @@ class ModelConfigurationDialog(QDialog):
     async def populate_models_async(self):
         """Fetches available models from the LLM client."""
         self.available_models = await self.llm_client.get_available_models()
+        if not self.available_models:
+            print("[ModelConfigurationDialog] Warning: No models were returned from the server.")
+
         for combo in self.model_combos.values():
             combo.clear()
             # Group by provider
             for provider, models in self.available_models.items():
-                combo.addItem(f"--- {provider.upper()} ---").setEnabled(False)
+                combo.addItem(f"--- {provider.upper()} ---")
+                # The newly added item is at the last index. We get its model item and disable it.
+                last_index = combo.count() - 1
+                combo.model().item(last_index).setEnabled(False)
+
                 for model_name in models:
                     combo.addItem(model_name, f"{provider}/{model_name}")
 

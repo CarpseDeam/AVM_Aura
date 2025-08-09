@@ -22,6 +22,7 @@ class LLMClient:
         print(f"[LLMClient] Client initialized. Will connect to LLM server at {self.llm_server_url}")
 
     def load_assignments(self):
+        """Loads role assignments and temperatures from JSON, with smart defaults."""
         if self.assignments_file.exists():
             with open(self.assignments_file, 'r') as f:
                 config_data = json.load(f)
@@ -31,13 +32,14 @@ class LLMClient:
             # Smart defaults if file doesn't exist
             self.role_assignments = {
                 "architect": "google/gemini-2.5-pro",
-                "coder": "google/gemini-2.5-pro",
-                "tester": "deepseek/deepseek-coder",
-                "chat": "deepseek/deepseek-chat",
-                "reviewer": "deepseek/deepseek-reasoner",
-                "finalizer": "anthropic/claude-sonnet-4-20250514"
+                "coder": "google/gemini-2.5-flash",
+                "tester": "ollama/deepseek-coder",
+                "chat": "google/gemini-2.5-flash",
+                "reviewer": "google/gemini-2.5-pro",
+                "finalizer": "google/gemini-2.5-pro"
             }
             self.role_temperatures = {}
+            self.save_assignments() # Create the file with defaults
 
         # Ensure all roles have a default temperature
         default_temperatures = {
@@ -47,8 +49,11 @@ class LLMClient:
         for role in self.role_assignments.keys():
             if role not in self.role_temperatures:
                 self.role_temperatures[role] = default_temperatures.get(role, 0.7)
+        self.save_assignments()
+
 
     def save_assignments(self):
+        """Saves the current role assignments and temperatures to the JSON file."""
         config_data = {
             "role_assignments": self.role_assignments,
             "role_temperatures": self.role_temperatures

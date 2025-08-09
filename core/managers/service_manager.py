@@ -73,7 +73,7 @@ class ServiceManager:
 
         self.log_to_event_bus("info", "[ServiceManager] Services initialized")
 
-    async def launch_background_servers(self):
+    async def launch_background_servers(self, timeout: int = 15):
         python_executable_to_use: str
         cwd_for_servers: Path
         log_dir_for_servers: Path
@@ -107,9 +107,25 @@ class ServiceManager:
             except Exception as e:
                 self.log_to_event_bus("error", f"Failed to launch LLM server: {e}\n{traceback.format_exc()}")
 
-        self.log_to_event_bus("info", "Waiting for background servers to initialize...")
-        await asyncio.sleep(3) # Give servers time to start up.
-        self.log_to_event_bus("info", "Resuming main application initialization.")
+        # NEW POLLING LOGIC
+        self.log_to_event_bus("info", "Waiting for LLM server to become available...")
+        start_time = asyncio.get_event_loop().time()
+        server_ready = False
+        while asyncio.get_event_loop().time() - start_time < timeout:
+            try:
+                models = await self.llm_client.get_available_models()
+                if models:
+                    self.log_to_event_bus("success", f"LLM Server is online. Found models from providers: {list(models.keys())}")
+                    server_ready = True
+                    break
+            except Exception:
+                pass  # The client logs connection errors, so we can just wait.
+            await asyncio.sleep(1)  # Wait 1 second before retrying.
+
+        if not server_ready:
+            msg = f"LLM Server failed to start within {timeout} seconds. Check llm_server_subprocess.log for errors."
+            self.log_to_event_bus("error", msg)
+            raise RuntimeError(msg)
 
 
     def terminate_background_servers(self):

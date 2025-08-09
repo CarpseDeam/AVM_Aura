@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QLabel, QSizePolicy, QPushButton
 )
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QIcon, QResizeEvent
+from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent
 
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
@@ -39,6 +39,16 @@ class AuraMainWindow(QMainWindow):
         )
         self.controller.post_welcome_message()
         self._apply_stylesheet()
+
+    def closeEvent(self, event: QCloseEvent):
+        """
+        Overrides the default close event to trigger a graceful shutdown.
+        """
+        logger.info("Main window close event triggered. Initiating application shutdown.")
+        # This signal will be caught by main.py to start the full shutdown.
+        self.event_bus.emit("application_shutdown")
+        # We accept the event to allow the window to close. The app itself will wait.
+        event.accept()
 
     def _setup_ui(self):
         central_widget = QWidget()
