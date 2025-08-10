@@ -21,20 +21,10 @@ class UserCommandEntered:
     args: List[str]
 
 @dataclass
-class InteractionModeChangeRequested:
-    """Published when the user clicks the Plan/Build mode toggle."""
-    new_mode: Any # Should be InteractionMode enum
-
-@dataclass
 class AppStateChanged:
     """Published by AppStateService when the state (BOOTSTRAP/MODIFY) changes."""
     new_state: Any # Should be AppState enum
     project_name: Optional[str] = None
-
-@dataclass
-class InteractionModeChanged:
-    """Published by AppStateService when the mode (PLAN/BUILD) changes."""
-    new_mode: Any # Should be InteractionMode enum
 
 @dataclass
 class NewSessionRequested:
@@ -49,6 +39,13 @@ class AgentStatusChanged:
     agent_name: str
     status_text: str
     icon_name: str
+
+@dataclass
+class PostChatMessage:
+    """Requests that a message be posted to the main chat log from a service."""
+    sender: str
+    message: str
+    is_error: bool = False
 
 @dataclass
 class AIWorkflowFinished:

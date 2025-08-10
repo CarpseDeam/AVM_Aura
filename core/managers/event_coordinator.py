@@ -59,10 +59,6 @@ class EventCoordinator:
             self.event_bus.subscribe("load_project_requested", action_service.handle_load_project)
             self.event_bus.subscribe("new_session_requested", action_service.handle_new_session)
 
-        app_state_service = self.service_manager.app_state_service
-        if app_state_service:
-            self.event_bus.subscribe("interaction_mode_change_requested", app_state_service.set_interaction_mode)
-
         if self.window_manager:
             self.event_bus.subscribe("app_state_changed", self.window_manager.handle_app_state_change)
 

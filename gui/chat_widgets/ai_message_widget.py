@@ -10,10 +10,11 @@ class AIMessageWidget(QFrame):
     a retro terminal transmission box. It handles its own painting to resize correctly.
     """
 
-    def __init__(self, text: str, parent=None):
+    def __init__(self, text: str, author: str = "Aura", parent=None):
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setObjectName("AIMessageWidget")
+        self.author = author.upper()
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
@@ -21,7 +22,7 @@ class AIMessageWidget(QFrame):
         layout.setContentsMargins(15, 10, 15, 15)
         layout.setSpacing(5)
 
-        self.author_label = QLabel("[ Aura ]")
+        self.author_label = QLabel(f"[ {self.author} ]")
         self.author_label.setObjectName("AuraAuthorLabel")
         self.author_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.author_label.adjustSize()
@@ -39,6 +40,20 @@ class AIMessageWidget(QFrame):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # --- Style Definitions for each Agent ---
+        STYLES = {
+            "ARCHITECT": {"tl": "╔", "tr": "╗", "bl": "╚", "br": "╝", "h": "═", "v": "║"},
+            "CODER": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│", "flair": "<>"},
+            "TESTER": {"tl": "[", "tr": "]", "bl": "[", "br": "]", "h": "-", "v": "¦"},
+            "FINALIZER": {"tl": "╭", "tr": "╮", "bl": "╰", "br": "╯", "h": "─", "v": "│"},
+            "CONDUCTOR": {"tl": "╓", "tr": "╖", "bl": "╙", "br": "╜", "h": "─", "v": "║"},
+            "REVIEWER": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "·", "v": "│"},
+            "AURA": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│"},
+            "DEFAULT": {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|"},
+        }
+
+        style = STYLES.get(self.author, STYLES["DEFAULT"])
 
         label_geom = self.author_label.geometry()
         if label_geom.width() == 0 or not self.author_label.isVisible():
@@ -65,16 +80,28 @@ class AIMessageWidget(QFrame):
         gap_start_x = label_geom.x() - 5
         gap_end_x = label_geom.right() + 5
 
-        painter.drawLine(rect.left(), top_line_y, gap_start_x, top_line_y)
-        painter.drawLine(gap_end_x, top_line_y, rect.right(), top_line_y)
-        painter.drawLine(rect.left(), top_line_y, rect.left(), rect.bottom())
-        painter.drawLine(rect.right(), top_line_y, rect.right(), rect.bottom())
-        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        # Draw box using styled characters
+        # Top line
+        painter.drawText(0, top_line_y, gap_start_x, fm.height(), Qt.AlignmentFlag.AlignRight, style['h'] * 50)
+        painter.drawText(gap_end_x, top_line_y, rect.width(), fm.height(), Qt.AlignmentFlag.AlignLeft, style['h'] * 50)
 
-        painter.drawText(QPoint(rect.left() - 1, top_line_y + char_h_offset), "┌")
-        painter.drawText(QPoint(rect.right() - 2, top_line_y + char_h_offset), "┐")
-        painter.drawText(QPoint(rect.left() - 1, rect.bottom() + char_h_offset), "└")
-        painter.drawText(QPoint(rect.right() - 2, rect.bottom() + char_h_offset), "┘")
+        # Side and bottom lines
+        for y in range(top_line_y, rect.bottom(), fm.height()):
+            painter.drawText(rect.left() - 1, y + fm.height(), style['v'])
+            painter.drawText(rect.right() - 2, y + fm.height(), style['v'])
+        painter.drawText(0, rect.bottom(), rect.width(), fm.height(), Qt.AlignmentFlag.AlignHCenter, style['h'] * 100)
+
+        # Draw corners
+        painter.drawText(QPoint(rect.left() - 1, top_line_y + char_h_offset), style['tl'])
+        painter.drawText(QPoint(rect.right() - 2, top_line_y + char_h_offset), style['tr'])
+        painter.drawText(QPoint(rect.left() - 1, rect.bottom() + char_h_offset), style['bl'])
+        painter.drawText(QPoint(rect.right() - 2, rect.bottom() + char_h_offset), style['br'])
+
+        # Draw special flair if it exists
+        if "flair" in style:
+            painter.drawText(QPoint(gap_start_x - fm.horizontalAdvance(style["flair"][0]), top_line_y + char_h_offset),
+                             style["flair"][0])
+            painter.drawText(QPoint(gap_end_x, top_line_y + char_h_offset), style["flair"][1])
 
         super().paintEvent(event)
 

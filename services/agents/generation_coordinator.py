@@ -8,6 +8,7 @@ from pathlib import Path
 from event_bus import EventBus
 from prompts import CODER_PROMPT, SIMPLE_FILE_PROMPT
 from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
+from events import PostChatMessage
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -20,21 +21,50 @@ class GenerationCoordinator:
         self.llm_client = service_manager.get_llm_client()
         self.project_manager = service_manager.get_project_manager()
 
-    async def coordinate_generation(self, plan: Dict[str, Any], existing_files: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    async def coordinate_generation(self, plan: Dict[str, Any], existing_files: Optional[Dict[str, str]]) -> Optional[
+        Dict[str, str]]:
         self.log("info", "Code generation phase started.")
         generated_files = {}
+
         files_to_generate = plan.get("files", [])
+        if not files_to_generate:
+            self.log("warning", "Architect's plan contained no files to generate.")
+            return {}
+
         total_files = len(files_to_generate)
 
         for i, file_info in enumerate(files_to_generate):
-            filename = file_info["filename"]
+            filename = None
+            purpose = ""
+
+            # --- DEFENSIVE PARSING of the Architect's plan ---
+            if isinstance(file_info, dict):
+                # Standard case: {"filename": "main.py", "purpose": "..."}
+                filename = file_info.get("filename")
+                purpose = file_info.get("purpose", "")
+            elif isinstance(file_info, str):
+                # Handle case where AI returns: "files": ["main.py", "requirements.txt"]
+                filename = file_info
+
+            if not filename:
+                self.log("error",
+                         f"Could not determine filename from architect plan entry: {file_info}. Aborting generation.")
+                self.event_bus.emit("post_chat_message", PostChatMessage(
+                    sender="Architect",
+                    message=f"I failed to create a valid file plan. The entry '{file_info}' was malformed. Please try rephrasing your request.",
+                    is_error=True
+                ))
+                return None
+
+            clean_file_info = {"filename": filename, "purpose": purpose}
+
             self.event_bus.emit("agent_status_changed", "Coder", f"Writing {filename}...", "fa5s.keyboard")
             self.log("info", f"Generating file {i + 1}/{total_files}: {filename}")
 
-            generated_content = await self._generate_single_file(file_info, plan, existing_files, generated_files)
+            generated_content = await self._generate_single_file(clean_file_info, plan, existing_files, generated_files)
             if generated_content is None:
                 self.log("error", f"Failed to generate content for {filename}.")
-                return None # Fail the whole process if one file fails
+                return None
 
             cleaned_content = self._robustly_clean_llm_output(generated_content)
             generated_files[filename] = cleaned_content
@@ -42,7 +72,8 @@ class GenerationCoordinator:
         self.log("success", f"Code generation phase complete. {len(generated_files)} files created.")
         return generated_files
 
-    async def _generate_single_file(self, file_info: Dict[str, str], plan: Dict, existing_files: Dict, generated_files_this_session: Dict) -> Optional[str]:
+    async def _generate_single_file(self, file_info: Dict[str, str], plan: Dict, existing_files: Dict,
+                                    generated_files_this_session: Dict) -> Optional[str]:
         filename = file_info["filename"]
         file_extension = Path(filename).suffix
 
@@ -74,8 +105,8 @@ class GenerationCoordinator:
                 original_code = existing_files.get(filename, "")
                 original_code_section = f"--- ORIGINAL CODE OF `{filename}` (You are modifying this file): ---\n```python\n{original_code}\n```"
 
-            # Rolling context of already generated files
-            code_context_json = json.dumps({k: v for k, v in generated_files_this_session.items() if k != filename}, indent=2)
+            code_context_json = json.dumps({k: v for k, v in generated_files_this_session.items() if k != filename},
+                                           indent=2)
 
             return CODER_PROMPT.format(
                 filename=filename,

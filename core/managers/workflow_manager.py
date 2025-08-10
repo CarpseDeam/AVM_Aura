@@ -3,11 +3,10 @@ from typing import Optional, Dict
 
 from event_bus import EventBus
 from core.app_state import AppState
-from core.interaction_mode import InteractionMode
 from core.managers.service_manager import ServiceManager
 from core.managers.window_manager import WindowManager
 from core.managers.task_manager import TaskManager
-from events import UserPromptEntered
+from events import UserPromptEntered, PostChatMessage
 
 
 class WorkflowManager:
@@ -32,35 +31,22 @@ class WorkflowManager:
         self.event_bus.subscribe("execution_failed", self.handle_execution_failed)
 
     def handle_user_request(self, event: UserPromptEntered):
-        """The central router for all user chat input."""
-        # Reset fix counter on any new user request
+        """
+        The central router for all user chat input.
+        This workflow always interprets user input as a request to create a high-level plan.
+        """
         self._fix_attempt_count = 0
-
         prompt = event.prompt_text
-        conversation_history = event.conversation_history
-        image_bytes = event.image_bytes
-        image_media_type = event.image_media_type
-
-        if not prompt.strip() and not image_bytes:
+        if not prompt.strip() and not event.image_bytes:
             return
-
-        app_state_service = self.service_manager.app_state_service
-        interaction_mode = app_state_service.get_interaction_mode()
-        app_state = app_state_service.get_app_state()
 
         dev_team_service = self.service_manager.get_development_team_service()
 
-        workflow_coroutine = None
-        if interaction_mode == InteractionMode.PLAN:
-            workflow_coroutine = dev_team_service.run_chat_workflow(prompt, conversation_history, image_bytes,
-                                                                    image_media_type)
-        elif interaction_mode == InteractionMode.BUILD:
-            # This is the key change: Only run the architect phase initially.
-            if app_state == AppState.BOOTSTRAP:
-                workflow_coroutine = dev_team_service.run_architect_phase(prompt, existing_files=None)
-            elif app_state == AppState.MODIFY:
-                existing_files = self.service_manager.project_manager.get_project_files()
-                workflow_coroutine = dev_team_service.run_architect_phase(prompt, existing_files)
+        # The user's prompt is a direct instruction to have Aura create a plan.
+        workflow_coroutine = dev_team_service.run_aura_planner_workflow(
+            user_idea=prompt,
+            conversation_history=event.conversation_history
+        )
 
         if workflow_coroutine:
             self.task_manager.start_ai_workflow_task(workflow_coroutine)
@@ -69,6 +55,14 @@ class WorkflowManager:
         """
         This is the entry point for the self-correction loop.
         """
+        self.event_bus.emit(
+            "post_chat_message",
+            PostChatMessage(
+                sender="Aura",
+                message="It looks like the execution failed. Don't worry, I'm starting the self-correction process to analyze and fix the problem.",
+                is_error=True
+            )
+        )
         self._last_error_report = error_report
         self._fix_attempt_count += 1
 
@@ -77,6 +71,14 @@ class WorkflowManager:
         if self._fix_attempt_count > self.MAX_FIX_ATTEMPTS:
             self.log("error", "Maximum fix attempts reached. Aborting.")
             self.event_bus.emit("agent_status_changed", "Aura", "Could not fix the error. Aborting.", "fa5s.thumbs-down")
+            self.event_bus.emit(
+                "post_chat_message",
+                PostChatMessage(
+                    sender="Aura",
+                    message="I've tried my best but was unable to automatically fix the issue. You may need to review the code and logs to resolve this one.",
+                    is_error=True
+                )
+            )
             return
 
         dev_team_service = self.service_manager.get_development_team_service()
@@ -86,11 +88,9 @@ class WorkflowManager:
             self.log("error", "Cannot attempt fix: Services or active project not available.")
             return
 
-        # Prepare context for the reviewer
         git_diff = project_manager.get_git_diff()
         full_code_context = project_manager.get_project_files()
 
-        # Start the "fix-it" workflow
         fix_coroutine = dev_team_service.run_review_and_fix_phase(
             error_report=error_report,
             git_diff=git_diff,

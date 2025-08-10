@@ -20,12 +20,12 @@ class VectorContextService:
     code snippets and other project context.
     """
 
-    def __init__(self, db_path: str = "./chroma_db"):
+    def __init__(self, db_path: str):
         try:
-            logger.info("Initializing VectorContextService...")
+            logger.info(f"Initializing VectorContextService with DB path: {db_path}")
             self.embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-            # Set up the ChromaDB client and collection
+            # Set up the ChromaDB client and collection for the specific project path
             self.client = chromadb.PersistentClient(path=db_path)
             self.collection = self.client.get_or_create_collection(
                 name="aura_project_context",

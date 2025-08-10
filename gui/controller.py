@@ -1,6 +1,7 @@
 # gui/controller.py
 import logging
 import shlex
+from idlelib import history
 from typing import Optional, Callable, TYPE_CHECKING, List, Dict, Any
 
 from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 
 from event_bus import EventBus
 from events import (
-    UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished
+    UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished, PostChatMessage
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
@@ -30,7 +31,7 @@ class GUIController(QObject):
     """Manages the UI logic, message display, and backend communication."""
 
     add_user_message_signal = Signal(str)
-    add_ai_message_signal = Signal(str)
+    add_ai_message_signal = Signal(str, str)
     add_system_message_signal = Signal(str)
     update_status_signal = Signal(str, str, bool, object, object)
 
@@ -42,7 +43,7 @@ class GUIController(QObject):
         self.scroll_area = scroll_area
 
         self.event_bus.subscribe("agent_status_changed", self.on_status_update)
-        # Connect both completion events to the new, unified handler
+        self.event_bus.subscribe("post_chat_message", self.on_post_chat_message)
         self.event_bus.subscribe("ai_workflow_finished", self._on_workflow_finished)
         self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
 
@@ -69,6 +70,10 @@ class GUIController(QObject):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
         self.status_bar = status_bar
+
+    def on_post_chat_message(self, event: PostChatMessage):
+        """Event handler to post a message from a service to the chat."""
+        self.add_ai_message_signal.emit(event.message, event.sender)
 
     def on_status_update(self, agent_name: str, status_text: str, icon_name: str):
         """Event handler that receives status updates from any thread."""
@@ -113,7 +118,7 @@ class GUIController(QObject):
     def get_display_callback(self) -> Callable[[str, str], None]:
         def callback(message: str, tag: str):
             if tag == "avm_response":
-                self.add_ai_message_signal.emit(message)
+                self.add_ai_message_signal.emit(message, "Aura")
             else:
                 formatted_message = f"[{tag.replace('_', ' ').upper()}] {message}"
                 self.add_system_message_signal.emit(formatted_message)
@@ -181,10 +186,10 @@ class GUIController(QObject):
         widget = UserMessageWidget(text)
         self._insert_widget(widget)
 
-    @Slot(str)
-    def _add_ai_message(self, text: str):
+    @Slot(str, str)
+    def _add_ai_message(self, text: str, author: str):
         self._on_workflow_finished()
-        widget = AIMessageWidget(text)
+        widget = AIMessageWidget(text, author=author)
         self._insert_widget(widget)
 
     def _insert_widget(self, widget: QWidget):
@@ -208,7 +213,7 @@ class GUIController(QObject):
             if isinstance(widget, UserMessageWidget):
                 text_parts.append(f"User: {widget.message_label.text()}")
             elif isinstance(widget, AIMessageWidget):
-                text_parts.append(f"[ Aura ]\n{widget.message_label.text()}")
+                history.append({"role": "model", "parts": [widget.message_label.text()]})
         return "\n".join(text_parts)
 
     def on_text_changed(self):

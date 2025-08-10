@@ -13,9 +13,10 @@ from core.managers.project_manager import ProjectManager
 from core.execution_engine import ExecutionEngine
 from services import (
     ActionService, AppStateService, MissionLogService, DevelopmentTeamService,
-    ConductorService, ToolRunnerService
+    ConductorService, ToolRunnerService, VectorContextService
 )
 from foundry import FoundryManager
+from events import ProjectCreated
 
 if TYPE_CHECKING:
     from core.managers.window_manager import WindowManager
@@ -42,10 +43,29 @@ class ServiceManager:
         self.development_team_service: DevelopmentTeamService = None
         self.conductor_service: ConductorService = None
         self.tool_runner_service: ToolRunnerService = None
+        self.vector_context_service: VectorContextService = None
 
         self.llm_server_process: Optional[subprocess.Popen] = None
+        self.event_bus.subscribe("project_created", self._on_project_activated)
 
         self.log_to_event_bus("info", "[ServiceManager] Initialized")
+
+    def _on_project_activated(self, event: ProjectCreated):
+        """Initializes or re-initializes services that depend on an active project."""
+        self.log_to_event_bus("info",
+                              f"Project activated: {event.project_name}. Initializing project-specific services.")
+        project_path = Path(event.project_path)
+
+        # Create a project-specific RAG database path
+        rag_db_path = project_path / ".rag_db"
+
+        # Instantiate the VectorContextService with the isolated path
+        self.vector_context_service = VectorContextService(db_path=str(rag_db_path))
+
+        # Now that we have the new service, re-initialize the ToolRunnerService
+        # to ensure it has the correct (and latest) instance.
+        self._initialize_tool_runner()
+        self.log_to_event_bus("success", "Project-specific services initialized.")
 
     def log_to_event_bus(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "ServiceManager", level, message)
@@ -64,24 +84,30 @@ class ServiceManager:
 
         self.app_state_service = AppStateService(self.event_bus)
         self.mission_log_service = MissionLogService(self.project_manager, self.event_bus)
-
-        # Create the Development Team first as the Conductor depends on it.
         self.development_team_service = DevelopmentTeamService(self.event_bus, self)
 
-        self.tool_runner_service = ToolRunnerService(self.event_bus, self.foundry_manager, self.project_manager,
-                                                     self.mission_log_service, None)
+        # ToolRunner is now initialized separately when a project is active.
+        self._initialize_tool_runner()
 
-        # Now create the Conductor and inject the dev team.
         self.conductor_service = ConductorService(
             self.event_bus,
             self.mission_log_service,
             self.tool_runner_service,
             self.development_team_service
         )
-
         self.action_service = ActionService(self.event_bus, self, None, None)
-
         self.log_to_event_bus("info", "[ServiceManager] Services initialized")
+
+    def _initialize_tool_runner(self):
+        """Helper to create or update the tool runner with the latest services."""
+        self.tool_runner_service = ToolRunnerService(
+            self.event_bus,
+            self.foundry_manager,
+            self.project_manager,
+            self.mission_log_service,
+            self.vector_context_service  # Pass the (potentially new) instance
+        )
+        self.log_to_event_bus("info", "ToolRunnerService has been configured with project-specific context.")
 
     async def launch_background_servers(self, timeout: int = 15):
         python_executable_to_use: str
@@ -104,7 +130,6 @@ class ServiceManager:
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
-        # Launch LLM Server
         if self.llm_server_process is None or self.llm_server_process.poll() is not None:
             self.log_to_event_bus("info", f"Attempting to launch LLM server from {llm_script_path}...")
             try:
@@ -117,7 +142,6 @@ class ServiceManager:
             except Exception as e:
                 self.log_to_event_bus("error", f"Failed to launch LLM server: {e}\n{traceback.format_exc()}")
 
-        # NEW POLLING LOGIC
         self.log_to_event_bus("info", "Waiting for LLM server to become available...")
         start_time = asyncio.get_event_loop().time()
         server_ready = False
@@ -130,8 +154,8 @@ class ServiceManager:
                     server_ready = True
                     break
             except Exception:
-                pass  # The client logs connection errors, so we can just wait.
-            await asyncio.sleep(1)  # Wait 1 second before retrying.
+                pass
+            await asyncio.sleep(1)
 
         if not server_ready:
             msg = f"LLM Server failed to start within {timeout} seconds. Check llm_server_subprocess.log for errors."
@@ -139,7 +163,6 @@ class ServiceManager:
             raise RuntimeError(msg)
 
     def terminate_background_servers(self):
-        """Terminates all managed background server processes."""
         self.log_to_event_bus("info", "[ServiceManager] Terminating background servers...")
         servers = {"LLM": self.llm_server_process}
         for name, process in servers.items():
@@ -161,7 +184,6 @@ class ServiceManager:
         self.terminate_background_servers()
         self.log_to_event_bus("info", "[ServiceManager] Services shutdown complete")
 
-    # --- Getters for Dependency Injection ---
     def get_llm_client(self) -> LLMClient:
         return self.llm_client
 
