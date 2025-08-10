@@ -4,20 +4,23 @@ import shlex
 from idlelib import history
 from typing import Optional, Callable, TYPE_CHECKING, List, Dict, Any
 
-from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer
+from PySide6.QtCore import QObject, Signal, Slot, QPoint, QTimer, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputDialog
 
 from event_bus import EventBus
 from events import (
     UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished, PostChatMessage,
-    ToolCallInitiated, ToolCallCompleted
+    ToolCallInitiated, ToolCallCompleted, MissionAccomplished, SystemAlertTriggered
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
 from .utils import get_aura_banner
-from .chat_widgets import UserMessageWidget, AIMessageWidget, AgentActivityWidget, ToolCallWidget
+from .chat_widgets import (
+    UserMessageWidget, AIMessageWidget, AgentActivityWidget, ToolCallWidget, BootSequenceWidget,
+    MissionAccomplishedWidget, SystemAlertWidget
+)
 from .command_input_widget import CommandInputWidget
 from services import view_formatter
 
@@ -48,6 +51,8 @@ class GUIController(QObject):
         self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
         self.event_bus.subscribe("tool_call_initiated", self.on_tool_call_initiated)
         self.event_bus.subscribe("tool_call_completed", self.on_tool_call_completed)
+        self.event_bus.subscribe("mission_accomplished", self.on_mission_accomplished)
+        self.event_bus.subscribe("system_alert_triggered", self.on_system_alert_triggered)
 
         self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -70,6 +75,16 @@ class GUIController(QObject):
     def register_ui_elements(self, command_input, autocomplete_popup):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
+
+    def on_system_alert_triggered(self, event: SystemAlertTriggered):
+        self._on_workflow_finished()
+        widget = SystemAlertWidget()
+        self._insert_widget(widget)
+
+    def on_mission_accomplished(self, event: MissionAccomplished):
+        self._on_workflow_finished()
+        widget = MissionAccomplishedWidget()
+        self._insert_widget(widget)
 
     def on_tool_call_initiated(self, event: ToolCallInitiated):
         self._on_workflow_finished()  # Finalize previous agent activity widget
@@ -98,13 +113,13 @@ class GUIController(QObject):
                           total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
         art_map = {
-            "AURA": {"logo": "( O )", "name": "AURA"},
-            "CONDUCTOR": {"logo": "⚙", "name": "CONDUCTOR"},
-            "CODER": {"logo": "< >", "name": "CODER"},
-            "TESTER": {"logo": "✓", "name": "TESTER"},
-            "REVIEWER": {"logo": "⚲", "name": "REVIEWER"},
-            "ARCHITECT": {"logo": "¶", "name": "ARCHITECT"},
-            "FINALIZER": {"logo": "§", "name": "FINALIZER"},
+            "AURA":      {"logo": "( O )", "name": "AURA"},
+            "CONDUCTOR": {"logo": "⚙",     "name": "CONDUCTOR"},
+            "CODER":     {"logo": "< >",   "name": "CODER"},
+            "TESTER":    {"logo": "✓",     "name": "TESTER"},
+            "REVIEWER":  {"logo": "⚲",     "name": "REVIEWER"},
+            "ARCHITECT": {"logo": "¶",     "name": "ARCHITECT"},
+            "FINALIZER": {"logo": "§",     "name": "FINALIZER"},
         }
         default_art = {"logo": "*", "name": "SYSTEM"}
 
@@ -172,9 +187,11 @@ class GUIController(QObject):
             self.event_bus.emit("user_request_submitted", event)
 
     def post_welcome_message(self):
-        banner_widget = QLabel(f"<pre>{get_aura_banner()}</pre>System online. Waiting for command...")
-        banner_widget.setObjectName("WelcomeBanner")
-        self._insert_widget(banner_widget)
+        boot_widget = BootSequenceWidget()
+        # Add the widget with explicit left alignment to override layout centering.
+        self.chat_layout.insertWidget(self.chat_layout.count() - 1, boot_widget, 0, Qt.AlignmentFlag.AlignLeft)
+        QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(boot_widget))
+
 
     @Slot()
     def _on_workflow_finished(self, event=None):
@@ -279,5 +296,3 @@ class GUIController(QObject):
 
     def toggle_mission_log(self):
         self.event_bus.emit("show_mission_log_requested")
-
-

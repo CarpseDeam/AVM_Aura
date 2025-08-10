@@ -61,9 +61,12 @@ class MissionLogWindow(QMainWindow):
         self.scroll_content_layout = QVBoxLayout(scroll_content_widget)
         self.scroll_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.pending_tasks_layout = QVBoxLayout()
+        self.pending_tasks_container = QWidget()
+        self.pending_tasks_layout = QVBoxLayout(self.pending_tasks_container)
+        self.pending_tasks_layout.setContentsMargins(0, 0, 0, 0)
         self.pending_tasks_layout.setSpacing(5)
-        self.scroll_content_layout.addLayout(self.pending_tasks_layout)
+        self.scroll_content_layout.addWidget(self.pending_tasks_container)
+
         self.scroll_content_layout.addStretch(1)
 
         self.separator = QFrame()

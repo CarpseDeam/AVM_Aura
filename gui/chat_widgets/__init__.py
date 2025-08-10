@@ -3,3 +3,6 @@ from .user_message_widget import UserMessageWidget
 from .ai_message_widget import AIMessageWidget
 from .agent_activity_widget import AgentActivityWidget
 from .tool_call_widget import ToolCallWidget
+from .boot_sequence_widget import BootSequenceWidget
+from .mission_accomplished_widget import MissionAccomplishedWidget
+from .system_alert_widget import SystemAlertWidget

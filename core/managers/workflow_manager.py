@@ -6,7 +6,7 @@ from core.app_state import AppState
 from core.managers.service_manager import ServiceManager
 from core.managers.window_manager import WindowManager
 from core.managers.task_manager import TaskManager
-from events import UserPromptEntered, PostChatMessage
+from events import UserPromptEntered, PostChatMessage, SystemAlertTriggered
 
 
 class WorkflowManager:
@@ -55,11 +55,12 @@ class WorkflowManager:
         """
         This is the entry point for the self-correction loop.
         """
+        self.event_bus.emit("system_alert_triggered", SystemAlertTriggered())
         self.event_bus.emit(
             "post_chat_message",
             PostChatMessage(
                 sender="Aura",
-                message="It looks like the execution failed. Don't worry, I'm starting the self-correction process to analyze and fix the problem.",
+                message="Execution failed. Initiating self-correction protocols.",
                 is_error=True
             )
         )

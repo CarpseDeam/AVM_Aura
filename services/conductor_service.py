@@ -8,7 +8,7 @@ from event_bus import EventBus
 from services.mission_log_service import MissionLogService
 from services.tool_runner_service import ToolRunnerService
 from services.development_team_service import DevelopmentTeamService
-from events import PostChatMessage
+from events import PostChatMessage, MissionAccomplished
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,7 @@ class ConductorService:
             mission_succeeded = True
             self.log("success", "Mission Accomplished! All tasks completed and tests passed.")
             self.event_bus.emit("agent_status_changed", "Aura", "Mission Accomplished!", "fa5s.rocket")
+            self.event_bus.emit("mission_accomplished", MissionAccomplished())
 
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)

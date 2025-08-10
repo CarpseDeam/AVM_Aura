@@ -57,6 +57,11 @@ class PlanReadyForReview:
     """Published by the Dev Team when the Architect's plan is in the Mission Log."""
     pass
 
+@dataclass
+class SystemAlertTriggered:
+    """Published when the self-correction loop is initiated."""
+    pass
+
 # --- Code Generation & Streaming Events ---
 
 @dataclass
@@ -86,6 +91,11 @@ class MissionDispatchRequest:
 class MissionLogUpdated:
     """Published by the MissionLogService when tasks are added, removed, or changed."""
     tasks: List[Dict[str, Any]]
+
+@dataclass
+class MissionAccomplished:
+    """Published by the Conductor when all tasks and tests are successfully completed."""
+    pass
 
 # --- Tool & Foundry Events ---
 
