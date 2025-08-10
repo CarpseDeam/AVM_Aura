@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 
 from event_bus import EventBus
 from events import (
-    UserPromptEntered, UserCommandEntered
+    UserPromptEntered, UserCommandEntered, PlanReadyForReview
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
@@ -16,7 +16,7 @@ from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
 from .status_bar_widget import StatusBarWidget
 from .utils import get_aura_banner
-from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
+from .chat_widgets import UserMessageWidget, AIMessageWidget, AgentActivityWidget
 from .command_input_widget import CommandInputWidget
 from services import view_formatter
 
@@ -42,6 +42,10 @@ class GUIController(QObject):
         self.scroll_area = scroll_area
 
         self.event_bus.subscribe("agent_status_changed", self.on_status_update)
+        # When AI responds or the plan is ready, we finalize the status widget
+        self.event_bus.subscribe("streaming_start", self.finalize_activity_widget)
+        self.event_bus.subscribe("ai_workflow_finished", self.finalize_activity_widget)
+        self.event_bus.subscribe("plan_ready_for_review", self.finalize_activity_widget)
 
         self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -52,6 +56,8 @@ class GUIController(QObject):
         self.mission_log_window = None
         self.status_bar: Optional[StatusBarWidget] = None
 
+        self.current_activity_widget: Optional[AgentActivityWidget] = None
+
         self.command_input: Optional[CommandInputWidget] = None
         self.autocomplete_popup: Optional[QLabel] = None
 
@@ -59,7 +65,6 @@ class GUIController(QObject):
         self.add_ai_message_signal.connect(self._add_ai_message)
         self.add_system_message_signal.connect(self._add_system_message)
         self.update_status_signal.connect(self._on_update_status)
-
 
     def register_ui_elements(self, command_input, autocomplete_popup, status_bar):
         self.command_input = command_input
@@ -72,12 +77,28 @@ class GUIController(QObject):
         self.update_status_signal.emit(agent_name, status_text, animate, None, None)
 
     @Slot(str, str, bool, object, object)
-    def _on_update_status(self, status: str, activity: str, animate: bool, progress: Optional[int], total: Optional[int]):
+    def _on_update_status(self, status: str, activity: str, animate: bool, progress: Optional[int],
+                          total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
-        if not self.status_bar:
-            return
-        self.status_bar.show_status(status, activity, animate)
+        if self.status_bar:
+            self.status_bar.show_status(status, activity, animate)
 
+        art_map = {
+            "ARCHITECT": "[ ARCHITECT // DRAFTING SPECIFICATION ]",
+            "CODER": "[ CODER // TRANSMITTING CODESTREAM... ]",
+            "TESTER": "[ TESTER // INITIATING TDD PROTOCOLS... ]",
+            "FINALIZER": "[ FINALIZER // ASSEMBLING BUILD PLAN... ]",
+            "CONDUCTOR": "[ CONDUCTOR // EXECUTING MISSION... ]",
+            "DEFAULT": "[ AURA // PROCESSING... ]"
+        }
+        agent_name = status.upper().split(" ")[0]
+        art = art_map.get(agent_name, art_map["DEFAULT"])
+
+        if not self.current_activity_widget:
+            self.current_activity_widget = AgentActivityWidget()
+            self._insert_widget(self.current_activity_widget)
+
+        self.current_activity_widget.set_agent_status(art, activity)
 
     def wire_up_command_handler(self, handler: CommandHandler):
         self.command_handler = handler
@@ -97,6 +118,7 @@ class GUIController(QObject):
             else:
                 formatted_message = f"[{tag.replace('_', ' ').upper()}] {message}"
                 self.add_system_message_signal.emit(formatted_message)
+
         return callback
 
     def submit_input(self):
@@ -106,6 +128,11 @@ class GUIController(QObject):
 
         self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
+
+        self.finalize_activity_widget()
+        self.current_activity_widget = AgentActivityWidget()
+        self.current_activity_widget.start_pulsing("Aura is processing your request...")
+        self._insert_widget(self.current_activity_widget)
 
         if input_text.startswith("/"):
             try:
@@ -127,8 +154,16 @@ class GUIController(QObject):
         banner_widget.setObjectName("WelcomeBanner")
         self._insert_widget(banner_widget)
 
+    @Slot()
+    def finalize_activity_widget(self, event=None):
+        """Stops the animation and unlinks the current activity widget, making it a permanent log entry."""
+        if self.current_activity_widget:
+            self.current_activity_widget.stop_animation()
+            self.current_activity_widget = None
+
     @Slot(str)
     def _add_system_message(self, message: str):
+        self.finalize_activity_widget()
         widget = QLabel(message)
         widget.setWordWrap(True)
         widget.setObjectName("SystemMessage")
@@ -141,6 +176,7 @@ class GUIController(QObject):
 
     @Slot(str)
     def _add_ai_message(self, text: str):
+        self.finalize_activity_widget()
         widget = AIMessageWidget(text)
         self._insert_widget(widget)
 

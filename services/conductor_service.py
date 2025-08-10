@@ -40,7 +40,37 @@ class ConductorService:
             return
 
         self.is_mission_active = True
-        mission_thread = threading.Thread(target=lambda: asyncio.run(self.execute_mission()), daemon=True)
+
+        # Get the running event loop from the main thread where this method is called.
+        try:
+            main_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.log("error", "Could not get the running event loop. Cannot start mission.")
+            self.is_mission_active = False
+            return
+
+        # Define the target function for our new thread.
+        def mission_runner():
+            """
+            This function runs in the new thread. It schedules the coroutine
+            on the main event loop and can optionally wait for the result.
+            """
+            self.log("info", "Mission thread started. Scheduling coroutine on main loop.")
+            # Schedule the coroutine to be run on the main loop.
+            future = asyncio.run_coroutine_threadsafe(self.execute_mission(), main_loop)
+
+            # You can add a callback to handle the result or exception from the thread
+            def on_done(f):
+                try:
+                    f.result() # Raises exception if the coroutine failed
+                    self.log("info", "Mission coroutine completed successfully (from thread).")
+                except Exception as e:
+                    self.log("error", f"Mission coroutine failed with exception: {e}")
+
+            future.add_done_callback(on_done)
+
+        # Start the thread with our new mission_runner function
+        mission_thread = threading.Thread(target=mission_runner, daemon=True)
         mission_thread.start()
 
     async def execute_mission(self):

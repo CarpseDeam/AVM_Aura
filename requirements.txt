@@ -27,3 +27,4 @@ aiohttp
 
 
 python-lsp-server[all]
+pytest

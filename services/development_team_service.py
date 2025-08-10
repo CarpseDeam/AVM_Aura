@@ -8,6 +8,7 @@ from event_bus import EventBus
 from prompts import CREATIVE_ASSISTANT_PROMPT
 from services.agents import ArchitectService, GenerationCoordinator, ReviewerService, FinalizerAgent
 from services.agents.tester_agent import TesterAgent
+from events import PlanReadyForReview
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -64,6 +65,10 @@ class DevelopmentTeamService:
                 "arguments": {"plan": plan, "existing_files": existing_files or {}}
             }
         )
+
+        # --- THIS IS THE FIX ---
+        # Signal the UI that the plan is ready and the agent is now waiting.
+        self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
 
         self.log("success", "Architect plan created. Awaiting user dispatch from Agent TODO.")
         self.event_bus.emit("agent_status_changed", "Aura", "Plan ready for your approval", "fa5s.rocket")

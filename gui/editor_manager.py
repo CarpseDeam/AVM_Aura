@@ -66,6 +66,32 @@ class EditorManager:
             editor.animate_set_content(content)
             logger.info(f"Created new editor tab for: {norm_path}")
 
+    def stream_to_tab(self, path_str: str, chunk: str):
+        """Finds or creates a tab and streams a chunk of content to it."""
+        norm_path = str(Path(path_str).resolve())
+
+        # If this is the first chunk for this file, create the tab.
+        if norm_path not in self.editors:
+            # Ensure the welcome message is cleared if it exists
+            if self.tab_widget.count() == 1 and isinstance(self.tab_widget.widget(0), QLabel):
+                self.tab_widget.removeTab(0)
+
+            editor = AuraCodeEditor()
+            self.editors[norm_path] = editor
+            editor.content_changed.connect(lambda: self._update_tab_title(norm_path))
+
+            tab_name = Path(norm_path).name
+            tab_index = self.tab_widget.addTab(editor, tab_name)
+            self.tab_widget.setTabToolTip(tab_index, norm_path)
+            self.tab_widget.setCurrentIndex(tab_index)
+
+            # Prepare the editor for the new content stream
+            editor.start_streaming()
+
+        # Append the chunk to the correct editor
+        editor = self.editors[norm_path]
+        editor.append_stream_chunk(chunk)
+
     def _update_tab_title(self, norm_path_str: str):
         """Updates the tab title to show an asterisk for dirty files."""
         if norm_path_str not in self.editors: return

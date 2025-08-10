@@ -25,7 +25,7 @@ def pip_install(project_context: ProjectContext, requirements_path: str = "requi
         return "Error: No virtual environment Python or pip executable found. Cannot install dependencies."
 
     working_dir = project_context.project_root
-    req_file = working_dir / requirements_path
+    req_file = Path(requirements_path)
 
     if not req_file.exists():
         return f"Error: requirements file not found at '{req_file}'. Please create it first."

@@ -1,13 +1,14 @@
 # core/managers/window_manager.py
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from core.llm_client import LLMClient
 from gui.main_window import AuraMainWindow
 from gui.code_viewer import CodeViewerWindow
 from gui.model_config_dialog import ModelConfigurationDialog
 from gui.log_viewer import LogViewerWindow
 
 from event_bus import EventBus
-from core.llm_client import LLMClient
 from core.app_state import AppState
 
 if TYPE_CHECKING:
@@ -45,7 +46,25 @@ class WindowManager:
 
         self.model_config_dialog = ModelConfigurationDialog(llm_client, self.main_window)
 
+        self.event_bus.subscribe("stream_code_chunk", self.handle_code_stream)
+
         print("[WindowManager] Windows initialized")
+
+    def handle_code_stream(self, filename: str, chunk: str):
+        """Handles a stream_code_chunk event by updating the code viewer."""
+        if not self.code_viewer:
+            return
+
+        # Make sure the code viewer is visible
+        if not self.code_viewer.isVisible():
+            self.code_viewer.show_window()
+
+        # We need to resolve the path relative to the active project
+        full_path_str = filename
+        if self.project_manager and self.project_manager.active_project_path:
+            full_path_str = str(self.project_manager.active_project_path / filename)
+
+        self.code_viewer.editor_manager.stream_to_tab(full_path_str, chunk)
 
     def handle_app_state_change(self, new_state: AppState, project_name: str | None):
         """

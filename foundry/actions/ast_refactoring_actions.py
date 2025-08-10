@@ -423,3 +423,68 @@ def replace_node_in_file(path: str, node_name: str, new_code: str) -> str:
         error_message = f"An unexpected error occurred while replacing node: {e}"
         logger.exception(error_message)
         return error_message
+
+def replace_method_in_class(path: str, class_name: str, method_name: str, new_code: str) -> str:
+    """
+    Replaces a specific method within a class in a file with new code.
+    """
+    logger.info(f"Attempting to replace method '{method_name}' in class '{class_name}' in file '{path}'")
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        return f"Error: File not found at '{path}'."
+    except Exception as e:
+        return f"Error reading file at '{path}': {e}"
+
+    try:
+        # Parse the original file content and the new code snippet
+        tree = ast.parse(content)
+        new_code_tree = ast.parse(new_code)
+
+        if not new_code_tree.body or not isinstance(new_code_tree.body[0], ast.FunctionDef):
+            return f"Error: The provided `new_code` does not contain a single, valid method definition."
+
+        new_method_node = new_code_tree.body[0]
+
+        if new_method_node.name != method_name:
+            return f"Error: The name in `new_code` ('{new_method_node.name}') does not match `method_name` ('{method_name}')."
+
+        # Find the target class node
+        class_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                class_node = node
+                break
+
+        if not class_node:
+            return f"Error: Class '{class_name}' not found in '{path}'."
+
+        # Find and replace the method within the class body
+        method_replaced = False
+        for i, class_body_node in enumerate(class_node.body):
+            if isinstance(class_body_node, ast.FunctionDef) and class_body_node.name == method_name:
+                class_node.body[i] = new_method_node
+                method_replaced = True
+                break
+
+        if not method_replaced:
+            return f"Error: Method '{method_name}' not found in class '{class_name}' in '{path}'."
+
+        # Unparse the modified tree and write it back
+        new_content = ast.unparse(tree)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+        success_message = f"Successfully replaced method '{method_name}' in class '{class_name}' in '{path}'."
+        logger.info(success_message)
+        return success_message
+
+    except SyntaxError as e:
+        return f"Error: Syntax error in file '{path}' or in `new_code`. Details: {e}"
+    except Exception as e:
+        error_message = f"An unexpected error occurred while replacing method: {e}"
+        logger.exception(error_message)
+        return error_message

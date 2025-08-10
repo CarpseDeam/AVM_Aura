@@ -82,20 +82,31 @@ class ToolRunnerService:
             return error_msg
 
     def _prepare_parameters(self, action_function: callable, action_params: dict) -> dict:
-        """Resolves file paths and injects necessary context and services."""
+        """
+        Resolves file paths (including defaults) and injects necessary services.
+        """
         resolved_params = action_params.copy()
-
-        # --- Path Resolution ---
         base_path: Optional[Path] = self.project_manager.active_project_path
+
+        # Get the function's signature to inspect its parameters
+        sig = inspect.signature(action_function)
+
+        # --- Path Resolution (Now handles defaults!) ---
         if base_path:
             for key in self.PATH_PARAM_KEYS:
-                if key in resolved_params and isinstance(resolved_params.get(key), str):
-                    if not Path(resolved_params[key]).is_absolute():
-                        resolved_params[key] = str((base_path / resolved_params[key]).resolve())
+                # Check if the function signature accepts this path key
+                if key in sig.parameters:
+                    # Get the path value from the call, or fall back to the function's default
+                    relative_path = action_params.get(key, sig.parameters[key].default)
+
+                    # Ensure we have a valid path string to resolve
+                    if isinstance(relative_path, str) and relative_path:
+                        if not Path(relative_path).is_absolute():
+                            resolved_path = (base_path / relative_path).resolve()
+                            resolved_params[key] = str(resolved_path)
 
         # --- Service and Context Injection ---
-        required_params = inspect.signature(action_function).parameters
-        for param_name in required_params:
+        for param_name in sig.parameters:
             if param_name in self.SERVICE_MAP and param_name not in resolved_params:
                 # Ensure service exists before injecting
                 if self.SERVICE_MAP[param_name] is not None:

@@ -100,6 +100,21 @@ class AuraCodeEditor(QPlainTextEdit):
             self.content_to_animate = ""
             self.animation_position = 0
 
+    def start_streaming(self):
+        """Prepares the editor for a new stream of text."""
+        if self.animation_timer.isActive():
+            self.animation_timer.stop()
+        self.clear()
+        self._original_content = ""
+        self._is_dirty = False
+        self.content_changed.emit()
+
+    def append_stream_chunk(self, chunk: str):
+        """Appends a chunk of text to the end of the editor."""
+        self.moveCursor(QTextCursor.MoveOperation.End)
+        self.insertPlainText(chunk)
+        self._original_content += chunk # Keep track of the full content
+
     def keyPressEvent(self, event):
         """Stop animation if user starts typing."""
         if self.animation_timer.isActive():

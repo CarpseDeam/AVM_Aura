@@ -55,6 +55,11 @@ class AIWorkflowFinished:
     """Published when any main AI workflow (build or chat) completes or fails."""
     pass
 
+@dataclass
+class PlanReadyForReview:
+    """Published by the Dev Team when the Architect's plan is in the Mission Log."""
+    pass
+
 # --- Code Generation & Streaming Events ---
 
 @dataclass
