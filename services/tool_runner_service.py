@@ -1,13 +1,14 @@
-# services/tool_runner_service.py
 import logging
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
 import inspect
+import asyncio
 
 from event_bus import EventBus
 from foundry import FoundryManager, BlueprintInvocation
 from services.mission_log_service import MissionLogService
 from services.vector_context_service import VectorContextService
+from events import ToolCallInitiated, ToolCallCompleted
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager, ProjectContext
@@ -44,7 +45,7 @@ class ToolRunnerService:
         }
         logger.info("ToolRunnerService initialized.")
 
-    def run_tool_by_dict(self, tool_call_dict: dict) -> Optional[Any]:
+    async def run_tool_by_dict(self, tool_call_dict: dict) -> Optional[Any]:
         """Convenience method to run a tool from a dictionary."""
         tool_name = tool_call_dict.get("tool_name")
         blueprint = self.foundry_manager.get_blueprint(tool_name)
@@ -54,9 +55,9 @@ class ToolRunnerService:
             return error_msg
 
         invocation = BlueprintInvocation(blueprint=blueprint, parameters=tool_call_dict.get('arguments', {}))
-        return self.run_tool(invocation)
+        return await self.run_tool(invocation)
 
-    def run_tool(self, invocation: BlueprintInvocation) -> Optional[Any]:
+    async def run_tool(self, invocation: BlueprintInvocation) -> Optional[Any]:
         """Executes a single blueprint invocation."""
         blueprint = invocation.blueprint
         action_id = blueprint.id
@@ -68,17 +69,34 @@ class ToolRunnerService:
             print(error_msg)
             return error_msg
 
+        widget_id = id(invocation)
+        self.event_bus.emit(
+            "tool_call_initiated",
+            ToolCallInitiated(widget_id, action_id, invocation.parameters)
+        )
+        await asyncio.sleep(0.1)
+
         try:
             prepared_params = self._prepare_parameters(action_function, invocation.parameters)
             result = action_function(**prepared_params)
 
+            status = "FAILURE" if isinstance(result, str) and result.strip().lower().startswith("error:") else "SUCCESS"
+
             print(f"✅ Result from {action_id}: {result}")
+            self.event_bus.emit(
+                "tool_call_completed",
+                ToolCallCompleted(widget_id, status, str(result))
+            )
             return result
 
         except Exception as e:
             logger.exception("An exception occurred while executing blueprint '%s'.", action_id)
             error_msg = f"❌ Error executing Blueprint '{action_id}': {e}"
             print(error_msg)
+            self.event_bus.emit(
+                "tool_call_completed",
+                ToolCallCompleted(widget_id, "FAILURE", error_msg)
+            )
             return error_msg
 
     def _prepare_parameters(self, action_function: callable, action_params: dict) -> dict:

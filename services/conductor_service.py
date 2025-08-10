@@ -97,7 +97,7 @@ class ConductorService:
                     "arguments": {"path": path, "content": content}
                 }
 
-                result = self.tool_runner_service.run_tool_by_dict(tool_call)
+                result = await self.tool_runner_service.run_tool_by_dict(tool_call)
 
                 is_failure = (isinstance(result, str) and "Error" in result)
                 if is_failure:
@@ -112,11 +112,11 @@ class ConductorService:
             # 4. Post-mission verification
             self._post_chat_message("Conductor", "All tasks completed. Running final verification steps.")
             self.event_bus.emit("agent_status_changed", "Conductor", "Verifying installation...", "fa5s.cogs")
-            pip_result = self.tool_runner_service.run_tool_by_dict({"tool_name": "pip_install", "arguments": {}})
+            pip_result = await self.tool_runner_service.run_tool_by_dict({"tool_name": "pip_install", "arguments": {}})
             self._post_chat_message("Conductor", f"Installation result:\n{pip_result}")
 
             self.event_bus.emit("agent_status_changed", "Conductor", "Running tests...", "fa5s.cogs")
-            test_result = self.tool_runner_service.run_tool_by_dict({"tool_name": "run_tests", "arguments": {}})
+            test_result = await self.tool_runner_service.run_tool_by_dict({"tool_name": "run_tests", "arguments": {}})
 
             test_summary = test_result.get('summary', 'No summary available.')
             self._post_chat_message("Conductor", f"Test result: {test_summary}")

@@ -100,6 +100,20 @@ class ToolsModified:
     """Published by the create_new_tool action to signal a need for a tool rescan."""
     pass
 
+@dataclass
+class ToolCallInitiated:
+    """Published by the ToolRunner when a tool is about to be executed."""
+    widget_id: int
+    tool_name: str
+    params: Dict[str, Any]
+
+@dataclass
+class ToolCallCompleted:
+    """Published by the ToolRunner after a tool has been executed."""
+    widget_id: int
+    status: str  # "SUCCESS" or "FAILURE"
+    result: str
+
 # --- GUI & Window Management Events ---
 
 @dataclass

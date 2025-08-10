@@ -9,14 +9,15 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 
 from event_bus import EventBus
 from events import (
-    UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished, PostChatMessage
+    UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished, PostChatMessage,
+    ToolCallInitiated, ToolCallCompleted
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
 from .utils import get_aura_banner
-from .chat_widgets import UserMessageWidget, AIMessageWidget, AgentActivityWidget
+from .chat_widgets import UserMessageWidget, AIMessageWidget, AgentActivityWidget, ToolCallWidget
 from .command_input_widget import CommandInputWidget
 from services import view_formatter
 
@@ -45,6 +46,8 @@ class GUIController(QObject):
         self.event_bus.subscribe("post_chat_message", self.on_post_chat_message)
         self.event_bus.subscribe("ai_workflow_finished", self._on_workflow_finished)
         self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
+        self.event_bus.subscribe("tool_call_initiated", self.on_tool_call_initiated)
+        self.event_bus.subscribe("tool_call_completed", self.on_tool_call_completed)
 
         self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -54,6 +57,7 @@ class GUIController(QObject):
         self.code_viewer_window = None
 
         self.current_activity_widget: Optional[AgentActivityWidget] = None
+        self.active_tool_widgets: Dict[int, ToolCallWidget] = {}
 
         self.command_input: Optional[CommandInputWidget] = None
         self.autocomplete_popup: Optional[QLabel] = None
@@ -66,6 +70,19 @@ class GUIController(QObject):
     def register_ui_elements(self, command_input, autocomplete_popup):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
+
+    def on_tool_call_initiated(self, event: ToolCallInitiated):
+        self._on_workflow_finished()  # Finalize previous agent activity widget
+        widget = ToolCallWidget(tool_name=event.tool_name, params=event.params)
+        self.active_tool_widgets[event.widget_id] = widget
+        self._insert_widget(widget)
+
+    def on_tool_call_completed(self, event: ToolCallCompleted):
+        if event.widget_id in self.active_tool_widgets:
+            widget = self.active_tool_widgets.pop(event.widget_id)
+            widget.update_status(event.status, event.result)
+        else:
+            logger.warning(f"Received ToolCallCompleted for unknown widget_id: {event.widget_id}")
 
     def on_post_chat_message(self, event: PostChatMessage):
         """Event handler to post a message from a service to the chat."""
@@ -81,21 +98,28 @@ class GUIController(QObject):
                           total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
         art_map = {
-            "ARCHITECT": "[ ARCHITECT // DRAFTING SPECIFICATION ]",
-            "CODER": "[ CODER // TRANSMITTING CODESTREAM... ]",
-            "TESTER": "[ TESTER // INITIATING TDD PROTOCOLS... ]",
-            "FINALIZER": "[ FINALIZER // ASSEMBLING BUILD PLAN... ]",
-            "CONDUCTOR": "[ CONDUCTOR // EXECUTING MISSION... ]",
-            "DEFAULT": "[ AURA // PROCESSING... ]"
+            "AURA": {"logo": "( O )", "name": "AURA"},
+            "CONDUCTOR": {"logo": "⚙", "name": "CONDUCTOR"},
+            "CODER": {"logo": "< >", "name": "CODER"},
+            "TESTER": {"logo": "✓", "name": "TESTER"},
+            "REVIEWER": {"logo": "⚲", "name": "REVIEWER"},
+            "ARCHITECT": {"logo": "¶", "name": "ARCHITECT"},
+            "FINALIZER": {"logo": "§", "name": "FINALIZER"},
         }
-        agent_name = status.upper().split(" ")[0]
-        art = art_map.get(agent_name, art_map["DEFAULT"])
+        default_art = {"logo": "*", "name": "SYSTEM"}
+
+        agent_name_key = status.upper().split(" ")[0]
+        agent_art = art_map.get(agent_name_key, default_art)
 
         if not self.current_activity_widget:
             self.current_activity_widget = AgentActivityWidget()
             self._insert_widget(self.current_activity_widget)
 
-        self.current_activity_widget.set_agent_status(art, activity)
+        self.current_activity_widget.set_agent_status(
+            logo=agent_art["logo"],
+            agent_name=agent_art["name"],
+            activity=activity
+        )
 
     def wire_up_command_handler(self, handler: CommandHandler):
         self.command_handler = handler
@@ -255,3 +279,5 @@ class GUIController(QObject):
 
     def toggle_mission_log(self):
         self.event_bus.emit("show_mission_log_requested")
+
+
