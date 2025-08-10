@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
+from prompts import CODER_PROMPT
+from prompts.master_rules import JSON_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 from prompts.creative import AURA_PLANNER_PROMPT, CREATIVE_ASSISTANT_PROMPT
-from services.agents import ReviewerService, FinalizerAgent
+from services.agents import ReviewerService
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -26,9 +28,7 @@ class DevelopmentTeamService:
         self.llm_client = service_manager.get_llm_client()
         self.project_manager = service_manager.get_project_manager()
         self.mission_log_service = service_manager.mission_log_service
-
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
-        self.finalizer = FinalizerAgent(service_manager)
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
@@ -73,9 +73,55 @@ class DevelopmentTeamService:
             self.handle_error("Aura", f"Failed to create a valid plan: {e}. Raw response logged for debugging.")
             self.log("error", f"Aura planning failure. Raw response: {response_str}")
 
+    async def run_coding_task(
+        self,
+        current_task: str,
+        full_mission_plan: List[str],
+        full_file_context: Dict[str, str]
+    ) -> Optional[Dict[str, str]]:
+        """
+        Executes a single coding task by invoking the Coder agent with full context.
+        The Coder is expected to determine the file to change and provide its complete new content.
+        """
+        self.log("info", f"Executing coding task: {current_task}")
+        self.event_bus.emit("agent_status_changed", "Coder", f"Working on: {current_task}...", "fa5s.keyboard")
+
+        prompt = CODER_PROMPT.format(
+            current_task=current_task,
+            full_mission_plan="\n".join(f"- {task}" for task in full_mission_plan),
+            full_file_context=json.dumps(full_file_context, indent=2),
+            TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
+            DOCSTRING_RULE=DOCSTRING_RULE.strip(),
+            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE.strip()
+        )
+
+        provider, model = self.llm_client.get_model_for_role("coder")
+        if not provider or not model:
+            self.handle_error("Coder", "No 'coder' model configured.")
+            return None
+
+        response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
+
+        try:
+            file_data = self._parse_json_response(response_str)
+            if not isinstance(file_data, dict) or len(file_data) != 1:
+                raise ValueError("Coder response must be a JSON object with a single file path key.")
+
+            path, content = list(file_data.items())[0]
+            # Stream the whole content at once for display, since we get it all at once from the coder.
+            self.event_bus.emit("stream_code_chunk", path, content)
+
+            return file_data
+
+        except (ValueError, json.JSONDecodeError) as e:
+            self.handle_error("Coder", f"Failed to produce valid file code: {e}. Raw response logged for debugging.")
+            self.log("error", f"Coder generation failure. Raw response: {response_str}")
+            return None
+
     async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
         self.log("info", "Review and Fix phase initiated.")
         self.event_bus.emit("agent_status_changed", "Reviewer", "Analyzing failure...", "fa5s.search")
+
         fix_json_str = await self.reviewer.review_and_correct_code(error_report, git_diff,
                                                                    json.dumps(full_code_context))
         if not fix_json_str:
@@ -83,22 +129,31 @@ class DevelopmentTeamService:
             return
 
         try:
-            corrected_files = json.loads(fix_json_str)
-        except json.JSONDecodeError:
-            self.handle_error("Reviewer", "Proposed fix was not valid JSON.")
+            corrected_files = self._parse_json_response(fix_json_str)
+            if not isinstance(corrected_files, dict):
+                raise ValueError("Reviewer's fix was not a valid file dictionary.")
+        except (json.JSONDecodeError, ValueError) as e:
+            self.handle_error("Reviewer", f"Proposed fix was not valid JSON or was malformed: {e}")
             return
+
         self._post_chat_message("Reviewer",
                                 "I've analyzed the error and proposed a fix. I will now create a new execution plan to apply it.")
 
-        self.event_bus.emit("agent_status_changed", "Finalizer", "Creating fix plan...", "fa5s.clipboard-list")
-        fix_tool_plan = await self.finalizer.create_tool_plan(corrected_files, full_code_context, dependencies=None)
+        # Convert the fix into a simple tool plan directly, removing the Finalizer dependency
+        fix_tool_plan = []
+        for path, content in corrected_files.items():
+            fix_tool_plan.append({
+                "tool_name": "write_file",
+                "arguments": {"path": path, "content": content}
+            })
 
-        if fix_tool_plan is None:
-            self.handle_error("Finalizer", "Failed to create a tool plan for the fix.")
+        if not fix_tool_plan:
+            self.handle_error("Reviewer", "The proposed fix resulted in an empty execution plan.")
             return
 
         self.mission_log_service.replace_all_tasks_with_tool_plan(fix_tool_plan)
-        self._post_chat_message("Finalizer", "A new plan to apply the fix has been created. Re-engaging the Conductor.")
+        self._post_chat_message("Conductor",
+                                "A new plan to apply the fix has been created. Re-engaging autonomous execution.")
         self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
 
     async def run_chat_workflow(self, user_idea: str, conversation_history: list, image_bytes: Optional[bytes],

@@ -19,7 +19,8 @@ class ModelConfigurationDialog(QDialog):
         self.setWindowTitle("Configure AI Models")
         self.setMinimumWidth(500)
 
-        self.roles = ["architect", "coder", "tester", "chat", "reviewer", "finalizer"]
+        # The roles are now dynamically determined from the client, not hardcoded.
+        self.roles = list(self.llm_client.get_role_assignments().keys())
         self.model_combos: dict[str, QComboBox] = {}
         self.temp_spins: dict[str, QDoubleSpinBox] = {}
         self.available_models = {}
@@ -82,15 +83,18 @@ class ModelConfigurationDialog(QDialog):
         temperatures = self.llm_client.get_role_temperatures()
 
         for role, combo in self.model_combos.items():
-            assigned_key = assignments.get(role)
-            if assigned_key:
-                index = combo.findData(assigned_key)
-                if index != -1:
-                    combo.setCurrentIndex(index)
+            # Only populate for roles that actually exist in the dialog
+            if role in assignments:
+                assigned_key = assignments.get(role)
+                if assigned_key:
+                    index = combo.findData(assigned_key)
+                    if index != -1:
+                        combo.setCurrentIndex(index)
 
         for role, spin in self.temp_spins.items():
-            temp = temperatures.get(role, 0.7)
-            spin.setValue(temp)
+            if role in temperatures:
+                temp = temperatures.get(role, 0.7)
+                spin.setValue(temp)
 
     def accept(self):
         """Saves the new settings back to the LLM client."""
