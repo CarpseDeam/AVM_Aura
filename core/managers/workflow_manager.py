@@ -14,6 +14,7 @@ class WorkflowManager:
     """
     Orchestrates AI workflows based on the authoritative application state.
     """
+    MAX_FIX_ATTEMPTS = 2
 
     def __init__(self, event_bus: EventBus):
         self.event_bus = event_bus
@@ -21,6 +22,7 @@ class WorkflowManager:
         self.window_manager: WindowManager = None
         self.task_manager: TaskManager = None
         self._last_error_report = None
+        self._fix_attempt_count = 0
         print("[WorkflowManager] Initialized")
 
     def set_managers(self, service_manager: ServiceManager, window_manager: WindowManager, task_manager: TaskManager):
@@ -31,6 +33,9 @@ class WorkflowManager:
 
     def handle_user_request(self, event: UserPromptEntered):
         """The central router for all user chat input."""
+        # Reset fix counter on any new user request
+        self._fix_attempt_count = 0
+
         prompt = event.prompt_text
         conversation_history = event.conversation_history
         image_bytes = event.image_bytes
@@ -61,7 +66,38 @@ class WorkflowManager:
             self.task_manager.start_ai_workflow_task(workflow_coroutine)
 
     def handle_execution_failed(self, error_report: str):
+        """
+        This is the entry point for the self-correction loop.
+        """
         self._last_error_report = error_report
+        self._fix_attempt_count += 1
+
+        self.log("warning", f"Execution failed. Entering self-correction attempt #{self._fix_attempt_count}.")
+
+        if self._fix_attempt_count > self.MAX_FIX_ATTEMPTS:
+            self.log("error", "Maximum fix attempts reached. Aborting.")
+            self.event_bus.emit("agent_status_changed", "Aura", "Could not fix the error. Aborting.", "fa5s.thumbs-down")
+            return
+
+        dev_team_service = self.service_manager.get_development_team_service()
+        project_manager = self.service_manager.get_project_manager()
+
+        if not dev_team_service or not project_manager.active_project_path:
+            self.log("error", "Cannot attempt fix: Services or active project not available.")
+            return
+
+        # Prepare context for the reviewer
+        git_diff = project_manager.get_git_diff()
+        full_code_context = project_manager.get_project_files()
+
+        # Start the "fix-it" workflow
+        fix_coroutine = dev_team_service.run_review_and_fix_phase(
+            error_report=error_report,
+            git_diff=git_diff,
+            full_code_context=full_code_context
+        )
+        self.task_manager.start_ai_workflow_task(fix_coroutine)
+
 
     def log(self, level, message):
         self.event_bus.emit("log_message_received", "WorkflowManager", level, message)

@@ -1,6 +1,6 @@
 # services/development_team_service.py
 from __future__ import annotations
-import re
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -8,7 +8,7 @@ from event_bus import EventBus
 from prompts import CREATIVE_ASSISTANT_PROMPT
 from services.agents import ArchitectService, GenerationCoordinator, ReviewerService, FinalizerAgent
 from services.agents.tester_agent import TesterAgent
-from events import PlanReadyForReview
+from events import PlanReadyForReview, MissionDispatchRequest
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -16,10 +16,7 @@ if TYPE_CHECKING:
 
 class DevelopmentTeamService:
     """
-    Orchestrates the AI agent team in two distinct phases:
-    1. Planning (Architect): Creates a high-level plan for user approval.
-    2. Execution (Coder, Tester, Finalizer): Generates code and a detailed tool plan
-       only after the user dispatches the mission.
+    Orchestrates the AI agent team in distinct phases, including a self-correction loop.
     """
 
     def __init__(self, event_bus: EventBus, service_manager: "ServiceManager"):
@@ -50,12 +47,29 @@ class DevelopmentTeamService:
 
         self.mission_log_service.clear_all_tasks()
 
-        # Create human-readable tasks for user review. These have no tool calls.
-        for dependency in plan.get("dependencies", []):
-            self.mission_log_service.add_task(f"Add dependency: {dependency}")
+        # --- NEW, SMARTER TASK GENERATION LOGIC ---
+        files_to_generate = plan.get("files", [])
+        dependencies = plan.get("dependencies", [])
+        has_req_file = any(f['filename'] == 'requirements.txt' for f in files_to_generate)
 
-        for file_to_create in plan.get("files", []):
-            self.mission_log_service.add_task(f"Generate file: {file_to_create['filename']}")
+        # Create human-readable tasks for user review.
+        if has_req_file:
+            # If a requirements file is planned, create tasks for files only,
+            # with a special description for the requirements file itself.
+            for file_info in files_to_generate:
+                if file_info['filename'] == 'requirements.txt':
+                    count = len(dependencies)
+                    plural = "ies" if count != 1 else "y"
+                    self.mission_log_service.add_task(f"Generate file: requirements.txt ({count} dependenc{plural})")
+                else:
+                    self.mission_log_service.add_task(f"Generate file: {file_info['filename']}")
+        else:
+            # Fallback: If no requirements file is planned, list dependencies and files separately.
+            for dependency in dependencies:
+                self.mission_log_service.add_task(f"Add dependency: {dependency}")
+            for file_info in files_to_generate:
+                self.mission_log_service.add_task(f"Generate file: {file_info['filename']}")
+        # --- END OF NEW LOGIC ---
 
         # Add a single, special task at the end to trigger the execution phase.
         self.mission_log_service.add_task(
@@ -67,7 +81,6 @@ class DevelopmentTeamService:
         )
 
         self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
-
         self.log("success", "Architect plan created. Awaiting user dispatch from Agent TODO.")
         self.event_bus.emit("agent_status_changed", "Aura", "Plan ready for your approval", "fa5s.rocket")
 
@@ -106,10 +119,49 @@ class DevelopmentTeamService:
 
         return tool_plan
 
+    async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
+        """
+        The self-correction phase. The Reviewer and Finalizer collaborate to create a new plan to fix the error.
+        """
+        self.log("info", "Review and Fix phase initiated.")
+        self.event_bus.emit("agent_status_changed", "Reviewer", "Analyzing failure and proposing a fix...", "fa5s.search")
+
+        # 1. Reviewer proposes a code fix as a JSON object of file contents.
+        fix_json_str = await self.reviewer.review_and_correct_code(error_report, git_diff, json.dumps(full_code_context))
+        if not fix_json_str:
+            self.handle_error("Reviewer", "Failed to generate a code fix.")
+            return
+
+        try:
+            # The reviewer's output is the complete, corrected code for one or more files.
+            corrected_files = json.loads(fix_json_str)
+        except json.JSONDecodeError:
+            self.handle_error("Reviewer", "Proposed fix was not valid JSON.")
+            return
+
+        # 2. Finalizer compares the proposed fix with the current broken code to create a surgical tool plan.
+        self.event_bus.emit("agent_status_changed", "Finalizer", "Creating a new plan to apply the fix...", "fa5s.clipboard-list")
+        # Note: We pass the corrected_files as the "generated" files and the current broken files as "existing".
+        fix_tool_plan = await self.finalizer.create_tool_plan(corrected_files, full_code_context, dependencies=None)
+
+        if fix_tool_plan is None:
+            self.handle_error("Finalizer", "Failed to create a tool plan for the fix.")
+            return
+
+        # 3. Add the new plan to the Mission Log and re-dispatch the Conductor.
+        new_tasks = []
+        for step in fix_tool_plan:
+            summary = self._summarize_tool_call(step)
+            new_tasks.append({"description": f"FIX: {summary}", "tool_call": step})
+
+        self.mission_log_service.replace_all_tasks(new_tasks)
+        self.log("success", "Reviewer and Finalizer created a fix plan. Re-engaging Conductor.")
+        self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
+
+
     async def run_chat_workflow(self, user_idea: str, conversation_history: list, image_bytes: Optional[bytes],
                                 image_media_type: Optional[str]):
         """Runs the 'Aura' creative assistant persona for planning and brainstorming."""
-        # This function remains unchanged
         self.log("info", f"Aura chat workflow processing: '{user_idea[:50]}...'")
         self.event_bus.emit("agent_status_changed", "Aura", "Thinking...", "fa5s.lightbulb")
         aura_prompt = CREATIVE_ASSISTANT_PROMPT.format(
@@ -136,7 +188,6 @@ class DevelopmentTeamService:
             self.event_bus.emit("streaming_end")
 
     def _summarize_tool_call(self, tool_call: dict) -> str:
-        # This function is now used by the Conductor
         tool_name = tool_call.get('tool_name', 'unknown_tool')
         args = tool_call.get('arguments', {})
         if not isinstance(args, dict): args = {}

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 
 from event_bus import EventBus
 from events import (
-    UserPromptEntered, UserCommandEntered, PlanReadyForReview
+    UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
@@ -42,10 +42,9 @@ class GUIController(QObject):
         self.scroll_area = scroll_area
 
         self.event_bus.subscribe("agent_status_changed", self.on_status_update)
-        # When AI responds or the plan is ready, we finalize the status widget
-        self.event_bus.subscribe("streaming_start", self.finalize_activity_widget)
-        self.event_bus.subscribe("ai_workflow_finished", self.finalize_activity_widget)
-        self.event_bus.subscribe("plan_ready_for_review", self.finalize_activity_widget)
+        # Connect both completion events to the new, unified handler
+        self.event_bus.subscribe("ai_workflow_finished", self._on_workflow_finished)
+        self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
 
         self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -129,7 +128,8 @@ class GUIController(QObject):
         self.add_user_message_signal.emit(input_text)
         self.command_input.clear()
 
-        self.finalize_activity_widget()
+        # Finalize any previous widget before starting a new one
+        self._on_workflow_finished()
         self.current_activity_widget = AgentActivityWidget()
         self.current_activity_widget.start_pulsing("Aura is processing your request...")
         self._insert_widget(self.current_activity_widget)
@@ -155,15 +155,22 @@ class GUIController(QObject):
         self._insert_widget(banner_widget)
 
     @Slot()
-    def finalize_activity_widget(self, event=None):
-        """Stops the animation and unlinks the current activity widget, making it a permanent log entry."""
+    def _on_workflow_finished(self, event=None):
+        """
+        Handles the completion of any AI workflow.
+        Stops all animations and updates the status bar to show the app is idle or waiting.
+        """
         if self.current_activity_widget:
             self.current_activity_widget.stop_animation()
             self.current_activity_widget = None
 
+        if self.status_bar:
+            final_status_text = "Plan ready. Awaiting dispatch." if isinstance(event, PlanReadyForReview) else "Idle. Waiting for input."
+            self.status_bar.show_status("Aura", final_status_text, animate=False)
+
     @Slot(str)
     def _add_system_message(self, message: str):
-        self.finalize_activity_widget()
+        self._on_workflow_finished()
         widget = QLabel(message)
         widget.setWordWrap(True)
         widget.setObjectName("SystemMessage")
@@ -176,7 +183,7 @@ class GUIController(QObject):
 
     @Slot(str)
     def _add_ai_message(self, text: str):
-        self.finalize_activity_widget()
+        self._on_workflow_finished()
         widget = AIMessageWidget(text)
         self._insert_widget(widget)
 

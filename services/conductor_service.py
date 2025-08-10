@@ -75,6 +75,7 @@ class ConductorService:
 
     async def execute_mission(self):
         """The main logic for running a mission from the Mission Log."""
+        failed_result = None
         try:
             mission_task_queue = [t for t in self.mission_log_service.get_tasks() if not t.get('done')]
             if not mission_task_queue:
@@ -134,7 +135,8 @@ class ConductorService:
                              (isinstance(result, dict) and result.get("status") in ["failure", "error"])
 
                 if is_failure:
-                    raise RuntimeError(f"Task '{task['description']}' failed with result: {result}. Aborting.")
+                    failed_result = result
+                    raise RuntimeError(f"Task '{task['description']}' failed. See logs for details.")
                 else:
                     self.mission_log_service.mark_task_as_done(task['id'])
 
@@ -144,6 +146,9 @@ class ConductorService:
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)
             self.event_bus.emit("agent_status_changed", "Conductor", f"Mission Failed: {e}", "fa5s.exclamation-circle")
+            if failed_result:
+                self.event_bus.emit("execution_failed", str(failed_result))
+
         finally:
             self.is_mission_active = False
             self.log("info", "Mission finished or aborted. Conductor is now idle.")

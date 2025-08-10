@@ -20,10 +20,16 @@ class GenerationCoordinator:
         self.llm_client = service_manager.get_llm_client()
         self.project_manager = service_manager.get_project_manager()
 
-    async def coordinate_generation(self, plan: Dict[str, Any], existing_files: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    async def coordinate_generation(self, plan: Dict[str, Any], existing_files: Optional[Dict[str, str]]) -> Optional[
+        Dict[str, str]]:
         self.log("info", "Code generation phase started.")
         generated_files = {}
-        files_to_generate = plan.get("files", [])
+
+        # --- THIS IS THE FIX ---
+        # The Coder should not be responsible for declarative dependency files.
+        # This is the Finalizer's job, using the correct tool.
+        files_to_generate = [f for f in plan.get("files", []) if f.get("filename") != "requirements.txt"]
+
         total_files = len(files_to_generate)
 
         for i, file_info in enumerate(files_to_generate):
@@ -34,7 +40,7 @@ class GenerationCoordinator:
             generated_content = await self._generate_single_file(file_info, plan, existing_files, generated_files)
             if generated_content is None:
                 self.log("error", f"Failed to generate content for {filename}.")
-                return None # Fail the whole process if one file fails
+                return None  # Fail the whole process if one file fails
 
             cleaned_content = self._robustly_clean_llm_output(generated_content)
             generated_files[filename] = cleaned_content
@@ -42,7 +48,8 @@ class GenerationCoordinator:
         self.log("success", f"Code generation phase complete. {len(generated_files)} files created.")
         return generated_files
 
-    async def _generate_single_file(self, file_info: Dict[str, str], plan: Dict, existing_files: Dict, generated_files_this_session: Dict) -> Optional[str]:
+    async def _generate_single_file(self, file_info: Dict[str, str], plan: Dict, existing_files: Dict,
+                                    generated_files_this_session: Dict) -> Optional[str]:
         filename = file_info["filename"]
         file_extension = Path(filename).suffix
 
@@ -75,7 +82,8 @@ class GenerationCoordinator:
                 original_code_section = f"--- ORIGINAL CODE OF `{filename}` (You are modifying this file): ---\n```python\n{original_code}\n```"
 
             # Rolling context of already generated files
-            code_context_json = json.dumps({k: v for k, v in generated_files_this_session.items() if k != filename}, indent=2)
+            code_context_json = json.dumps({k: v for k, v in generated_files_this_session.items() if k != filename},
+                                           indent=2)
 
             return CODER_PROMPT.format(
                 filename=filename,

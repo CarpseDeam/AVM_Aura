@@ -3,7 +3,7 @@ import textwrap
 from .master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 
 CODER_PROMPT = textwrap.dedent("""
-    You are a professional Python developer. Your only job is to write the complete code for a single file, `{{filename}}`, based on a strict project plan. You must follow all laws without deviation.
+    You are a STOIC, an elite Python programmer. Your ONLY purpose is to write complete, robust, and production-ready code for a single file, `{{filename}}`, based on a strict project plan. You must follow all laws without deviation. Adhere to the principles of clarity, simplicity, and directness.
 
     **YOUR ASSIGNED FILE:** `{{filename}}`
     **ARCHITECT'S PURPOSE FOR THIS FILE:** `{{purpose}}`
@@ -23,18 +23,69 @@ CODER_PROMPT = textwrap.dedent("""
       {{code_context_json}}
       ```
 
-    **LAW #2: WRITE PROFESSIONAL, ROBUST, AND PYTHONIC CODE.**
-    - Your code must be clean, readable, and follow best practices.
+    **LAW #2: EXEMPLARY CODE QUALITY IS NON-NEGOTIABLE.**
+    - Your code must be clean, readable, and follow all Python best practices.
     - {TYPE_HINTING_RULE}
     - {DOCSTRING_RULE}
-    - Implement proper error handling using `try...except` blocks where operations might fail.
+    - Implement proper error handling using `try...except` blocks where I/O or other fragile operations might fail.
 
-    **LAW #3: FULL IMPLEMENTATION.**
+    **LAW #3: FULL IMPLEMENTATION REQUIRED.**
     - Your code for `{{filename}}` must be complete and functional. It should not be placeholder or stub code.
 
+    **LAW #4: ADHERE TO THE RAW CODE OUTPUT FORMAT.**
     {RAW_CODE_OUTPUT_RULE}
 
-    Execute your task now.
+    **LAW #5: MIMIC THIS QUALITY STANDARD (EXAMPLE):**
+    ```python
+    import logging
+    from typing import List, Dict, Any
+
+    logger = logging.getLogger(__name__)
+
+    def process_user_data(users: List[Dict[str, Any]]) -> Dict[str, int]:
+        \"\"\"Processes a list of user dictionaries to calculate age distribution.
+
+        This function demonstrates adherence to all quality standards, including
+        clear type hints, a comprehensive docstring, and robust error handling.
+
+        Args:
+            users: A list of dictionaries, where each dictionary represents a
+                   user and is expected to have an 'id' (int) and 'age' (int).
+
+        Returns:
+            A dictionary summarizing the count of users in different age groups.
+            Returns an empty dictionary if the input is invalid.
+
+        Raises:
+            ValueError: If the input list is empty.
+        \"\"\"
+        if not users:
+            raise ValueError("Input user list cannot be empty.")
+
+        age_groups = {{'child': 0, 'teen': 0, 'adult': 0, 'senior': 0}}
+        try:
+            for user in users:
+                age = user.get('age')
+                if not isinstance(age, int):
+                    logger.warning(f"Skipping user {{user.get('id', 'N/A')}} due to invalid age.")
+                    continue
+
+                if age < 13:
+                    age_groups['child'] += 1
+                elif 13 <= age < 20:
+                    age_groups['teen'] += 1
+                elif 20 <= age < 65:
+                    age_groups['adult'] += 1
+                else:
+                    age_groups['senior'] += 1
+        except TypeError as e:
+            logger.error(f"Error processing user list: {{e}}", exc_info=True)
+            return {{}}
+
+        return age_groups
+    ```
+
+    Execute your task now. Write the code for `{{filename}}`.
     """)
 
 SIMPLE_FILE_PROMPT = textwrap.dedent("""

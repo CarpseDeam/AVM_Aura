@@ -24,7 +24,7 @@ FINALIZER_PROMPT = textwrap.dedent("""
         - If a file is entirely new (`--- /dev/null`), you MUST use the `write_file` tool with the full content.
         - If a file has changes but is not new, you MUST use the most surgical tool available. `add_function_to_file` or `replace_node_in_file` are strongly preferred over `write_file`. Only use `write_file` on existing files as a last resort if the changes are too complex for other tools.
         - If a file is being deleted (`+++ /dev/null`), you MUST use the `delete_file` tool.
-    2.  **HANDLE DEPENDENCIES:** For each item in "Desired Dependencies", you MUST generate a call to the `add_dependency_to_requirements` tool.
+    2.  **HANDLE DEPENDENCIES:** For each item in "Desired Dependencies", you MUST generate a call to the `add_dependency_to_requirements` tool. This tool correctly handles creating the file if it doesn't exist and avoids duplicates. Its `path` parameter should be `requirements.txt`.
     3.  **VERIFY:** After all file and dependency changes, your plan MUST end with calls to `pip_install` and `run_tests` to ensure the project is in a working state.
     4.  **ORDER OF OPERATIONS:**
         - All `delete_file` calls should come first.
@@ -45,7 +45,8 @@ FINALIZER_PROMPT = textwrap.dedent("""
         {{
           "tool_name": "add_dependency_to_requirements",
           "arguments": {{
-            "dependency": "flask"
+            "dependency": "flask",
+            "path": "requirements.txt"
           }}
         }},
         {{
