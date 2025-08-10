@@ -141,14 +141,10 @@ async def get_available_models():
     """Returns a dictionary of available models, grouped by provider."""
     ollama_models = await _get_ollama_models()
 
-    # --- THIS IS THE CHANGE ---
-    # Instead of a single model, we now provide a list of popular and useful Gemini models.
-    # You can customize this list with any other Gemini models you have access to!
     if GEMINI_API_KEY:
         google_models = [
             "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.5-flash"
         ]
     else:
         google_models = []
@@ -176,3 +172,5 @@ async def stream_chat(request: StreamChatRequest):
 if __name__ == "__main__":
     logging.info("Starting Aura LLM Server...")
     uvicorn.run(app, host="127.0.0.1", port=8002, log_level="info")
+
+### `services/development_team_service.py`

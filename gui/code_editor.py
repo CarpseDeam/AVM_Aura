@@ -42,10 +42,16 @@ class AuraCodeEditor(QPlainTextEdit):
 
         # --- Animation Components ---
         self.animation_timer = QTimer(self)
-        self.animation_timer.setInterval(5)  # Adjust for typing speed
+        self.animation_timer.setInterval(5)
         self.animation_timer.timeout.connect(self._animate_chunk)
         self.content_to_animate = ""
         self.animation_position = 0
+
+        # --- Streaming Components ---
+        self.stream_buffer = ""
+        self.stream_timer = QTimer(self)
+        self.stream_timer.setInterval(10)  # Controls typing speed
+        self.stream_timer.timeout.connect(self._process_stream_buffer)
 
         self.blockCountChanged.connect(self.update_line_number_area_width)
         self.updateRequest.connect(self.update_line_number_area)
@@ -74,22 +80,24 @@ class AuraCodeEditor(QPlainTextEdit):
 
     def animate_set_content(self, content: str):
         """Clears the editor and starts a streaming animation for new content."""
+        if self.stream_timer.isActive():
+            self.stream_timer.stop()
         if self.animation_timer.isActive():
             self.animation_timer.stop()
 
         self.clear()
         self.content_to_animate = content
         self.animation_position = 0
-        self._original_content = content  # Set original content for dirty tracking
+        self._original_content = content
         self._is_dirty = False
-        self.content_changed.emit()  # Ensure title bar is updated
+        self.content_changed.emit()
 
         if self.content_to_animate:
             self.animation_timer.start()
 
     def _animate_chunk(self):
-        """Appends the next chunk of text to the editor during animation."""
-        chunk_size = 25  # How many characters to "type" per tick
+        """Appends the next chunk of text to the editor during full-content animation."""
+        chunk_size = 25
         if self.animation_position < len(self.content_to_animate):
             chunk = self.content_to_animate[self.animation_position:self.animation_position + chunk_size]
             self.moveCursor(QTextCursor.MoveOperation.End)
@@ -101,31 +109,56 @@ class AuraCodeEditor(QPlainTextEdit):
             self.animation_position = 0
 
     def start_streaming(self):
-        """Prepares the editor for a new stream of text."""
+        """Prepares the editor for a new stream of text from the LLM."""
         if self.animation_timer.isActive():
             self.animation_timer.stop()
+        if self.stream_timer.isActive():
+            self.stream_timer.stop()
+
         self.clear()
         self._original_content = ""
         self._is_dirty = False
+        self.stream_buffer = ""
         self.content_changed.emit()
 
     def append_stream_chunk(self, chunk: str):
-        """Appends a chunk of text to the end of the editor."""
+        """Adds a chunk of text to the buffer and ensures the stream timer is running."""
+        self.stream_buffer += chunk
+        if not self.stream_timer.isActive():
+            self.stream_timer.start()
+
+    def _process_stream_buffer(self):
+        """The timer's slot that 'types out' text from the buffer."""
+        if not self.stream_buffer:
+            self.stream_timer.stop()
+            self._original_content = self.toPlainText()
+            self._is_dirty = False
+            self.content_changed.emit()
+            return
+
+        chunk_size = min(len(self.stream_buffer), 15)
+        text_to_add = self.stream_buffer[:chunk_size]
+        self.stream_buffer = self.stream_buffer[chunk_size:]
+
         self.moveCursor(QTextCursor.MoveOperation.End)
-        self.insertPlainText(chunk)
-        self._original_content += chunk # Keep track of the full content
+        self.insertPlainText(text_to_add)
 
     def keyPressEvent(self, event):
-        """Stop animation if user starts typing."""
+        """Stop any animation if the user starts typing."""
         if self.animation_timer.isActive():
             self.animation_timer.stop()
-            self.setPlainText(self.content_to_animate)  # Instantly finish
+            self.setPlainText(self.content_to_animate)
+        if self.stream_timer.isActive():
+            self.stream_timer.stop()
+            self.insertPlainText(self.stream_buffer)
+            self.stream_buffer = ""
+
         super().keyPressEvent(event)
 
     def _on_content_changed(self):
         """Internal slot to track if content has changed from original."""
-        if self.animation_timer.isActive():
-            return  # Don't mark as dirty during animation
+        if self.animation_timer.isActive() or self.stream_timer.isActive():
+            return
         current_content = self.toPlainText()
         was_dirty = self._is_dirty
         self._is_dirty = current_content != self._original_content

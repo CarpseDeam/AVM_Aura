@@ -66,8 +66,6 @@ class DevelopmentTeamService:
             }
         )
 
-        # --- THIS IS THE FIX ---
-        # Signal the UI that the plan is ready and the agent is now waiting.
         self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
 
         self.log("success", "Architect plan created. Awaiting user dispatch from Agent TODO.")

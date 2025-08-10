@@ -22,33 +22,52 @@ class LLMClient:
         print(f"[LLMClient] Client initialized. Will connect to LLM server at {self.llm_server_url}")
 
     def load_assignments(self):
-        """Loads role assignments and temperatures from JSON, with smart defaults."""
-        if self.assignments_file.exists():
-            with open(self.assignments_file, 'r') as f:
-                config_data = json.load(f)
-            self.role_assignments = config_data.get("role_assignments", {})
-            self.role_temperatures = config_data.get("role_temperatures", {})
-        else:
-            # Smart defaults if file doesn't exist
-            self.role_assignments = {
-                "architect": "google/gemini-2.5-pro",
-                "coder": "google/gemini-2.5-flash",
-                "tester": "ollama/deepseek-coder",
-                "chat": "google/gemini-2.5-flash",
-                "reviewer": "google/gemini-2.5-pro",
-                "finalizer": "google/gemini-2.5-pro"
-            }
-            self.role_temperatures = {}
-            self.save_assignments() # Create the file with defaults
-
-        # Ensure all roles have a default temperature
+        """Loads role assignments and temperatures from JSON, with smart, self-healing defaults."""
+        default_assignments = {
+            "architect": "google/gemini-2.5-pro",
+            "coder": "google/gemini-2.5-pro",
+            "tester": "ollama/deepseek-coder",
+            "chat": "google/gemini-2.5-flash",
+            "reviewer": "google/gemini-2.5-pro",
+            "finalizer": "google/gemini-2.5-pro"
+        }
         default_temperatures = {
             "architect": 0.35, "coder": 0.16, "tester": 0.1, "chat": 0.7,
             "reviewer": 0.2, "finalizer": 0.1
         }
-        for role in self.role_assignments.keys():
-            if role not in self.role_temperatures:
-                self.role_temperatures[role] = default_temperatures.get(role, 0.7)
+
+        loaded_assignments = {}
+        loaded_temperatures = {}
+
+        if self.assignments_file.exists():
+            try:
+                with open(self.assignments_file, 'r') as f:
+                    config_data = json.load(f)
+                loaded_assignments = config_data.get("role_assignments", {})
+                loaded_temperatures = config_data.get("role_temperatures", {})
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"[LLMClient] Warning: Could not parse role_assignments.json: {e}. Will use defaults and attempt to repair.")
+
+        # Start with a clean copy of the defaults
+        final_assignments = default_assignments.copy()
+        final_temperatures = default_temperatures.copy()
+
+        # Merge loaded configs over defaults
+        if isinstance(loaded_assignments, dict):
+            final_assignments.update(loaded_assignments)
+        if isinstance(loaded_temperatures, dict):
+            final_temperatures.update(loaded_temperatures)
+
+
+        # Clean up any null/empty values by restoring the default
+        for role, model in final_assignments.items():
+            if not model:
+                final_assignments[role] = default_assignments.get(role)
+
+        self.role_assignments = final_assignments
+        self.role_temperatures = final_temperatures
+
+        # Save the potentially repaired config back to the file
         self.save_assignments()
 
 

@@ -38,31 +38,8 @@ class MissionLogService:
             return self.project_manager.active_project_path / MISSION_LOG_FILENAME
         return None
 
-    def load_log_for_active_project(self):
-        """Loads the mission log from disk for the currently active project."""
-        log_path = self._get_log_path()
-        if log_path and log_path.exists():
-            try:
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    self.tasks = json.load(f)
-                if self.tasks:
-                    self._next_task_id = max(task.get('id', 0) for task in self.tasks) + 1
-                else:
-                    self._next_task_id = 1
-                logger.info(f"Successfully loaded Mission Log for '{self.project_manager.active_project_name}'")
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"Failed to load or parse mission log at {log_path}: {e}")
-                self.tasks = []
-                self._next_task_id = 1
-        else:
-            logger.info("No existing mission log found for this project. Starting fresh.")
-            self.tasks = []
-            self._next_task_id = 1
-
-        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
-
-    def _save_log(self):
-        """Saves the current list of tasks to disk."""
+    def _save_and_notify(self):
+        """Saves the current list of tasks to disk and notifies the UI."""
         log_path = self._get_log_path()
         if not log_path:
             logger.debug("Cannot save mission log, no active project path set yet.")
@@ -73,9 +50,34 @@ class MissionLogService:
         try:
             with open(log_path, 'w', encoding='utf-8') as f:
                 json.dump(self.tasks, f, indent=2)
-            logger.info(f"Mission Log saved to {log_path}")
+            # Emit the update *after* successfully saving.
+            self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.get_tasks()))
+            logger.debug(f"Mission Log saved and UI notified. Task count: {len(self.tasks)}")
         except IOError as e:
             logger.error(f"Failed to save mission log to {log_path}: {e}")
+
+    def load_log_for_active_project(self):
+        """Loads the mission log from disk for the currently active project."""
+        log_path = self._get_log_path()
+        self.tasks = []
+        self._next_task_id = 1
+
+        if log_path and log_path.exists():
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    self.tasks = json.load(f)
+                if self.tasks:
+                    # Ensure all tasks have a valid ID and find the max.
+                    valid_ids = [task.get('id', 0) for task in self.tasks]
+                    self._next_task_id = max(valid_ids) + 1 if valid_ids else 1
+                logger.info(f"Successfully loaded Mission Log for '{self.project_manager.active_project_name}'")
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Failed to load or parse mission log at {log_path}: {e}. Starting fresh.")
+                self.tasks = [] # Ensure tasks are cleared on error
+        else:
+            logger.info("No existing mission log found for this project. Starting fresh.")
+
+        self._save_and_notify()
 
     def add_task(self, description: str, tool_call: Optional[Dict] = None) -> Dict[str, Any]:
         """Adds a new task to the mission log, optionally with its tool call."""
@@ -90,8 +92,7 @@ class MissionLogService:
         }
         self.tasks.append(new_task)
         self._next_task_id += 1
-        self._save_log()
-        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
+        self._save_and_notify()
         logger.info(f"Added task {new_task['id']}: '{description}'")
         return new_task
 
@@ -99,10 +100,10 @@ class MissionLogService:
         """Marks a specific task as completed."""
         for task in self.tasks:
             if task.get('id') == task_id:
-                task['done'] = True
-                self._save_log()
-                self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
-                logger.info(f"Marked task {task_id} as done.")
+                if not task.get('done'): # Only update if it's not already done
+                    task['done'] = True
+                    self._save_and_notify()
+                    logger.info(f"Marked task {task_id} as done.")
                 return True
         logger.warning(f"Attempted to mark non-existent task {task_id} as done.")
         return False
@@ -117,8 +118,7 @@ class MissionLogService:
             return
         self.tasks = []
         self._next_task_id = 1
-        self._save_log()
-        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
+        self._save_and_notify()
         logger.info("All tasks cleared from the Mission Log.")
 
     def replace_all_tasks(self, new_task_definitions: List[Dict[str, Any]]):
@@ -126,9 +126,14 @@ class MissionLogService:
         self.tasks = []
         self._next_task_id = 1
         for task_def in new_task_definitions:
-            self.add_task(description=task_def['description'], tool_call=task_def.get('tool_call'))
+            new_task = {
+                "id": self._next_task_id,
+                "description": task_def['description'],
+                "done": False,
+                "tool_call": task_def.get('tool_call')
+            }
+            self.tasks.append(new_task)
+            self._next_task_id += 1
 
-        # The add_task method already saves and emits, but we can do a final emit
-        # to ensure the UI gets the complete final list in one go.
-        self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.tasks))
+        self._save_and_notify()
         logger.info(f"Mission Log replaced with {len(self.tasks)} new tasks.")

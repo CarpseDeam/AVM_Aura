@@ -1,4 +1,4 @@
-# services/generation_coordinator.py
+# services/agents/generation_coordinator.py
 from __future__ import annotations
 import json
 import re
@@ -7,6 +7,7 @@ from pathlib import Path
 
 from event_bus import EventBus
 from prompts import CODER_PROMPT, SIMPLE_FILE_PROMPT
+from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -82,6 +83,9 @@ class GenerationCoordinator:
                 original_code_section=original_code_section,
                 file_plan_json=json.dumps(plan, indent=2),
                 code_context_json=code_context_json,
+                TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
+                DOCSTRING_RULE=DOCSTRING_RULE.strip(),
+                RAW_CODE_OUTPUT_RULE=RAW_CODE_OUTPUT_RULE.strip()
             )
         else:
             return SIMPLE_FILE_PROMPT.format(
