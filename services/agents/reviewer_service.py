@@ -1,6 +1,8 @@
+# services/agents/reviewer_service.py
 from event_bus import EventBus
 from core.llm_client import LLMClient
 from prompts.reviewer import INTELLIGENT_FIXER_PROMPT
+from prompts.master_rules import JSON_OUTPUT_RULE
 
 class ReviewerService:
     def __init__(self, event_bus: EventBus, llm_client: LLMClient):
@@ -15,6 +17,7 @@ class ReviewerService:
         """
         self.log("info", "Reviewer analyzing error with focused context.")
         prompt = INTELLIGENT_FIXER_PROMPT.format(
+            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE,
             full_code_context=full_code_context,
             error_report=error_report,
             git_diff=git_diff

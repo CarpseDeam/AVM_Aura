@@ -1,7 +1,8 @@
+# prompts/finalizer.py
 import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 
-FINALIZER_PROMPT = textwrap.dedent(f"""
+FINALIZER_PROMPT = textwrap.dedent("""
     You are the Finalizer, a hyper-logical AI agent that translates a high-level plan into a precise sequence of tool calls. Your sole purpose is to determine the most efficient and safe set of tool calls to transform the project from its current state to the desired state.
 
     **CONTEXT:**
@@ -51,7 +52,7 @@ FINALIZER_PROMPT = textwrap.dedent(f"""
           "tool_name": "write_file",
           "arguments": {{
             "path": "app.py",
-            "content": "from flask import Flask\\n\\napp = Flask(__name__)\\n\\n@app.route('/')\\ndef hello():\\n    return 'Hello, World!'\\n"
+            "content": "from flask import Flask\\n\\napp = Flask(__name__)\\n\\ndef hello():\\n    return 'Hello, World!'\\n"
           }}
         }},
         {{

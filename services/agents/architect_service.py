@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict, Optional
 
 from event_bus import EventBus
 from prompts import HIERARCHICAL_PLANNER_PROMPT, MODIFICATION_PLANNER_PROMPT
+from prompts.master_rules import JSON_OUTPUT_RULE
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -25,11 +26,15 @@ class ArchitectService:
 
         if existing_files:
             plan_prompt = MODIFICATION_PLANNER_PROMPT.format(
+                JSON_OUTPUT_RULE=JSON_OUTPUT_RULE,
                 prompt=prompt,
                 full_code_context=json.dumps(existing_files, indent=2)
             )
         else:
-            plan_prompt = HIERARCHICAL_PLANNER_PROMPT.format(prompt=prompt)
+            plan_prompt = HIERARCHICAL_PLANNER_PROMPT.format(
+                JSON_OUTPUT_RULE=JSON_OUTPUT_RULE,
+                prompt=prompt
+            )
 
         return await self._get_plan_from_llm(plan_prompt)
 

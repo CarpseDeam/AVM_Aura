@@ -1,7 +1,8 @@
+# prompts/coder.py
 import textwrap
 from .master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 
-CODER_PROMPT = textwrap.dedent(f"""
+CODER_PROMPT = textwrap.dedent("""
     You are a professional Python developer. Your only job is to write the complete code for a single file, `{{filename}}`, based on a strict project plan. You must follow all laws without deviation.
 
     **YOUR ASSIGNED FILE:** `{{filename}}`
@@ -24,8 +25,8 @@ CODER_PROMPT = textwrap.dedent(f"""
 
     **LAW #2: WRITE PROFESSIONAL, ROBUST, AND PYTHONIC CODE.**
     - Your code must be clean, readable, and follow best practices.
-    - {TYPE_HINTING_RULE.strip()}
-    - {DOCSTRING_RULE.strip()}
+    - {TYPE_HINTING_RULE}
+    - {DOCSTRING_RULE}
     - Implement proper error handling using `try...except` blocks where operations might fail.
 
     **LAW #3: FULL IMPLEMENTATION.**

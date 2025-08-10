@@ -1,11 +1,13 @@
+# services/agents/finalizer_agent.py
 from __future__ import annotations
 import json
 import re
+import difflib
 from typing import TYPE_CHECKING, Dict, List, Optional
-import unidiff
 
 from event_bus import EventBus
 from prompts import FINALIZER_PROMPT
+from prompts.master_rules import JSON_OUTPUT_RULE
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -39,6 +41,7 @@ class FinalizerAgent:
         available_tools = self.foundry.get_llm_tool_definitions()
 
         finalizer_prompt = FINALIZER_PROMPT.format(
+            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE,
             diffs="\n".join(diffs),
             dependencies=json.dumps(dependencies or [], indent=2),
             available_tools=json.dumps(available_tools, indent=2)
@@ -46,24 +49,31 @@ class FinalizerAgent:
 
         plan = await self._get_plan_from_llm(finalizer_prompt)
         if plan:
-            self.log("success", f"Finalizer created an execution plan with {len(plan)} steps.")
+            self.log("success", f"Finalizer created a validated execution plan with {len(plan)} steps.")
         return plan
 
     def _calculate_diffs(self, generated_files: Dict[str, str], existing_files: Dict[str, str]) -> List[str]:
-        """Calculates git-style diffs for each file."""
+        """Calculates git-style diffs for each file using difflib."""
         diff_texts = []
         all_filenames = set(generated_files.keys()) | set(existing_files.keys())
 
         for filename in sorted(list(all_filenames)):
-            old_content = existing_files.get(filename, "")
-            new_content = generated_files.get(filename, "")
+            old_content_lines = existing_files.get(filename, "").splitlines(keepends=True)
+            new_content_lines = generated_files.get(filename, "").splitlines(keepends=True)
 
-            if old_content == new_content:
+            if old_content_lines == new_content_lines:
                 continue
 
-            diff = unidiff.patch.make_patch(old_content.splitlines(True), new_content.splitlines(True),
-                                            fromfile=f"a/{filename}", tofile=f"b/{filename}")
-            diff_texts.append(str(diff))
+            diff_generator = difflib.unified_diff(
+                old_content_lines,
+                new_content_lines,
+                fromfile=f"a/{filename}",
+                tofile=f"b/{filename}"
+            )
+            diff = "".join(diff_generator)
+            if diff:
+                diff_texts.append(diff)
+
         return diff_texts
 
     async def _get_plan_from_llm(self, prompt: str) -> Optional[List[Dict]]:
@@ -78,14 +88,38 @@ class FinalizerAgent:
                 raw_response += chunk
 
             plan_data = self._parse_json_response(raw_response)
-            if not isinstance(plan_data, dict) or "plan" not in plan_data:
-                raise ValueError("Finalizer response is not a valid JSON object with a 'plan' key.")
 
-            # TODO: Add validation against Foundry blueprints here
-            return plan_data["plan"]
+            plan = plan_data.get("plan")
+            if not isinstance(plan, list):
+                raise ValueError("Finalizer response JSON does not contain a valid 'plan' list.")
+
+            # --- Plan Validation Logic ---
+            for i, step in enumerate(plan):
+                tool_name = step.get("tool_name")
+                if not tool_name:
+                    raise ValueError(f"Plan step {i} is missing a 'tool_name'.")
+
+                blueprint = self.foundry.get_blueprint(tool_name)
+                if not blueprint:
+                    raise ValueError(f"Plan step {i} uses a non-existent tool: '{tool_name}'.")
+
+                provided_args = step.get("arguments", {}).keys()
+                required_args = set(blueprint.parameters.get("required", []))
+                all_possible_args = set(blueprint.parameters.get("properties", {}).keys())
+
+                missing_args = required_args - provided_args
+                if missing_args:
+                    raise ValueError(
+                        f"Plan step {i} ('{tool_name}') is missing required arguments: {list(missing_args)}")
+
+                unknown_args = provided_args - all_possible_args
+                if unknown_args:
+                    raise ValueError(f"Plan step {i} ('{tool_name}') provided unknown arguments: {list(unknown_args)}")
+
+            return plan
 
         except (json.JSONDecodeError, ValueError) as e:
-            self.log("error", f"Finalizer plan creation failed: {e}\nResponse: {raw_response}")
+            self.log("error", f"Finalizer plan creation or validation failed: {e}\nResponse: {raw_response}")
             return None
         except Exception as e:
             self.log("error", f"An unexpected error during finalizer planning: {e}")

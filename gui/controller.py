@@ -18,6 +18,7 @@ from .status_bar_widget import StatusBarWidget
 from .utils import get_aura_banner
 from .chat_widgets import UserMessageWidget, AIMessageWidget, ThinkingWidget
 from .command_input_widget import CommandInputWidget
+from services import view_formatter
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager

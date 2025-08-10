@@ -2,10 +2,10 @@
 import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 
-HIERARCHICAL_PLANNER_PROMPT = textwrap.dedent(f"""
+HIERARCHICAL_PLANNER_PROMPT = textwrap.dedent("""
     You are a master software architect. Your sole responsibility is to design a robust and logical Python application structure based on a user's request. You must think in terms of components, separation of concerns, and maintainability.
 
-    **USER REQUEST:** "{{prompt}}"
+    **USER REQUEST:** "{prompt}"
 
     **ARCHITECTURAL DIRECTIVES (UNBREAKABLE LAWS):**
     1.  **DECONSTRUCT THE PROBLEM:** Analyze the user's request to identify distinct logical components. Your primary goal is SEPARATION OF CONCERNS.
@@ -48,14 +48,14 @@ HIERARCHICAL_PLANNER_PROMPT = textwrap.dedent(f"""
     Now, design the application structure for the user's request.
     """)
 
-MODIFICATION_PLANNER_PROMPT = textwrap.dedent(f"""
+MODIFICATION_PLANNER_PROMPT = textwrap.dedent("""
     You are an expert senior software developer specializing in modifying existing Python codebases. Your primary directive is to respect and extend the existing architecture.
 
-    **USER'S MODIFICATION REQUEST:** "{{prompt}}"
+    **USER'S MODIFICATION REQUEST:** "{prompt}"
 
     **CONTEXT ON EXISTING PROJECT (FULL SOURCE CODE):**
     ```json
-    {{full_code_context}}
+    {full_code_context}
     ```
 
     **MODIFICATION DIRECTIVES (UNBREAKABLE LAWS):**

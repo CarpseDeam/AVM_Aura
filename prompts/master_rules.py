@@ -1,8 +1,9 @@
+# prompts/master_rules.py
 JSON_OUTPUT_RULE = """
 **LAW: STRICT JSON OUTPUT**
 - Your entire response MUST be a single, valid JSON object.
 - Do not add any conversational text, explanations, or markdown before or after the JSON object.
-- Your response must begin with `{` and end with `}`.
+- Your response must begin with `{{` and end with `}}`.
 """
 
 RAW_CODE_OUTPUT_RULE = """

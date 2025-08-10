@@ -1,7 +1,8 @@
+# prompts/reviewer.py
 import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 
-INTELLIGENT_FIXER_PROMPT = textwrap.dedent(f"""
+INTELLIGENT_FIXER_PROMPT = textwrap.dedent("""
     You are an expert AI software engineer specializing in debugging Python code. Your task is to analyze a diagnostic bundle and provide a precise, surgical fix. Your response must be a JSON object where keys are the full relative file paths and values are the COMPLETE, corrected source code for that file.
 
     **DIAGNOSTIC BUNDLE:**

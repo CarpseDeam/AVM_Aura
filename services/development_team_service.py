@@ -15,8 +15,10 @@ if TYPE_CHECKING:
 
 class DevelopmentTeamService:
     """
-    Orchestrates the AI agent team (Architect, Coder, Reviewer, Finalizer)
-    to turn a user prompt into an executable plan for the Mission Log.
+    Orchestrates the AI agent team in two distinct phases:
+    1. Planning (Architect): Creates a high-level plan for user approval.
+    2. Execution (Coder, Tester, Finalizer): Generates code and a detailed tool plan
+       only after the user dispatches the mission.
     """
 
     def __init__(self, event_bus: EventBus, service_manager: "ServiceManager"):
@@ -33,27 +35,53 @@ class DevelopmentTeamService:
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
         self.finalizer = FinalizerAgent(service_manager)
 
-    async def run_build_workflow(self, prompt: str, existing_files: Optional[Dict[str, str]] = None):
+    async def run_architect_phase(self, prompt: str, existing_files: Optional[Dict[str, str]] = None):
         """
-        Executes the full build pipeline: Plan -> Code -> Test -> Review -> Finalize -> Log.
+        Phase 1: Run the architect to generate a high-level plan for user approval.
         """
-        self.log("info", f"Build workflow initiated for prompt: '{prompt[:50]}...'")
-
-        # 1. Architect Phase
+        self.log("info", f"Architect phase initiated for prompt: '{prompt[:50]}...'")
         self.event_bus.emit("agent_status_changed", "Architect", "Planning project...", "fa5s.pencil-ruler")
+
         plan = await self.architect.generate_plan(prompt, existing_files)
         if not plan:
             self.handle_error("Architect", "Failed to generate a valid plan.")
             return
 
-        # 2. Coder Phase (coordinated)
+        self.mission_log_service.clear_all_tasks()
+
+        # Create human-readable tasks for user review. These have no tool calls.
+        for dependency in plan.get("dependencies", []):
+            self.mission_log_service.add_task(f"Add dependency: {dependency}")
+
+        for file_to_create in plan.get("files", []):
+            self.mission_log_service.add_task(f"Generate file: {file_to_create['filename']}")
+
+        # Add a single, special task at the end to trigger the execution phase.
+        self.mission_log_service.add_task(
+            description="Authorize and Begin Execution",
+            tool_call={
+                "tool_name": "execute_full_generation_plan",
+                "arguments": {"plan": plan, "existing_files": existing_files or {}}
+            }
+        )
+
+        self.log("success", "Architect plan created. Awaiting user dispatch from Agent TODO.")
+        self.event_bus.emit("agent_status_changed", "Aura", "Plan ready for your approval", "fa5s.rocket")
+
+    async def run_execution_phase(self, plan: dict, existing_files: dict) -> Optional[List[dict]]:
+        """
+        Phase 2: Called by the Conductor after approval. Runs Coder, Tester, and Finalizer.
+        """
+        self.log("info", "Execution phase initiated by Conductor.")
+
+        # 1. Coder Phase
         self.event_bus.emit("agent_status_changed", "Coder", "Generating code...", "fa5s.keyboard")
         generated_files = await self.coordinator.coordinate_generation(plan, existing_files)
         if not generated_files:
             self.handle_error("Coder", "Code generation failed to produce files.")
-            return
+            return None
 
-        # 3. Tester Phase
+        # 2. Tester Phase
         self.event_bus.emit("agent_status_changed", "Tester", "Writing tests...", "fa5s.vial")
         test_files = {}
         for filename, content in generated_files.items():
@@ -62,45 +90,33 @@ class DevelopmentTeamService:
                 test_code = await self.tester.generate_tests_for_file(content, filename)
                 if test_code:
                     test_files[test_filename] = test_code
-
-        # Merge test files with the main generated files
         generated_files.update(test_files)
         if test_files:
             self.log("success", f"TesterAgent generated {len(test_files)} test file(s).")
 
-        # 4. Finalizer Phase
+        # 3. Finalizer Phase
         self.event_bus.emit("agent_status_changed", "Finalizer", "Creating execution plan...", "fa5s.clipboard-list")
         tool_plan = await self.finalizer.create_tool_plan(generated_files, existing_files, plan.get('dependencies', []))
         if tool_plan is None:
             self.handle_error("Finalizer", "Failed to create an executable tool plan.")
-            return
+            return None
 
-        # 5. Populate Mission Log
-        self.mission_log_service.clear_pending_tasks()
-        for tool_call in tool_plan:
-            summary = self._summarize_tool_call(tool_call)
-            self.mission_log_service.add_task(summary, tool_call)
-
-        self.log("success", "Build plan successfully generated and loaded into Mission Log.")
-        self.event_bus.emit("agent_status_changed", "Aura", "Plan ready for dispatch", "fa5s.rocket")
+        return tool_plan
 
     async def run_chat_workflow(self, user_idea: str, conversation_history: list, image_bytes: Optional[bytes],
                                 image_media_type: Optional[str]):
         """Runs the 'Aura' creative assistant persona for planning and brainstorming."""
+        # This function remains unchanged
         self.log("info", f"Aura chat workflow processing: '{user_idea[:50]}...'")
         self.event_bus.emit("agent_status_changed", "Aura", "Thinking...", "fa5s.lightbulb")
-
-        # The creative prompt doesn't need the full project context, just the conversation.
         aura_prompt = CREATIVE_ASSISTANT_PROMPT.format(
             conversation_history="\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history]),
             user_idea=user_idea
         )
-
         provider, model = self.llm_client.get_model_for_role("chat")
         if not provider or not model:
             self.event_bus.emit("streaming_chunk", "Sorry, no 'chat' model is configured for Aura.")
             return
-
         self.event_bus.emit("streaming_start", "Aura")
         try:
             stream = self.llm_client.stream_chat(
@@ -117,27 +133,23 @@ class DevelopmentTeamService:
             self.event_bus.emit("streaming_end")
 
     def _summarize_tool_call(self, tool_call: dict) -> str:
-        """Creates a human-readable summary of a tool call for the Mission Log."""
+        # This function is now used by the Conductor
         tool_name = tool_call.get('tool_name', 'unknown_tool')
         args = tool_call.get('arguments', {})
         if not isinstance(args, dict): args = {}
-
         summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
         path = args.get('path') or args.get('source_path')
         if path:
-            summary += f": '{path}'"
+            summary += f": '{Path(path).name}'"
         elif 'project_name' in args:
             summary += f": '{args['project_name']}'"
         elif 'dependency' in args:
             summary += f": '{args['dependency']}'"
-
         return summary
 
     def handle_error(self, agent: str, error_msg: str):
         self.log("error", f"{agent} failed: {error_msg}")
         self.event_bus.emit("agent_status_changed", agent, "Failed", "fa5s.exclamation-triangle")
-        # Optionally, send a message to the chat UI
-        # self.event_bus.emit("streaming_chunk", f"Sorry, the {agent} failed: {error_msg}")
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "DevTeamService", level, message)

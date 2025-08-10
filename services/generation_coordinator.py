@@ -1,3 +1,4 @@
+# services/generation_coordinator.py
 from __future__ import annotations
 import json
 import re
@@ -86,8 +87,7 @@ class GenerationCoordinator:
             return SIMPLE_FILE_PROMPT.format(
                 filename=filename,
                 purpose=file_info.get("purpose", ""),
-                file_plan_json=json.dumps(plan, indent=2),
-                existing_files_json=json.dumps(generated_files_this_session, indent=2)
+                file_plan_json=json.dumps(plan, indent=2)
             )
 
     def _robustly_clean_llm_output(self, content: str) -> str:

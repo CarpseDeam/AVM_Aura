@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 
 from event_bus import EventBus
 from prompts.tester import TESTER_PROMPT
+from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -27,7 +28,10 @@ class TesterAgent:
         self.log("info", f"TesterAgent received request to generate tests for '{filename_to_test}'.")
         prompt = TESTER_PROMPT.format(
             filename_to_test=filename_to_test,
-            source_code_to_test=source_code_to_test
+            source_code_to_test=source_code_to_test,
+            TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
+            DOCSTRING_RULE=DOCSTRING_RULE.strip(),
+            RAW_CODE_OUTPUT_RULE=RAW_CODE_OUTPUT_RULE.strip()
         )
 
         provider, model = self.llm_client.get_model_for_role("tester")

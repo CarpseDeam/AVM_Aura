@@ -64,11 +64,21 @@ class ServiceManager:
 
         self.app_state_service = AppStateService(self.event_bus)
         self.mission_log_service = MissionLogService(self.project_manager, self.event_bus)
+
+        # Create the Development Team first as the Conductor depends on it.
+        self.development_team_service = DevelopmentTeamService(self.event_bus, self)
+
         self.tool_runner_service = ToolRunnerService(self.event_bus, self.foundry_manager, self.project_manager,
                                                      self.mission_log_service, None)
-        self.conductor_service = ConductorService(self.event_bus, self.mission_log_service, self.tool_runner_service)
 
-        self.development_team_service = DevelopmentTeamService(self.event_bus, self)
+        # Now create the Conductor and inject the dev team.
+        self.conductor_service = ConductorService(
+            self.event_bus,
+            self.mission_log_service,
+            self.tool_runner_service,
+            self.development_team_service
+        )
+
         self.action_service = ActionService(self.event_bus, self, None, None)
 
         self.log_to_event_bus("info", "[ServiceManager] Services initialized")
@@ -115,7 +125,8 @@ class ServiceManager:
             try:
                 models = await self.llm_client.get_available_models()
                 if models:
-                    self.log_to_event_bus("success", f"LLM Server is online. Found models from providers: {list(models.keys())}")
+                    self.log_to_event_bus("success",
+                                          f"LLM Server is online. Found models from providers: {list(models.keys())}")
                     server_ready = True
                     break
             except Exception:
@@ -126,7 +137,6 @@ class ServiceManager:
             msg = f"LLM Server failed to start within {timeout} seconds. Check llm_server_subprocess.log for errors."
             self.log_to_event_bus("error", msg)
             raise RuntimeError(msg)
-
 
     def terminate_background_servers(self):
         """Terminates all managed background server processes."""

@@ -2,7 +2,7 @@
 import textwrap
 from .master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 
-TESTER_PROMPT = textwrap.dedent(f"""
+TESTER_PROMPT = textwrap.dedent("""
     You are an expert Python QA Engineer. Your sole responsibility is to write comprehensive `pytest` tests for the provided source code.
 
     **LAW #1: FOCUS ON THE TARGET FILE.**
@@ -22,8 +22,8 @@ TESTER_PROMPT = textwrap.dedent(f"""
     - Use `mocker` fixture if you need to mock dependencies, but prefer to test pure functions directly.
 
     **LAW #3: WRITE COMPLETE, HIGH-QUALITY TEST CODE.**
-    - {TYPE_HINTING_RULE.strip()}
-    - {DOCSTRING_RULE.strip()}
+    - {TYPE_HINTING_RULE}
+    - {DOCSTRING_RULE}
     - Your generated test file should be fully functional.
 
     {RAW_CODE_OUTPUT_RULE}
