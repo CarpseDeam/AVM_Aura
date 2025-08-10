@@ -15,7 +15,6 @@ from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
-from .status_bar_widget import StatusBarWidget
 from .utils import get_aura_banner
 from .chat_widgets import UserMessageWidget, AIMessageWidget, AgentActivityWidget
 from .command_input_widget import CommandInputWidget
@@ -53,8 +52,6 @@ class GUIController(QObject):
 
         self.node_viewer_window = None
         self.code_viewer_window = None
-        self.mission_log_window = None
-        self.status_bar: Optional[StatusBarWidget] = None
 
         self.current_activity_widget: Optional[AgentActivityWidget] = None
 
@@ -66,10 +63,9 @@ class GUIController(QObject):
         self.add_system_message_signal.connect(self._add_system_message)
         self.update_status_signal.connect(self._on_update_status)
 
-    def register_ui_elements(self, command_input, autocomplete_popup, status_bar):
+    def register_ui_elements(self, command_input, autocomplete_popup):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
-        self.status_bar = status_bar
 
     def on_post_chat_message(self, event: PostChatMessage):
         """Event handler to post a message from a service to the chat."""
@@ -84,9 +80,6 @@ class GUIController(QObject):
     def _on_update_status(self, status: str, activity: str, animate: bool, progress: Optional[int],
                           total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
-        if self.status_bar:
-            self.status_bar.show_status(status, activity, animate)
-
         art_map = {
             "ARCHITECT": "[ ARCHITECT // DRAFTING SPECIFICATION ]",
             "CODER": "[ CODER // TRANSMITTING CODESTREAM... ]",
@@ -168,10 +161,6 @@ class GUIController(QObject):
         if self.current_activity_widget:
             self.current_activity_widget.stop_animation()
             self.current_activity_widget = None
-
-        if self.status_bar:
-            final_status_text = "Plan ready. Awaiting dispatch." if isinstance(event, PlanReadyForReview) else "Idle. Waiting for input."
-            self.status_bar.show_status("Aura", final_status_text, animate=False)
 
     @Slot(str)
     def _add_system_message(self, message: str):
@@ -265,10 +254,4 @@ class GUIController(QObject):
         self.event_bus.emit("open_code_viewer_requested")
 
     def toggle_mission_log(self):
-        if self.mission_log_service is None:
-            self.add_system_message_signal.emit("Mission Log system is not ready yet.")
-            return
-        if self.mission_log_window is None or not self.mission_log_window.isVisible():
-            self.mission_log_window = MissionLogWindow(event_bus=self.event_bus)
-        self.mission_log_service.load_log_for_active_project()
-        self.mission_log_window.show_window()
+        self.event_bus.emit("show_mission_log_requested")

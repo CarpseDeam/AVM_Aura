@@ -94,6 +94,7 @@ class Application:
 
     def show(self):
         self.window_manager.show_main_window()
+        self.event_bus.emit("show_mission_log_requested")
 
     async def shutdown(self):
         print("[Application] Shutting down application components...")

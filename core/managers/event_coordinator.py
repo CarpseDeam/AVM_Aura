@@ -39,14 +39,11 @@ class EventCoordinator:
         print("[EventCoordinator] All events wired successfully.")
 
     def _wire_status_bar_events(self):
-        if not self.window_manager: return
-        main_window = self.window_manager.get_main_window()
-        if not main_window: return
-
-        if hasattr(main_window, 'status_bar') and main_window.status_bar:
-             self.event_bus.subscribe("agent_status_changed", main_window.status_bar.show_status)
-        else:
-            print("[EventCoordinator] Warning: StatusBar not found or is missing 'update_agent_status' method.")
+        """
+        This method is now a no-op as the StatusBarWidget has been removed.
+        Kept for structural consistency.
+        """
+        pass
 
     def _wire_chat_session_events(self):
         # This can be implemented later if needed
@@ -68,6 +65,7 @@ class EventCoordinator:
         )
 
         self.event_bus.subscribe("show_log_viewer_requested", self.window_manager.show_log_viewer)
+        self.event_bus.subscribe("show_mission_log_requested", self.window_manager.show_mission_log)
 
     def _wire_ai_workflow_events(self):
         if self.workflow_manager:

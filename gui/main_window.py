@@ -11,7 +11,6 @@ from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent
 
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
-from .status_bar_widget import StatusBarWidget
 from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -34,8 +33,7 @@ class AuraMainWindow(QMainWindow):
         self.controller = GUIController(self, self.event_bus, self.chat_layout, self.scroll_area)
         self.controller.register_ui_elements(
             command_input=self.command_input,
-            autocomplete_popup=self.autocomplete_popup,
-            status_bar=self.status_bar
+            autocomplete_popup=self.autocomplete_popup
         )
         self.controller.post_welcome_message()
         self._apply_stylesheet()
@@ -75,10 +73,6 @@ class AuraMainWindow(QMainWindow):
 
         self.scroll_area.setWidget(chat_container)
         left_column_layout.addWidget(self.scroll_area)
-
-        self.status_bar = StatusBarWidget()
-        self.setStatusBar(self.status_bar)
-
 
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
