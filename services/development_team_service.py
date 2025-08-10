@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
 from prompts.creative import AURA_PLANNER_PROMPT, CREATIVE_ASSISTANT_PROMPT
-from services.agents import ArchitectService, GenerationCoordinator, ReviewerService, FinalizerAgent
-from services.agents.tester_agent import TesterAgent
+from services.agents import ReviewerService, FinalizerAgent
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -17,7 +16,8 @@ if TYPE_CHECKING:
 
 class DevelopmentTeamService:
     """
-    Orchestrates the AI agent team in distinct phases, including a self-correction loop.
+    Orchestrates the main AI workflows: high-level planning and self-correction.
+    The main build process is now handled by the ConductorService.
     """
 
     def __init__(self, event_bus: EventBus, service_manager: "ServiceManager"):
@@ -27,9 +27,6 @@ class DevelopmentTeamService:
         self.project_manager = service_manager.get_project_manager()
         self.mission_log_service = service_manager.mission_log_service
 
-        self.architect = ArchitectService(service_manager)
-        self.coordinator = GenerationCoordinator(service_manager)
-        self.tester = TesterAgent(service_manager)
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
         self.finalizer = FinalizerAgent(service_manager)
 
@@ -43,7 +40,7 @@ class DevelopmentTeamService:
         return json.loads(match.group(0))
 
     async def run_aura_planner_workflow(self, user_idea: str, conversation_history: list):
-        """Phase 1: Aura (as a planner) talks to the user to create a high-level plan."""
+        """Phase 1: Aura creates the initial high-level, human-readable plan."""
         self.log("info", f"Aura Planner workflow initiated for: '{user_idea[:50]}...'")
         self.event_bus.emit("agent_status_changed", "Aura", "Formulating a plan...", "fa5s.lightbulb")
 
@@ -62,66 +59,19 @@ class DevelopmentTeamService:
             plan_data = self._parse_json_response(response_str)
             plan_steps = plan_data.get("plan", [])
             if not plan_steps:
-                raise ValueError("Aura's plan was empty.")
+                raise ValueError("Aura's plan was empty or malformed.")
 
             self.mission_log_service.clear_all_tasks()
             for step in plan_steps:
                 self.mission_log_service.add_task(description=step)
 
             self._post_chat_message("Aura",
-                                    "I've created a high-level plan based on your request. Please review it in the 'Agent TODO' list. You can add, edit, or remove steps. When you're ready, click 'Dispatch Aura' to begin the build.")
+                                    "I've created a high-level plan. Please review it in the 'Agent TODO' list. When you're ready, click 'Dispatch Aura' to begin the build.")
             self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
 
         except (ValueError, json.JSONDecodeError) as e:
-            self.handle_error("Aura", f"Failed to create a valid plan: {e}")
-            self._post_chat_message("Aura",
-                                    "I had trouble structuring a plan for that. Could you please rephrase your request?",
-                                    is_error=True)
-
-    async def run_full_technical_build(self, high_level_prompt: str) -> Optional[List[Dict]]:
-        """Phase 2: The Conductor calls this to run the entire technical team."""
-        existing_files = self.project_manager.get_project_files()
-
-        self.event_bus.emit("agent_status_changed", "Architect", "Planning project...", "fa5s.pencil-ruler")
-        high_level_plan = await self.architect.generate_plan(high_level_prompt, existing_files)
-        if not high_level_plan:
-            self.handle_error("Architect", "Failed to generate a technical plan.")
-            return None
-
-        self.event_bus.emit("agent_status_changed", "Coder", "Drafting code...", "fa5s.keyboard")
-        generated_files = await self.coordinator.coordinate_generation(high_level_plan, existing_files)
-        if generated_files is None:
-            self.handle_error("Coder", "Code generation failed.")
-            return None
-
-        self.event_bus.emit("agent_status_changed", "Tester", "Drafting tests...", "fa5s.vial")
-        test_files = {}
-        for filename, content in generated_files.items():
-            if filename.endswith(".py") and not Path(filename).name.startswith("test_"):
-                test_filepath = Path('tests') / f"test_{Path(filename).name}"
-                test_code = await self.tester.generate_tests_for_file(content, filename)
-                if test_code:
-                    test_files[str(test_filepath)] = test_code
-
-        all_generated_files = {**generated_files, **test_files}
-
-        self.event_bus.emit("agent_status_changed", "Finalizer", "Creating execution plan...", "fa5s.clipboard-list")
-        final_tool_plan = await self.finalizer.create_tool_plan(
-            generated_files=all_generated_files,
-            existing_files=existing_files,
-            dependencies=high_level_plan.get('dependencies', [])
-        )
-        if final_tool_plan is None:
-            self.handle_error("Finalizer", "Failed to create a final tool plan.")
-            return None
-
-        # This will be a list of dicts, where each dict has 'description' and 'tool_call'
-        detailed_plan_for_log = []
-        for step in final_tool_plan:
-            summary = self._summarize_tool_call(step)
-            detailed_plan_for_log.append({"description": summary, "tool_call": step})
-
-        return detailed_plan_for_log
+            self.handle_error("Aura", f"Failed to create a valid plan: {e}. Raw response logged for debugging.")
+            self.log("error", f"Aura planning failure. Raw response: {response_str}")
 
     async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
         self.log("info", "Review and Fix phase initiated.")
@@ -138,20 +88,16 @@ class DevelopmentTeamService:
             self.handle_error("Reviewer", "Proposed fix was not valid JSON.")
             return
         self._post_chat_message("Reviewer",
-                                "I've analyzed the error and proposed a fix. Handing off to create a new execution plan.")
+                                "I've analyzed the error and proposed a fix. I will now create a new execution plan to apply it.")
 
         self.event_bus.emit("agent_status_changed", "Finalizer", "Creating fix plan...", "fa5s.clipboard-list")
         fix_tool_plan = await self.finalizer.create_tool_plan(corrected_files, full_code_context, dependencies=None)
+
         if fix_tool_plan is None:
             self.handle_error("Finalizer", "Failed to create a tool plan for the fix.")
             return
 
-        new_tasks = []
-        for step in fix_tool_plan:
-            summary = self._summarize_tool_call(step)
-            new_tasks.append({"description": f"FIX: {summary}", "tool_call": step})
-
-        self.mission_log_service.replace_all_tasks(new_tasks)
+        self.mission_log_service.replace_all_tasks_with_tool_plan(fix_tool_plan)
         self._post_chat_message("Finalizer", "A new plan to apply the fix has been created. Re-engaging the Conductor.")
         self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
 
@@ -175,23 +121,10 @@ class DevelopmentTeamService:
         self._post_chat_message("Aura", response_str)
         self.event_bus.emit("ai_workflow_finished")
 
-    def _summarize_tool_call(self, tool_call: dict) -> str:
-        tool_name = tool_call.get('tool_name', 'unknown_tool')
-        args = tool_call.get('arguments', {})
-        if not isinstance(args, dict): args = {}
-        summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
-        path = args.get('path') or args.get('source_path')
-        if path:
-            summary += f": '{Path(path).name}'"
-        elif 'project_name' in args:
-            summary += f": '{args['project_name']}'"
-        elif 'dependency' in args:
-            summary += f": '{args['dependency']}'"
-        return summary
-
     def handle_error(self, agent: str, error_msg: str):
         self.log("error", f"{agent} failed: {error_msg}")
         self.event_bus.emit("agent_status_changed", agent, "Failed", "fa5s.exclamation-triangle")
+        self._post_chat_message(agent, error_msg, is_error=True)
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "DevTeamService", level, message)

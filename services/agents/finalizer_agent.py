@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 class FinalizerAgent:
     """
-    Analyzes the difference between generated code and existing code
-    to produce a precise, surgical plan of tool calls for the Mission Log.
+    Analyzes a high-level goal or a code diff to produce a precise,
+    surgical plan of tool calls for execution.
     """
 
     def __init__(self, service_manager: "ServiceManager"):
@@ -25,13 +25,42 @@ class FinalizerAgent:
         self.llm_client = service_manager.get_llm_client()
         self.foundry = service_manager.get_foundry_manager()
 
+    async def create_tool_plan_from_prompt(self, high_level_prompt: str) -> Optional[List[Dict]]:
+        """
+        New method for the architectural phase. Takes a human-readable plan and
+        converts it into an executable tool plan.
+        """
+        self.log("info", "Finalizer acting as Architect to create executable plan.")
+
+        # We create a "fake" diff to fit the existing prompt structure. The key is the prompt itself.
+        diffs = [
+            "--- /dev/null",
+            "+++ new_project/",
+            f"@@ -0,0 +1 @@",
+            f"+ {high_level_prompt}"
+        ]
+
+        available_tools = self.foundry.get_llm_tool_definitions()
+
+        finalizer_prompt = FINALIZER_PROMPT.format(
+            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE,
+            diffs="\n".join(diffs),
+            dependencies="[]",  # Assume no dependencies initially, let the AI add them
+            available_tools=json.dumps(available_tools, indent=2)
+        )
+
+        plan = await self._get_plan_from_llm(finalizer_prompt)
+        if plan:
+            self.log("success", f"Finalizer created an executable plan with {len(plan)} steps.")
+        return plan
+
     async def create_tool_plan(self, generated_files: Dict[str, str],
                                existing_files: Optional[Dict[str, str]],
                                dependencies: Optional[List[str]]) -> Optional[List[Dict]]:
         """
-        The main method to generate the final tool-based execution plan.
+        Original method for the self-correction loop. Takes code diffs and creates a fix plan.
         """
-        self.log("info", "Finalizer phase started. Comparing generated code to existing project.")
+        self.log("info", "Finalizer creating tool plan from code diffs.")
         diffs = self._calculate_diffs(generated_files, existing_files or {})
 
         if not diffs and not dependencies:

@@ -8,7 +8,7 @@ from event_bus import EventBus
 from services.mission_log_service import MissionLogService
 from services.tool_runner_service import ToolRunnerService
 from services.development_team_service import DevelopmentTeamService
-from foundry import BlueprintInvocation
+from services.agents.finalizer_agent import FinalizerAgent
 from events import PostChatMessage
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 class ConductorService:
     """
-    Orchestrates the execution of multi-step missions from the Mission Log.
+    Orchestrates the execution of a mission by first using the Finalizer agent to
+    convert a high-level plan into an executable tool plan, then running the tools.
     """
 
     def __init__(
@@ -30,76 +31,67 @@ class ConductorService:
         self.mission_log_service = mission_log_service
         self.tool_runner_service = tool_runner_service
         self.development_team_service = development_team_service
+        # The Finalizer is the key to translating the human plan to a tool plan
+        self.finalizer = FinalizerAgent(development_team_service.service_manager)
         self.is_mission_active = False
         logger.info("ConductorService initialized.")
 
     def execute_mission_in_background(self, event=None):
         """Starts the mission execution in a new thread to avoid blocking the GUI."""
         if self.is_mission_active:
-            print("[ConductorService] Mission is already in progress.")
+            self.log("warning", "Mission is already in progress.")
             return
 
         self.is_mission_active = True
 
-        try:
-            main_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self.log("error", "Could not get the running event loop. Cannot start mission.")
-            self.is_mission_active = False
-            return
-
         def mission_runner():
-            self.log("info", "Mission thread started. Scheduling coroutine on main loop.")
-            future = asyncio.run_coroutine_threadsafe(self.execute_mission(), main_loop)
-
-            def on_done(f):
-                try:
-                    f.result()
-                    self.log("info", "Mission coroutine completed successfully (from thread).")
-                except Exception as e:
-                    self.log("error", f"Mission coroutine failed with exception: {e}")
-
-            future.add_done_callback(on_done)
+            asyncio.run(self.execute_mission())
 
         mission_thread = threading.Thread(target=mission_runner, daemon=True)
         mission_thread.start()
 
     async def execute_mission(self):
-        """The main logic for running a mission from the Mission Log."""
-        failed_result = None
+        """
+        The main logic for running a mission.
+        1. Takes the human-readable plan from the Mission Log.
+        2. Uses the Finalizer to create a detailed, tool-based plan.
+        3. Replaces the old plan with the new executable plan.
+        4. Executes the tool calls one by one.
+        """
         mission_succeeded = False
         try:
-            high_level_tasks = self.mission_log_service.get_tasks()
+            self.event_bus.emit("agent_status_changed", "Conductor", "Mission dispatched...", "fa5s.play-circle")
+
+            # Get the high-level plan from the user's log.
+            high_level_tasks = self.mission_log_service.get_tasks(done=False)
             if not high_level_tasks:
                 self.log("info", "Mission Log is empty. Nothing to execute.")
                 return
 
-            self.event_bus.emit("agent_status_changed", "Conductor", "Mission dispatched...", "fa5s.play-circle")
-            self.event_bus.emit("post_chat_message", PostChatMessage(sender="Conductor",
-                                                                     message="Mission dispatched! I'm now taking the high-level plan and handing it off to the technical team to create a detailed implementation plan."))
+            self._post_chat_message("Conductor",
+                                    "High-level plan received. Engaging Finalizer to create detailed execution plan.")
+            self.event_bus.emit("agent_status_changed", "Finalizer", "Creating technical plan...",
+                                "fa5s.clipboard-list")
 
-            # Combine high-level plan into a single prompt for the dev team
-            high_level_prompt = "\n".join([f"- {task['description']}" for task in high_level_tasks])
+            # Create a fake diff and dependency list to satisfy the Finalizer's prompt format.
+            # The real intelligence is in how it handles the prompt.
+            finalizer_prompt_context = "\n".join([f"- {task['description']}" for task in high_level_tasks])
 
-            # Run the full technical planning phase
-            detailed_tool_plan = await self.development_team_service.run_full_technical_build(high_level_prompt)
+            # The Finalizer is now our Architect. It converts the human plan to a tool plan.
+            tool_plan = await self.finalizer.create_tool_plan_from_prompt(finalizer_prompt_context)
 
-            if detailed_tool_plan is None:
-                raise RuntimeError("The development team failed to produce a detailed execution plan.")
+            if not tool_plan:
+                raise RuntimeError("The Finalizer failed to create an executable tool plan from the high-level steps.")
 
-            # Replace the high-level plan with the detailed, tool-based plan
-            self.mission_log_service.replace_all_tasks(detailed_tool_plan)
-            self.event_bus.emit("post_chat_message", PostChatMessage(sender="Conductor",
-                                                                     message="The detailed plan is complete. I am now executing the steps."))
+            self.mission_log_service.replace_all_tasks_with_tool_plan(tool_plan)
+            self._post_chat_message("Conductor", "Executable plan created. Beginning execution loop.")
 
-            mission_task_queue = [t for t in self.mission_log_service.get_tasks() if not t.get('done')]
-
-            while mission_task_queue:
-                task = mission_task_queue.pop(0)
+            # Execute the newly created tool-based plan
+            mission_task_queue = self.mission_log_service.get_tasks(done=False)
+            for task in mission_task_queue:
                 tool_call = task.get("tool_call")
-
-                self.log("info", f"Executing task: {task['description']}")
-                await asyncio.sleep(0.5)
+                self.event_bus.emit("agent_status_changed", "Conductor", f"Executing: {task['description']}",
+                                    "fa5s.cogs")
 
                 result = self.tool_runner_service.run_tool_by_dict(tool_call)
 
@@ -107,10 +99,11 @@ class ConductorService:
                              (isinstance(result, dict) and result.get("status") in ["failure", "error"])
 
                 if is_failure:
-                    failed_result = result
+                    self.event_bus.emit("execution_failed", str(result))
                     raise RuntimeError(f"Task '{task['description']}' failed.")
                 else:
                     self.mission_log_service.mark_task_as_done(task['id'])
+                await asyncio.sleep(0.5)
 
             mission_succeeded = True
             self.log("success", "Mission Accomplished! All tasks completed.")
@@ -119,15 +112,15 @@ class ConductorService:
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)
             self.event_bus.emit("agent_status_changed", "Conductor", f"Mission Failed: {e}", "fa5s.exclamation-circle")
-            if failed_result:
-                self.event_bus.emit("execution_failed", str(failed_result))
 
         finally:
             self.is_mission_active = False
             if mission_succeeded:
-                self.event_bus.emit("post_chat_message", PostChatMessage(sender="Aura",
-                                                                         message="Mission Accomplished! All tasks have been completed successfully."))
+                self._post_chat_message("Aura", "Mission Accomplished! All tasks have been completed successfully.")
             self.log("info", "Mission finished or aborted. Conductor is now idle.")
+
+    def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
+        self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "ConductorService", level, message)

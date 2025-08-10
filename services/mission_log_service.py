@@ -73,7 +73,7 @@ class MissionLogService:
                 logger.info(f"Successfully loaded Mission Log for '{self.project_manager.active_project_name}'")
             except (json.JSONDecodeError, IOError) as e:
                 logger.error(f"Failed to load or parse mission log at {log_path}: {e}. Starting fresh.")
-                self.tasks = [] # Ensure tasks are cleared on error
+                self.tasks = []  # Ensure tasks are cleared on error
         else:
             logger.info("No existing mission log found for this project. Starting fresh.")
 
@@ -100,7 +100,7 @@ class MissionLogService:
         """Marks a specific task as completed."""
         for task in self.tasks:
             if task.get('id') == task_id:
-                if not task.get('done'): # Only update if it's not already done
+                if not task.get('done'):  # Only update if it's not already done
                     task['done'] = True
                     self._save_and_notify()
                     logger.info(f"Marked task {task_id} as done.")
@@ -108,9 +108,12 @@ class MissionLogService:
         logger.warning(f"Attempted to mark non-existent task {task_id} as done.")
         return False
 
-    def get_tasks(self) -> List[Dict[str, Any]]:
-        """Returns a copy of the current tasks."""
-        return self.tasks.copy()
+    def get_tasks(self, done: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Returns a copy of the current tasks, optionally filtered by done status."""
+        tasks = self.tasks.copy()
+        if done is not None:
+            return [task for task in tasks if task.get('done') == done]
+        return tasks
 
     def clear_all_tasks(self):
         """Removes all tasks from the log."""
@@ -121,19 +124,32 @@ class MissionLogService:
         self._save_and_notify()
         logger.info("All tasks cleared from the Mission Log.")
 
-    def replace_all_tasks(self, new_task_definitions: List[Dict[str, Any]]):
-        """Atomically replaces all tasks with a new set."""
+    def replace_all_tasks_with_tool_plan(self, tool_plan: List[Dict[str, Any]]):
+        """Atomically replaces all tasks with a new, executable tool-based plan."""
         self.tasks = []
         self._next_task_id = 1
-        for task_def in new_task_definitions:
+
+        # Helper to create a human-readable summary
+        def _summarize_tool_call(tool_call: dict) -> str:
+            tool_name = tool_call.get('tool_name', 'unknown_tool')
+            args = tool_call.get('arguments', {})
+            summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
+            path = args.get('path') or args.get('source_path')
+            if path:
+                summary += f": '{Path(path).name}'"
+            elif 'dependency' in args:
+                summary += f": '{args['dependency']}'"
+            return summary
+
+        for tool_call in tool_plan:
             new_task = {
                 "id": self._next_task_id,
-                "description": task_def['description'],
+                "description": _summarize_tool_call(tool_call),
                 "done": False,
-                "tool_call": task_def.get('tool_call')
+                "tool_call": tool_call
             }
             self.tasks.append(new_task)
             self._next_task_id += 1
 
         self._save_and_notify()
-        logger.info(f"Mission Log replaced with {len(self.tasks)} new tasks.")
+        logger.info(f"Mission Log replaced with executable plan of {len(self.tasks)} steps.")
