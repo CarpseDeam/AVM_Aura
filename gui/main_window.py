@@ -20,7 +20,7 @@ class AuraMainWindow(QMainWindow):
     def __init__(self, event_bus: EventBus, project_root: Path):
         super().__init__()
         self.setWindowTitle("Aura - Command Deck")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 850, 800)
         self.event_bus = event_bus
 
         icon_path = project_root / "assets" / "Ava_icon.ico"
