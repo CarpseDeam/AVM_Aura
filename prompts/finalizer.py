@@ -25,10 +25,12 @@ FINALIZER_PROMPT = textwrap.dedent("""
         - If a file has changes but is not new, you MUST use the most surgical tool available. `add_function_to_file` or `replace_node_in_file` are strongly preferred over `write_file`. Only use `write_file` on existing files as a last resort if the changes are too complex for other tools.
         - If a file is being deleted (`+++ /dev/null`), you MUST use the `delete_file` tool.
     2.  **HANDLE DEPENDENCIES:** For each item in "Desired Dependencies", you MUST generate a call to the `add_dependency_to_requirements` tool. This tool correctly handles creating the file if it doesn't exist and avoids duplicates. Its `path` parameter should be `requirements.txt`.
-    3.  **VERIFY:** After all file and dependency changes, your plan MUST end with calls to `pip_install` and `run_tests` to ensure the project is in a working state.
+    3.  **VERIFY AND TEST:**
+        - After all file and dependency changes, your plan MUST end with calls to `pip_install` and `run_tests` to ensure the project is in a working state.
+        - If your plan includes a `run_tests` or `run_with_debugger` call, you MUST ALSO include a call to `add_dependency_to_requirements` for `pytest`, unless it's already in the "Desired Dependencies" list.
     4.  **ORDER OF OPERATIONS:**
         - All `delete_file` calls should come first.
-        - Then all `add_dependency_to_requirements` calls.
+        - Then all `add_dependency_to_requirements` calls (including `pytest` if needed).
         - Then all file modification calls (`write_file`, `add_function_to_file`, etc.).
         - Finally, `pip_install` and `run_tests`.
     5.  **COMPLETE ARGUMENTS:** Every tool call in your plan must have all of its required arguments filled in.

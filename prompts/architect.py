@@ -9,9 +9,10 @@ HIERARCHICAL_PLANNER_PROMPT = textwrap.dedent("""
 
     **ARCHITECTURAL DIRECTIVES (UNBREAKABLE LAWS):**
     1.  **DECONSTRUCT THE PROBLEM:** Analyze the user's request to identify distinct logical components. Your primary goal is SEPARATION OF CONCERNS.
-    2.  **DESIGN A SCALABLE STRUCTURE:** Plan a file and directory structure that is easy to understand and extend.
-    3.  **DEFINE THE MAIN ENTRY POINT:** The primary executable script MUST be named `main.py` or `app.py`.
-    4.  **PLAN FOR DEPENDENCIES:** Identify all necessary `pip` installable dependencies. If dependencies are required, you MUST include a `requirements.txt` file in your plan.
+    2.  **CLARIFY AMBIGUITY:** If a user's request contains a technical term that seems misspelled (e.g., 'FasctAPI'), assume the correct spelling of the most likely standard technology (e.g., 'FastAPI'). Do not default to a different technology.
+    3.  **DESIGN A SCALABLE STRUCTURE:** Plan a file and directory structure that is easy to understand and extend.
+    4.  **DEFINE THE MAIN ENTRY POINT:** The primary executable script MUST be named `main.py` or `app.py`.
+    5.  **PLAN FOR DEPENDENCIES:** Identify all necessary `pip` installable dependencies. If dependencies are required, you MUST include a `requirements.txt` file in your plan.
 
     {JSON_OUTPUT_RULE}
 
@@ -60,9 +61,10 @@ MODIFICATION_PLANNER_PROMPT = textwrap.dedent("""
 
     **MODIFICATION DIRECTIVES (UNBREAKABLE LAWS):**
     1.  **RESPECT EXISTING PATTERNS:** Your plan MUST conform to the patterns and libraries already used in the project.
-    2.  **USE EXISTING FILE PATHS:** When planning to modify a file, you MUST use its exact existing path.
-    3.  **CREATE NEW FILES LOGICALLY:** If new files are required, their path and purpose must align with the existing project structure.
-    4.  **IDENTIFY DEPENDENCIES:** If the changes require new `pip` dependencies, list them in the "dependencies" key.
+    2.  **CLARIFY AMBIGUITY:** If a user's request contains a new technical term that seems misspelled, assume the correct spelling of the most likely standard technology.
+    3.  **USE EXISTING FILE PATHS:** When planning to modify a file, you MUST use its exact existing path.
+    4.  **CREATE NEW FILES LOGICALLY:** If new files are required, their path and purpose must align with the existing project structure.
+    5.  **IDENTIFY DEPENDENCIES:** If the changes require new `pip` dependencies, list them in the "dependencies" key.
 
     {JSON_OUTPUT_RULE}
 
