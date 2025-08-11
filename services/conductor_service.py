@@ -67,6 +67,11 @@ class ConductorService:
                 current_task_desc = task_dict['description']
                 task_id = task_dict['id']
 
+                # Stop if mission was aborted externally
+                if not self.is_mission_active:
+                    self.log("info", "Mission was aborted. Halting execution.")
+                    return
+
                 # If the task is a pre-defined tool call (like indexing), execute it directly.
                 if task_dict.get('tool_call'):
                     self._post_chat_message("Conductor", f"Executing utility task: {current_task_desc}")
@@ -74,45 +79,30 @@ class ConductorService:
                     self.mission_log_service.mark_task_as_done(task_id)
                     continue
 
-                # Stop if mission was aborted externally
-                if not self.is_mission_active:
-                    self.log("info", "Mission was aborted. Halting execution.")
-                    return
-
                 self.event_bus.emit("agent_status_changed", "Conductor", f"Executing: {current_task_desc}", "fa5s.cogs")
 
-                # 1. Assemble the Mission Plan context
-                full_mission_plan = [t['description'] for t in self.mission_log_service.get_tasks()]
-
-                # 2. Delegate to Dev Team to get the single file modification
-                file_to_write = await self.development_team_service.run_coding_task(
-                    current_task=current_task_desc,
-                    full_mission_plan=full_mission_plan,
+                # 1. Delegate to Dev Team to get the correct tool call for the task
+                tool_call_to_execute = await self.development_team_service.run_coding_task(
+                    current_task=current_task_desc
                 )
 
-                if not file_to_write:
-                    raise RuntimeError(f"The Coder failed to generate code for task: '{current_task_desc}'")
+                if not tool_call_to_execute:
+                    raise RuntimeError(f"The Coder failed to generate a tool call for task: '{current_task_desc}'")
 
-                # 3. Execute the tool call
-                path, content = list(file_to_write.items())[0]
-                tool_call = {
-                    "tool_name": "write_file",
-                    "arguments": {"path": path, "content": content}
-                }
+                # 2. Execute the returned tool call
+                result = await self.tool_runner_service.run_tool_by_dict(tool_call_to_execute)
 
-                result = await self.tool_runner_service.run_tool_by_dict(tool_call)
-
-                is_failure = (isinstance(result, str) and "Error" in result)
+                is_failure = (isinstance(result, str) and result.lower().strip().startswith("error"))
                 if is_failure:
                     self.event_bus.emit("execution_failed", str(result))
-                    raise RuntimeError(f"Task '{current_task_desc}' failed during file write.")
+                    raise RuntimeError(f"Task '{current_task_desc}' failed during tool execution.")
                 else:
                     self.mission_log_service.mark_task_as_done(task_id)
                     self._post_chat_message("Conductor", f"Task completed: {current_task_desc}")
 
                 await asyncio.sleep(0.5)
 
-            # 4. Post-mission verification
+            # 3. Post-mission verification
             self._post_chat_message("Conductor", "All tasks completed. Running final verification steps.")
             self.event_bus.emit("agent_status_changed", "Conductor", "Verifying installation...", "fa5s.cogs")
             pip_result = await self.tool_runner_service.run_tool_by_dict({"tool_name": "pip_install", "arguments": {}})

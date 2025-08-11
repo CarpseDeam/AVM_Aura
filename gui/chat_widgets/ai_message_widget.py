@@ -1,7 +1,7 @@
 # gui/chat_widgets/ai_message_widget.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QSizePolicy
-from PySide6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics, QTextDocument, QTextOption
+from PySide6.QtCore import Qt, QPoint, QSize
 
 
 class AIMessageWidget(QFrame):
@@ -15,7 +15,9 @@ class AIMessageWidget(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setObjectName("AIMessageWidget")
         self.author = author.upper()
+        self.text = text
 
+        # This size policy is crucial for heightForWidth to work correctly
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QVBoxLayout(self)
@@ -27,88 +29,100 @@ class AIMessageWidget(QFrame):
         self.author_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.author_label.adjustSize()
 
-        self.message_label = QLabel(text)
+        # This invisible label helps the layout manager understand there's content
+        self.message_label = QLabel()
         self.message_label.setObjectName("AIMessageLabel")
         self.message_label.setWordWrap(True)
-        self.message_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.message_label.setVisible(False)  # We do our own drawing
 
         layout.addWidget(self.author_label, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.message_label)
 
         self._apply_stylesheet()
 
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        """Calculates the required height based on the text and a given width."""
+        margins = self.layout().contentsMargins()
+        # The available width for text is the widget's width minus horizontal margins.
+        text_width = width - margins.left() - margins.right()
+
+        # Use a QTextDocument to accurately measure wrapped text height
+        doc = QTextDocument()
+        doc.setDefaultFont(self.message_label.font())  # Use the label's font for consistency
+        doc.setPlainText(self.text)
+        doc.setTextWidth(text_width)
+
+        text_height = doc.size().height()
+        author_height = self.author_label.sizeHint().height()
+
+        # Total height is the sum of all components and layout spacing
+        return int(text_height + author_height + margins.top() + margins.bottom() + self.layout().spacing())
+
     def paintEvent(self, event):
+        """Custom painting to draw the box and the wrapped text."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # --- Style Definitions for each Agent ---
-        STYLES = {
-            "ARCHITECT": {"tl": "╔", "tr": "╗", "bl": "╚", "br": "╝", "h": "═", "v": "║"},
-            "CODER": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│", "flair": "<>"},
-            "TESTER": {"tl": "[", "tr": "]", "bl": "[", "br": "]", "h": "-", "v": "¦"},
-            "FINALIZER": {"tl": "╭", "tr": "╮", "bl": "╰", "br": "╯", "h": "─", "v": "│"},
-            "CONDUCTOR": {"tl": "╓", "tr": "╖", "bl": "╙", "br": "╜", "h": "─", "v": "║"},
-            "REVIEWER": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "·", "v": "│"},
-            "AURA": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│"},
-            "DEFAULT": {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|"},
-        }
-
-        style = STYLES.get(self.author, STYLES["DEFAULT"])
-
-        label_geom = self.author_label.geometry()
-        if label_geom.width() == 0 or not self.author_label.isVisible():
-            painter.fillRect(self.rect(), QColor("#0d0d0d"))
-            super().paintEvent(event)
-            return
+        # We need to call the superclass paintEvent to allow the child author_label to draw itself.
+        super().paintEvent(event)
 
         border_color = QColor("#FFB74D")
-        bg_color = QColor("#0d0d0d")
+        text_color = QColor("#d4d4d4")
 
-        painter.fillRect(self.rect(), bg_color)
-
+        # Set up a pen for drawing borders
         pen = QPen(border_color)
         pen.setWidth(1)
         painter.setPen(pen)
 
-        font = self.font()
-        painter.setFont(font)
-        fm = QFontMetrics(font)
-        char_h_offset = fm.ascent() / 2 - 2
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        author_geom = self.author_label.geometry()
 
-        rect = self.rect().adjusted(2, 2, -2, -2)
-        top_line_y = label_geom.center().y()
-        gap_start_x = label_geom.x() - 5
-        gap_end_x = label_geom.right() + 5
+        # The top line of our box should align with the center of the author label
+        top_line_y = author_geom.center().y()
 
-        # Draw box using styled characters
-        # Top line
-        painter.drawText(0, top_line_y, gap_start_x, fm.height(), Qt.AlignmentFlag.AlignRight, style['h'] * 50)
-        painter.drawText(gap_end_x, top_line_y, rect.width(), fm.height(), Qt.AlignmentFlag.AlignLeft, style['h'] * 50)
+        # --- Draw the Box ---
+        # Draw left part of top line
+        painter.drawLine(rect.left(), top_line_y, author_geom.left() - 5, top_line_y)
+        # Draw right part of top line
+        painter.drawLine(author_geom.right() + 5, top_line_y, rect.right(), top_line_y)
+        # Draw vertical and bottom lines
+        painter.drawLine(rect.left(), top_line_y, rect.left(), rect.bottom())
+        painter.drawLine(rect.right(), top_line_y, rect.right(), rect.bottom())
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
 
-        # Side and bottom lines
-        for y in range(top_line_y, rect.bottom(), fm.height()):
-            painter.drawText(rect.left() - 1, y + fm.height(), style['v'])
-            painter.drawText(rect.right() - 2, y + fm.height(), style['v'])
-        painter.drawText(0, rect.bottom(), rect.width(), fm.height(), Qt.AlignmentFlag.AlignHCenter, style['h'] * 100)
+        # --- Custom Text Drawing with Wrapping ---
+        painter.setPen(text_color)
 
-        # Draw corners
-        painter.drawText(QPoint(rect.left() - 1, top_line_y + char_h_offset), style['tl'])
-        painter.drawText(QPoint(rect.right() - 2, top_line_y + char_h_offset), style['tr'])
-        painter.drawText(QPoint(rect.left() - 1, rect.bottom() + char_h_offset), style['bl'])
-        painter.drawText(QPoint(rect.right() - 2, rect.bottom() + char_h_offset), style['br'])
+        # Define the rectangle where the text will be drawn.
+        text_rect = self.rect().adjusted(
+            self.layout().contentsMargins().left(),
+            author_geom.bottom() + self.layout().spacing(),  # Start below the author label
+            -self.layout().contentsMargins().right(),
+            -self.layout().contentsMargins().bottom()
+        )
 
-        # Draw special flair if it exists
-        if "flair" in style:
-            painter.drawText(QPoint(gap_start_x - fm.horizontalAdvance(style["flair"][0]), top_line_y + char_h_offset),
-                             style["flair"][0])
-            painter.drawText(QPoint(gap_end_x, top_line_y + char_h_offset), style["flair"][1])
+        # Use QTextDocument for robust word wrapping
+        doc = QTextDocument()
+        doc.setDefaultFont(self.message_label.font())
+        doc.setPlainText(self.text)
+        option = QTextOption(Qt.AlignmentFlag.AlignLeft)
+        option.setWrapMode(QTextOption.WrapMode.WordWrap)
+        doc.setDefaultTextOption(option)
+        doc.setTextWidth(text_rect.width())
 
-        super().paintEvent(event)
+        # Translate the painter to the top-left of our text area and draw
+        painter.save()
+        painter.translate(text_rect.topLeft())
+        doc.drawContents(painter)
+        painter.restore()
 
     def _apply_stylesheet(self):
         self.setStyleSheet("""
             #AIMessageWidget {
-                background-color: transparent;
+                background-color: #0d0d0d;
                 border: none;
             }
             #AuraAuthorLabel {
@@ -116,8 +130,5 @@ class AIMessageWidget(QFrame):
                 font-weight: bold;
                 background-color: #0d0d0d;
                 padding: 0 5px;
-            }
-            #AIMessageLabel {
-                color: #d4d4d4;
             }
         """)

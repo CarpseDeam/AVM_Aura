@@ -7,14 +7,15 @@ from event_bus import EventBus
 from core.llm_client import LLMClient
 from services.vector_context_service import VectorContextService
 from core.managers.project_manager import ProjectManager
+from foundry import FoundryManager
 from prompts import CODER_PROMPT
-from prompts.master_rules import JSON_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
+from prompts.master_rules import JSON_OUTPUT_RULE
 
 
 class CoderService:
     """
-    A specialized service responsible for generating code for a single task
-    by querying a vector database for relevant context and prompting an LLM.
+    A specialized service responsible for translating a task into a single,
+    executable tool call by prompting an LLM with RAG context.
     """
 
     def __init__(
@@ -23,11 +24,13 @@ class CoderService:
         llm_client: LLMClient,
         vector_context_service: VectorContextService,
         project_manager: ProjectManager,
+        foundry_manager: FoundryManager,
     ):
         self.event_bus = event_bus
         self.llm_client = llm_client
         self.vector_context_service = vector_context_service
         self.project_manager = project_manager
+        self.foundry_manager = foundry_manager
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "CoderService", level, message)
@@ -41,46 +44,41 @@ class CoderService:
     async def run_coding_task(
         self,
         current_task: str,
-        full_mission_plan: List[str],
     ) -> Optional[Dict[str, str]]:
         """
-        Executes a single coding task by querying the vector DB for context
-        and then invoking the Coder agent.
+        Translates a single task into a tool call using an LLM with RAG context.
         """
-        self.log("info", f"Executing coding task with RAG context: {current_task}")
-        self.event_bus.emit("agent_status_changed", "Coder", f"Finding context for: {current_task}...", "fa5s.search")
+        self.log("info", f"Translating task to tool call: {current_task}")
+        self.event_bus.emit("agent_status_changed", "Coder", f"Planning action for: {current_task}...", "fa5s.cogs")
 
-        # 1. Query the vector database to get relevant code snippets.
+        # 1. Get relevant context using RAG
+        relevant_context = "No existing code snippets were found. You are likely creating a new file or starting a new project."
         try:
-            if not self.vector_context_service:
-                raise ValueError("VectorContextService is not available.")
-            retrieved_chunks = self.vector_context_service.query(current_task, n_results=5)
-            if not retrieved_chunks:
-                self.log("warning", "No relevant code found in vector DB. The Coder will rely on file names only.")
-                relevant_context = "No existing code snippets were found to be relevant. You may need to create a new file."
+            if self.vector_context_service and self.vector_context_service.collection.count() > 0:
+                retrieved_chunks = self.vector_context_service.query(current_task, n_results=5)
+                if retrieved_chunks:
+                    context_parts = ["Here are the most relevant code snippets based on the task:\n"]
+                    for chunk in retrieved_chunks:
+                        metadata = chunk['metadata']
+                        source_info = f"From file: {metadata.get('file_path', 'N/A')} ({metadata.get('node_type', 'N/A')}: {metadata.get('node_name', 'N/A')})"
+                        context_parts.append(f"```python\n# {source_info}\n{chunk['document']}\n```")
+                    relevant_context = "\n\n".join(context_parts)
             else:
-                context_parts = ["Here are the most relevant code snippets based on the task:\n"]
-                for chunk in retrieved_chunks:
-                    metadata = chunk['metadata']
-                    source_info = f"From file: {metadata.get('file_path', 'N/A')} ({metadata.get('node_type', 'N/A')}: {metadata.get('node_name', 'N/A')})"
-                    context_parts.append(f"```python\n# {source_info}\n{chunk['document']}\n```")
-                relevant_context = "\n\n".join(context_parts)
+                self.log("warning", "Vector database is empty. Proceeding without RAG context.")
         except Exception as e:
             self.log("error", f"Failed to query vector context: {e}")
             relevant_context = f"Error: Could not retrieve context from the vector database. Details: {e}"
 
-        # 2. Get the file tree to provide structural context.
-        file_tree = self.project_manager.get_project_files().keys()
-        file_structure = "\n".join(sorted(list(file_tree)))
+        # 2. Get the file tree and available tools
+        file_structure = "\n".join(sorted(list(self.project_manager.get_project_files().keys()))) or "The project is currently empty."
+        available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
 
-        # 3. Update the prompt to use the new, focused context.
+        # 3. Build the prompt
         prompt = CODER_PROMPT.format(
             current_task=current_task,
-            full_mission_plan="\n".join(f"- {task}" for task in full_mission_plan),
-            relevant_code_snippets=relevant_context,
+            available_tools=available_tools,
             file_structure=file_structure,
-            TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
-            DOCSTRING_RULE=DOCSTRING_RULE.strip(),
+            relevant_code_snippets=relevant_context,
             JSON_OUTPUT_RULE=JSON_OUTPUT_RULE.strip()
         )
 
@@ -92,14 +90,10 @@ class CoderService:
         response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
 
         try:
-            file_data = self._parse_json_response(response_str)
-            if not isinstance(file_data, dict) or len(file_data) != 1:
-                raise ValueError("Coder response must be a JSON object with a single file path key.")
-
-            path, content = list(file_data.items())[0]
-            self.event_bus.emit("stream_code_chunk", path, content)
-            return file_data
-
+            tool_call = self._parse_json_response(response_str)
+            if "tool_name" not in tool_call or "arguments" not in tool_call:
+                raise ValueError("Coder response must be a JSON object with 'tool_name' and 'arguments' keys.")
+            return tool_call
         except (ValueError, json.JSONDecodeError) as e:
             self.log("error", f"Coder generation failure. Raw response: {response_str}. Error: {e}")
             return None

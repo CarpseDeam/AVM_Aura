@@ -61,6 +61,8 @@ class MissionLogWindow(QMainWindow):
         self.scroll_content_layout = QVBoxLayout(scroll_content_widget)
         self.scroll_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+        # *** THE FIX IS HERE: ***
+        # We create a container widget for the pending tasks layout.
         self.pending_tasks_container = QWidget()
         self.pending_tasks_layout = QVBoxLayout(self.pending_tasks_container)
         self.pending_tasks_layout.setContentsMargins(0, 0, 0, 0)

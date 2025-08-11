@@ -34,6 +34,7 @@ class DevelopmentTeamService:
             self.llm_client,
             self.service_manager.vector_context_service,
             self.project_manager,
+            self.service_manager.foundry_manager,
         )
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
@@ -79,11 +80,10 @@ class DevelopmentTeamService:
 
     async def run_coding_task(
         self,
-        current_task: str,
-        full_mission_plan: List[str]
+        current_task: str
     ) -> Optional[Dict[str, str]]:
         """Delegates the coding task to the specialized CoderService."""
-        return await self.coder.run_coding_task(current_task, full_mission_plan)
+        return await self.coder.run_coding_task(current_task)
 
     async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
         self.log("info", "Review and Fix phase initiated.")

@@ -113,13 +113,13 @@ class GUIController(QObject):
                           total: Optional[int]):
         """This slot is guaranteed to run on the main UI thread."""
         art_map = {
-            "AURA":      {"logo": "( O )", "name": "AURA"},
-            "CONDUCTOR": {"logo": "⚙",     "name": "CONDUCTOR"},
-            "CODER":     {"logo": "< >",   "name": "CODER"},
-            "TESTER":    {"logo": "✓",     "name": "TESTER"},
-            "REVIEWER":  {"logo": "⚲",     "name": "REVIEWER"},
-            "ARCHITECT": {"logo": "¶",     "name": "ARCHITECT"},
-            "FINALIZER": {"logo": "§",     "name": "FINALIZER"},
+            "AURA": {"logo": "( O )", "name": "AURA"},
+            "CONDUCTOR": {"logo": "⚙", "name": "CONDUCTOR"},
+            "CODER": {"logo": "< >", "name": "CODER"},
+            "TESTER": {"logo": "✓", "name": "TESTER"},
+            "REVIEWER": {"logo": "⚲", "name": "REVIEWER"},
+            "ARCHITECT": {"logo": "¶", "name": "ARCHITECT"},
+            "FINALIZER": {"logo": "§", "name": "FINALIZER"},
         }
         default_art = {"logo": "*", "name": "SYSTEM"}
 
@@ -130,11 +130,15 @@ class GUIController(QObject):
             self.current_activity_widget = AgentActivityWidget()
             self._insert_widget(self.current_activity_widget)
 
-        self.current_activity_widget.set_agent_status(
-            logo=agent_art["logo"],
-            agent_name=agent_art["name"],
-            activity=activity
-        )
+        if animate:
+            pulsing_text = activity.replace("...", "")
+            self.current_activity_widget.start_pulsing(pulsing_text)
+        else:
+            self.current_activity_widget.set_agent_status(
+                logo=agent_art["logo"],
+                agent_name=agent_art["name"],
+                activity=activity
+            )
 
     def wire_up_command_handler(self, handler: CommandHandler):
         self.command_handler = handler
@@ -191,7 +195,6 @@ class GUIController(QObject):
         # Add the widget with explicit left alignment to override layout centering.
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, boot_widget, 0, Qt.AlignmentFlag.AlignLeft)
         QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(boot_widget))
-
 
     @Slot()
     def _on_workflow_finished(self, event=None):
