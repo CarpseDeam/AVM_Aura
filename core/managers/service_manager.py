@@ -65,6 +65,15 @@ class ServiceManager:
         # Now that we have the new service, re-initialize the ToolRunnerService
         # to ensure it has the correct (and latest) instance.
         self._initialize_tool_runner()
+
+        # Update the conductor with the new tool runner that has the vector service
+        if self.conductor_service:
+            self.conductor_service.tool_runner_service = self.tool_runner_service
+
+        # Update the dev team with the new vector service
+        if self.development_team_service and self.development_team_service.coder:
+            self.development_team_service.coder.vector_context_service = self.vector_context_service
+
         self.log_to_event_bus("success", "Project-specific services initialized.")
 
     def log_to_event_bus(self, level: str, message: str):

@@ -15,9 +15,14 @@ CODER_PROMPT = textwrap.dedent("""
         {full_mission_plan}
         ```
 
-    3.  **EXISTING FILE CONTEXT:** The full source code for all files currently in the project. Use this to understand the existing architecture and to correctly modify files. If you are modifying a file, its entire new content must be returned.
-        ```json
-        {full_file_context}
+    3.  **PROJECT FILE STRUCTURE:** A list of all files currently in the project. Use this to understand the project layout and decide on correct file paths.
+        ```
+        {file_structure}
+        ```
+
+    4.  **RELEVANT CODE SNIPPETS:** These are the most relevant existing functions or classes from the project, based on the current task. Use these to understand how to integrate your new code. If this section is empty, you are likely creating the first file or a completely new feature.
+        ```
+        {relevant_code_snippets}
         ```
 
     **YOUR DIRECTIVES (UNBREAKABLE LAWS):**

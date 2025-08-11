@@ -79,7 +79,25 @@ class MissionLogService:
 
         self._save_and_notify()
 
-    def add_task(self, description: str, tool_call: Optional[Dict] = None) -> Dict[str, Any]:
+    def set_initial_plan(self, plan_steps: List[str]):
+        """Clears all tasks and sets a new plan, including the initial indexing task."""
+        self.tasks = []
+        self._next_task_id = 1
+
+        # The first step is to index the project so the Coder has context.
+        self.add_task(
+            description="Index the project to build a contextual map.",
+            tool_call={"tool_name": "index_project_context", "arguments": {"path": "."}},
+            notify=False  # Don't notify for this one yet
+        )
+
+        for step in plan_steps:
+            self.add_task(description=step, notify=False)  # Add all steps without notifying
+
+        self._save_and_notify()  # Notify only once after all tasks are added
+        logger.info(f"Initial plan with {len(self.tasks)} steps has been set.")
+
+    def add_task(self, description: str, tool_call: Optional[Dict] = None, notify: bool = True) -> Dict[str, Any]:
         """Adds a new task to the mission log, optionally with its tool call."""
         if not description:
             raise ValueError("Task description cannot be empty.")
@@ -92,7 +110,8 @@ class MissionLogService:
         }
         self.tasks.append(new_task)
         self._next_task_id += 1
-        self._save_and_notify()
+        if notify:
+            self._save_and_notify()
         logger.info(f"Added task {new_task['id']}: '{description}'")
         return new_task
 

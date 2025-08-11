@@ -59,7 +59,7 @@ class WindowManager:
 
     def handle_code_stream(self, filename: str, chunk: str):
         """Handles a stream_code_chunk event by updating the code viewer."""
-        if not self.code_viewer:
+        if not self.code_viewer or not self.code_viewer.editor_manager:
             return
 
         # Make sure the code viewer is visible
@@ -71,7 +71,7 @@ class WindowManager:
         if self.project_manager and self.project_manager.active_project_path:
             full_path_str = str(self.project_manager.active_project_path / filename)
 
-        self.code_viewer.stream_to_tab(full_path_str, chunk)
+        self.code_viewer.editor_manager.stream_to_tab(full_path_str, chunk)
 
     def handle_app_state_change(self, new_state: AppState, project_name: str | None):
         """

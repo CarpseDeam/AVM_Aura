@@ -6,10 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
-from prompts import CODER_PROMPT
-from prompts.master_rules import JSON_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
-from prompts.creative import AURA_PLANNER_PROMPT, CREATIVE_ASSISTANT_PROMPT
-from services.agents import ReviewerService
+from prompts.creative import AURA_PLANNER_PROMPT
+from services.agents import ReviewerService, CoderService
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -18,8 +16,8 @@ if TYPE_CHECKING:
 
 class DevelopmentTeamService:
     """
-    Orchestrates the main AI workflows: high-level planning and self-correction.
-    The main build process is now handled by the ConductorService.
+    Orchestrates the main AI workflows by delegating to specialized services
+    like the CoderService and ReviewerService.
     """
 
     def __init__(self, event_bus: EventBus, service_manager: "ServiceManager"):
@@ -28,7 +26,15 @@ class DevelopmentTeamService:
         self.llm_client = service_manager.get_llm_client()
         self.project_manager = service_manager.get_project_manager()
         self.mission_log_service = service_manager.mission_log_service
+
+        # Instantiate specialist services
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
+        self.coder = CoderService(
+            self.event_bus,
+            self.llm_client,
+            self.service_manager.vector_context_service,
+            self.project_manager,
+        )
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
@@ -61,9 +67,7 @@ class DevelopmentTeamService:
             if not plan_steps:
                 raise ValueError("Aura's plan was empty or malformed.")
 
-            self.mission_log_service.clear_all_tasks()
-            for step in plan_steps:
-                self.mission_log_service.add_task(description=step)
+            self.mission_log_service.set_initial_plan(plan_steps)
 
             self._post_chat_message("Aura",
                                     "I've created a high-level plan. Please review it in the 'Agent TODO' list. When you're ready, click 'Dispatch Aura' to begin the build.")
@@ -76,47 +80,10 @@ class DevelopmentTeamService:
     async def run_coding_task(
         self,
         current_task: str,
-        full_mission_plan: List[str],
-        full_file_context: Dict[str, str]
+        full_mission_plan: List[str]
     ) -> Optional[Dict[str, str]]:
-        """
-        Executes a single coding task by invoking the Coder agent with full context.
-        The Coder is expected to determine the file to change and provide its complete new content.
-        """
-        self.log("info", f"Executing coding task: {current_task}")
-        self.event_bus.emit("agent_status_changed", "Coder", f"Working on: {current_task}...", "fa5s.keyboard")
-
-        prompt = CODER_PROMPT.format(
-            current_task=current_task,
-            full_mission_plan="\n".join(f"- {task}" for task in full_mission_plan),
-            full_file_context=json.dumps(full_file_context, indent=2),
-            TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
-            DOCSTRING_RULE=DOCSTRING_RULE.strip(),
-            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE.strip()
-        )
-
-        provider, model = self.llm_client.get_model_for_role("coder")
-        if not provider or not model:
-            self.handle_error("Coder", "No 'coder' model configured.")
-            return None
-
-        response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
-
-        try:
-            file_data = self._parse_json_response(response_str)
-            if not isinstance(file_data, dict) or len(file_data) != 1:
-                raise ValueError("Coder response must be a JSON object with a single file path key.")
-
-            path, content = list(file_data.items())[0]
-            # Stream the whole content at once for display, since we get it all at once from the coder.
-            self.event_bus.emit("stream_code_chunk", path, content)
-
-            return file_data
-
-        except (ValueError, json.JSONDecodeError) as e:
-            self.handle_error("Coder", f"Failed to produce valid file code: {e}. Raw response logged for debugging.")
-            self.log("error", f"Coder generation failure. Raw response: {response_str}")
-            return None
+        """Delegates the coding task to the specialized CoderService."""
+        return await self.coder.run_coding_task(current_task, full_mission_plan)
 
     async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
         self.log("info", "Review and Fix phase initiated.")
@@ -139,7 +106,7 @@ class DevelopmentTeamService:
         self._post_chat_message("Reviewer",
                                 "I've analyzed the error and proposed a fix. I will now create a new execution plan to apply it.")
 
-        # Convert the fix into a simple tool plan directly, removing the Finalizer dependency
+        # Convert the fix into a simple tool plan directly
         fix_tool_plan = []
         for path, content in corrected_files.items():
             fix_tool_plan.append({
@@ -155,26 +122,6 @@ class DevelopmentTeamService:
         self._post_chat_message("Conductor",
                                 "A new plan to apply the fix has been created. Re-engaging autonomous execution.")
         self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
-
-    async def run_chat_workflow(self, user_idea: str, conversation_history: list, image_bytes: Optional[bytes],
-                                image_media_type: Optional[str]):
-        """Runs the 'Aura' creative assistant persona for general conversation."""
-        self.log("info", f"Aura chat workflow processing: '{user_idea[:50]}...'")
-        self.event_bus.emit("agent_status_changed", "Aura", "Thinking...", "fa5s.lightbulb")
-        aura_prompt = CREATIVE_ASSISTANT_PROMPT.format(
-            conversation_history="\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history]),
-            user_idea=user_idea
-        )
-        provider, model = self.llm_client.get_model_for_role("chat")
-        if not provider or not model:
-            self.event_bus.emit("streaming_chunk", "Sorry, no 'chat' model is configured for Aura.")
-            return
-
-        response_str = "".join([chunk async for chunk in
-                                self.llm_client.stream_chat(provider, model, aura_prompt, "chat", image_bytes,
-                                                            image_media_type, history=conversation_history)])
-        self._post_chat_message("Aura", response_str)
-        self.event_bus.emit("ai_workflow_finished")
 
     def handle_error(self, agent: str, error_msg: str):
         self.log("error", f"{agent} failed: {error_msg}")

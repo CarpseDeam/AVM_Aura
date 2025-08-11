@@ -44,8 +44,6 @@ class ConductorService:
             return
 
         self.is_mission_active = True
-        # This is the corrected way to run a background async task
-        # without creating a new thread or a new event loop.
         asyncio.create_task(self.execute_mission())
 
     async def execute_mission(self):
@@ -69,6 +67,13 @@ class ConductorService:
                 current_task_desc = task_dict['description']
                 task_id = task_dict['id']
 
+                # If the task is a pre-defined tool call (like indexing), execute it directly.
+                if task_dict.get('tool_call'):
+                    self._post_chat_message("Conductor", f"Executing utility task: {current_task_desc}")
+                    await self.tool_runner_service.run_tool_by_dict(task_dict['tool_call'])
+                    self.mission_log_service.mark_task_as_done(task_id)
+                    continue
+
                 # Stop if mission was aborted externally
                 if not self.is_mission_active:
                     self.log("info", "Mission was aborted. Halting execution.")
@@ -76,15 +81,13 @@ class ConductorService:
 
                 self.event_bus.emit("agent_status_changed", "Conductor", f"Executing: {current_task_desc}", "fa5s.cogs")
 
-                # 1. Assemble the Context Bundle
+                # 1. Assemble the Mission Plan context
                 full_mission_plan = [t['description'] for t in self.mission_log_service.get_tasks()]
-                project_files = self.development_team_service.project_manager.get_project_files()
 
                 # 2. Delegate to Dev Team to get the single file modification
                 file_to_write = await self.development_team_service.run_coding_task(
                     current_task=current_task_desc,
                     full_mission_plan=full_mission_plan,
-                    full_file_context=project_files
                 )
 
                 if not file_to_write:
@@ -122,7 +125,6 @@ class ConductorService:
             self._post_chat_message("Conductor", f"Test result: {test_summary}")
 
             if test_result.get("status") in ["failure", "error"]:
-                 # THIS IS THE KEY CHANGE: Pass the full output, not just a generic message
                  error_details = test_result.get('full_output', 'No detailed output available from test run.')
                  self.event_bus.emit("execution_failed", error_details)
                  raise RuntimeError("Tests failed after mission completion.")
