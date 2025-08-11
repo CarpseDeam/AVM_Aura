@@ -1,6 +1,7 @@
 # services/mission_log_service.py
 import logging
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
@@ -40,9 +41,6 @@ class MissionLogService:
 
     def _save_and_notify(self):
         """Saves the current list of tasks to disk and notifies the UI."""
-        # *** THE FIX IS HERE: ***
-        # We always notify the UI of the in-memory change, ensuring responsiveness.
-        # The file-saving operation is for persistence.
         self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.get_tasks()))
         logger.debug(f"UI notified of mission log update. Task count: {len(self.tasks)}")
 
@@ -80,7 +78,6 @@ class MissionLogService:
         else:
             logger.info("No existing mission log found for this project. Starting fresh.")
 
-        # Always notify after loading/clearing to ensure UI is in sync.
         self._save_and_notify()
 
     def set_initial_plan(self, plan_steps: List[str]):
@@ -101,7 +98,10 @@ class MissionLogService:
         logger.info(f"Initial plan with {len(self.tasks)} steps has been set.")
 
     def add_task(self, description: str, tool_call: Optional[Dict] = None, notify: bool = True) -> Dict[str, Any]:
-        """Adds a new task to the mission log, optionally with its tool call."""
+        """
+        Adds a new task. If the task is for creating a Python file, it
+        automatically adds a follow-up task to generate tests.
+        """
         if not description:
             raise ValueError("Task description cannot be empty.")
 
@@ -113,9 +113,33 @@ class MissionLogService:
         }
         self.tasks.append(new_task)
         self._next_task_id += 1
+        logger.info(f"Added task {new_task['id']}: '{description}'")
+
+        # --- AUTOMATIC TEST GENERATION RULE (HARDENED) ---
+        # If the task is for creating a .py file AND is NOT a test-generation task itself.
+        match = re.search(r"['`\"](.+?\.py)['`\"]", description, re.IGNORECASE)
+        is_test_generation_task = 'test' in description.lower()
+
+        if match and not is_test_generation_task:
+            py_filename = match.group(1)
+            test_task_desc = f"Generate tests for {py_filename}"
+            test_task = {
+                "id": self._next_task_id,
+                "description": test_task_desc,
+                "done": False,
+                "tool_call": {
+                    "tool_name": "generate_tests_for_file",
+                    "arguments": {"path": py_filename}
+                }
+            }
+            self.tasks.append(test_task)
+            self._next_task_id += 1
+            logger.info(f"AUTO-TASK: Added task {test_task['id']}: '{test_task_desc}'")
+        # --- END OF RULE ---
+
         if notify:
             self._save_and_notify()
-        logger.info(f"Added task {new_task['id']}: '{description}'")
+
         return new_task
 
     def mark_task_as_done(self, task_id: int) -> bool:
@@ -158,11 +182,12 @@ class MissionLogService:
                 summary += f": '{args['dependency']}'"
             return summary
 
+        # Use the main add_task method so the auto-test rule still applies to fixes
         for tool_call in tool_plan:
             self.add_task(
                 description=_summarize_tool_call(tool_call),
                 tool_call=tool_call,
-                notify=False
+                notify=False # Delay notification until all tasks are added
             )
 
         self._save_and_notify()

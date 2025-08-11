@@ -13,6 +13,7 @@ from gui.mission_log_window import MissionLogWindow
 
 from event_bus import EventBus
 from core.app_state import AppState
+from events import StreamCodeChunk
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
@@ -57,7 +58,7 @@ class WindowManager:
 
         print("[WindowManager] Windows initialized")
 
-    def handle_code_stream(self, filename: str, chunk: str):
+    def handle_code_stream(self, event: StreamCodeChunk):
         """Handles a stream_code_chunk event by updating the code viewer."""
         if not self.code_viewer or not self.code_viewer.editor_manager:
             return
@@ -67,11 +68,15 @@ class WindowManager:
             self.code_viewer.show_window()
 
         # We need to resolve the path relative to the active project
-        full_path_str = filename
+        full_path_str = event.filename
         if self.project_manager and self.project_manager.active_project_path:
-            full_path_str = str(self.project_manager.active_project_path / filename)
+            # Handle both relative and absolute paths coming in
+            path_obj = Path(event.filename)
+            if not path_obj.is_absolute():
+                full_path_str = str(self.project_manager.active_project_path / event.filename)
 
-        self.code_viewer.editor_manager.stream_to_tab(full_path_str, chunk)
+        self.code_viewer.editor_manager.stream_to_tab(full_path_str, event.chunk, getattr(event, 'is_first_chunk', False))
+
 
     def handle_app_state_change(self, new_state: AppState, project_name: str | None):
         """

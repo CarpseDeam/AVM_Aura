@@ -26,5 +26,10 @@ python-dotenv
 aiohttp
 
 
+# --- Professional Testing & QA Suite ---
 python-lsp-server[all]
-pytest
+pytest          # The core testing framework
+pytest-mock     # For creating mock objects (essential for service testing)
+pytest-asyncio  # For running async tests correctly
+pytest-cov      # For measuring test coverage
+ruff            # Modern, high-performance linter and code formatter

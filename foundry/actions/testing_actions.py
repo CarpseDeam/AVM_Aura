@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from event_bus import EventBus
 from prompts.tester import TESTER_PROMPT
 from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
 from foundry.actions.file_system_actions import write_file
@@ -25,7 +26,7 @@ def _robustly_clean_llm_output(content: str) -> str:
     return content
 
 
-async def generate_tests_for_file(path: str, project_manager: "ProjectManager", llm_client: "LLMClient") -> str:
+async def generate_tests_for_file(path: str, project_manager: "ProjectManager", llm_client: "LLMClient", event_bus: EventBus) -> str:
     """
     Reads a source file, uses an LLM to generate pytest tests, and writes the tests to a new file.
     """
@@ -74,7 +75,7 @@ async def generate_tests_for_file(path: str, project_manager: "ProjectManager", 
         return "Error: Test generation resulted in empty code."
 
     # Write the generated test file
-    write_result = write_file(str(test_filepath), cleaned_code)
+    write_result = await write_file(str(test_filepath), cleaned_code, event_bus)
     if "Error" in write_result:
         return f"Error saving generated test file: {write_result}"
 

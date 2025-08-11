@@ -120,10 +120,12 @@ class FoundryManager:
 
                     module = importlib.import_module(module_name)
                     for name, func in inspect.getmembers(module, inspect.isfunction):
-                        if name in self._actions:
-                            logger.warning(f"Action function '{name}' is being overwritten by module '{module_name}'.")
-                        self._actions[name] = func
-                        logger.debug(f"Registered action function: {name} from {file_path.name}")
+                        # Only register the function if it was DEFINED in this module
+                        if func.__module__ == module_name:
+                            if name in self._actions:
+                                logger.warning(f"Action function '{name}' is being overwritten by module '{module_name}'.")
+                            self._actions[name] = func
+                            logger.debug(f"Registered action function: {name} from {file_path.name}")
                 except ImportError as e:
                     logger.error(f"Failed to import action module {module_name}: {e}", exc_info=True)
                 except Exception as e:

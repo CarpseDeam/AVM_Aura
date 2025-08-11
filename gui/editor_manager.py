@@ -66,7 +66,7 @@ class EditorManager:
             editor.animate_set_content(content)
             logger.info(f"Created new editor tab for: {norm_path}")
 
-    def stream_to_tab(self, path_str: str, chunk: str):
+    def stream_to_tab(self, path_str: str, chunk: str, is_first_chunk: bool = False):
         """Finds or creates a tab and streams a chunk of content to it."""
         norm_path = str(Path(path_str).resolve())
 
@@ -88,8 +88,11 @@ class EditorManager:
             # Prepare the editor for the new content stream
             editor.start_streaming()
 
-        # Append the chunk to the correct editor
         editor = self.editors[norm_path]
+        if is_first_chunk:
+            editor.start_streaming()
+
+        # Append the chunk to the correct editor
         editor.append_stream_chunk(chunk)
 
     def _update_tab_title(self, norm_path_str: str):

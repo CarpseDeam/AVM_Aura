@@ -3,12 +3,13 @@ from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
 import inspect
 import asyncio
+import copy
 
 from event_bus import EventBus
 from foundry import FoundryManager, BlueprintInvocation
 from services.mission_log_service import MissionLogService
 from services.vector_context_service import VectorContextService
-from events import ToolCallInitiated, ToolCallCompleted
+from events import ToolCallInitiated, ToolCallCompleted, RefreshFileTree
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager, ProjectContext
@@ -75,7 +76,6 @@ class ToolRunnerService:
         """Executes a single blueprint invocation."""
         blueprint = invocation.blueprint
         action_id = blueprint.id
-        print(f"▶️  Executing: {action_id} with params {invocation.parameters}")
 
         action_function = self.foundry_manager.get_action(blueprint.action_function_name)
         if not action_function:
@@ -83,65 +83,101 @@ class ToolRunnerService:
             print(error_msg)
             return error_msg
 
+        # Prepare parameters for ACTUAL EXECUTION (always with absolute paths)
+        execution_params = self._prepare_parameters(action_function, invocation.parameters)
+
+        # Prepare separate parameters for DISPLAY (with relative paths)
+        display_params = self._create_display_params(execution_params)
+
+        print(f"▶️  Executing: {action_id} with params {display_params}")
+
         widget_id = id(invocation)
         self.event_bus.emit(
             "tool_call_initiated",
-            ToolCallInitiated(widget_id, action_id, invocation.parameters)
+            ToolCallInitiated(widget_id, action_id, display_params)
         )
         await asyncio.sleep(0.1)
 
+        result = None
+        status = "FAILURE"
         try:
-            prepared_params = self._prepare_parameters(action_function, invocation.parameters)
-
             # Support both async and sync actions
             if inspect.iscoroutinefunction(action_function):
-                result = await action_function(**prepared_params)
+                result = await action_function(**execution_params)
             else:
-                result = action_function(**prepared_params)
+                result = action_function(**execution_params)
 
             status = "FAILURE" if isinstance(result, str) and result.strip().lower().startswith("error") else "SUCCESS"
 
+            if status == "SUCCESS":
+                self.event_bus.emit("refresh_file_tree", RefreshFileTree())
+
             print(f"✅ Result from {action_id}: {result}")
-            self.event_bus.emit(
-                "tool_call_completed",
-                ToolCallCompleted(widget_id, status, str(result))
-            )
             return result
 
         except Exception as e:
             logger.exception("An exception occurred while executing blueprint '%s'.", action_id)
-            error_msg = f"❌ Error executing Blueprint '{action_id}': {e}"
-            print(error_msg)
+            result = f"❌ Error executing Blueprint '{action_id}': {e}"
+            print(result)
+            return result
+        finally:
             self.event_bus.emit(
                 "tool_call_completed",
-                ToolCallCompleted(widget_id, "FAILURE", error_msg)
+                ToolCallCompleted(widget_id, status, str(result))
             )
-            return error_msg
 
     def _prepare_parameters(self, action_function: callable, action_params: dict) -> dict:
         """
-        Resolves file paths (including defaults) and injects necessary services.
+        Prepares parameters for EXECUTION.
+        It resolves all file paths to ABSOLUTE paths to ensure sandbox safety.
+        It injects necessary services.
         """
-        resolved_params = action_params.copy()
+        execution_params = action_params.copy()
         base_path: Optional[Path] = self.project_manager.active_project_path
         sig = inspect.signature(action_function)
-
         service_map = self._get_service_map()
 
         if base_path:
             for key in self.PATH_PARAM_KEYS:
-                if key in sig.parameters:
-                    relative_path = action_params.get(key, sig.parameters[key].default)
-                    if isinstance(relative_path, str) and relative_path:
-                        if not Path(relative_path).is_absolute():
-                            resolved_path = (base_path / relative_path).resolve()
-                            resolved_params[key] = str(resolved_path)
+                if key in sig.parameters and key in execution_params:
+                    relative_path_str = execution_params[key]
+                    if isinstance(relative_path_str, str) and relative_path_str:
+                        path_obj = Path(relative_path_str)
+                        if not path_obj.is_absolute():
+                            resolved_path = (base_path / path_obj).resolve()
+                            execution_params[key] = str(resolved_path)
 
-        for param_name, param in sig.parameters.items():
+        for param_name in sig.parameters:
             if param_name in service_map:
                 if service_map[param_name] is not None:
-                    resolved_params[param_name] = service_map[param_name]
+                    execution_params[param_name] = service_map[param_name]
             elif param_name == 'project_context':
-                resolved_params['project_context'] = self.project_manager.active_project_context
+                execution_params['project_context'] = self.project_manager.active_project_context
 
-        return resolved_params
+        return execution_params
+
+    def _create_display_params(self, execution_params: dict) -> dict:
+        """
+        Creates a copy of parameters for display purposes, making paths relative.
+        """
+        display_params = copy.deepcopy(execution_params)
+        base_path = self.project_manager.active_project_path
+
+        # Remove injected services from the display version
+        service_keys = self._get_service_map().keys()
+        for key in list(display_params.keys()):  # Use list to allow removal during iteration
+            if key in service_keys or key == 'project_context':
+                del display_params[key]
+
+        if base_path:
+            for key in self.PATH_PARAM_KEYS:
+                if key in display_params and isinstance(display_params[key], str):
+                    try:
+                        abs_path = Path(display_params[key])
+                        if abs_path.is_absolute():
+                            display_params[key] = str(abs_path.relative_to(base_path))
+                    except ValueError:
+                        # Path is not within the project, leave it as absolute for clarity
+                        pass
+
+        return display_params

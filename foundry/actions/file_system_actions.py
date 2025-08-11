@@ -6,16 +6,50 @@ resolved to absolute paths by the ExecutorService before being passed in.
 """
 import logging
 import shutil
+import asyncio
 from pathlib import Path
+from event_bus import EventBus
+from events import StreamCodeChunk
+from core.managers import ProjectManager
 
 logger = logging.getLogger(__name__)
 
 
-def write_file(path: str, content: str) -> str:
-    """Writes content to a specified file, creating directories if necessary."""
+async def write_file(path: str, content: str, event_bus: EventBus, project_manager: ProjectManager) -> str:
+    """
+    Writes content to a specified file, creating directories if necessary.
+    This version first streams the content to the GUI before writing.
+    """
     try:
-        logger.info(f"Attempting to write to file: {path}")
+        # --- CRITICAL VALIDATION ---
+        if not content or not content.strip():
+            error_message = f"Error: Attempted to write an empty or whitespace-only file to '{path}'. Operation aborted."
+            logger.warning(error_message)
+            return error_message
+
+        logger.info(f"Attempting to stream and write to file: {path}")
         path_obj = Path(path)
+
+        # Determine the relative path for the event
+        relative_path = path
+        if project_manager.active_project_path and path_obj.is_absolute():
+            try:
+                relative_path = str(path_obj.relative_to(project_manager.active_project_path))
+            except ValueError:
+                pass  # Path is not within the project, use the full path as a fallback
+
+        # --- Streaming Logic ---
+        # Clear the tab first by sending an empty chunk with a special flag/initial call
+        event_bus.emit("stream_code_chunk", StreamCodeChunk(filename=relative_path, chunk="", is_first_chunk=True))
+        await asyncio.sleep(0.01)
+
+        chunk_size = 100
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i + chunk_size]
+            event_bus.emit("stream_code_chunk", StreamCodeChunk(filename=relative_path, chunk=chunk))
+            await asyncio.sleep(0.01)
+
+        # --- File Write Logic ---
         path_obj.parent.mkdir(parents=True, exist_ok=True)
         bytes_written = path_obj.write_text(content, encoding='utf-8')
         success_message = f"Successfully wrote {bytes_written} bytes to {path}"
@@ -36,7 +70,6 @@ def append_to_file(path: str, content: str) -> str:
             return f"Error: File not found at path '{path}'. Cannot append."
 
         with path_obj.open('a', encoding='utf-8') as f:
-            # Prepend a newline if the file doesn't end with one, ensuring separation
             if path_obj.read_text(encoding='utf-8') and not path_obj.read_text(encoding='utf-8').endswith('\n'):
                 f.write('\n')
             bytes_written = f.write(content)
@@ -118,7 +151,6 @@ def create_package_init(path: str) -> str:
         dir_path = Path(path)
         logger.info(f"Attempting to initialize package at: {dir_path}")
 
-        # Ensure the directory exists, create it if it doesn't.
         dir_path.mkdir(parents=True, exist_ok=True)
 
         init_file_path = dir_path / "__init__.py"
@@ -128,7 +160,6 @@ def create_package_init(path: str) -> str:
             logger.warning(message)
             return message
 
-        # Add a quality docstring by default.
         package_name = dir_path.name
         content = f'"""Initializes the \'{package_name}\' package."""\n'
 
