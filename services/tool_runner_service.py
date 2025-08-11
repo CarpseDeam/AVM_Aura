@@ -12,6 +12,8 @@ from events import ToolCallInitiated, ToolCallCompleted
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager, ProjectContext
+    from core.llm_client import LLMClient
+    from services.development_team_service import DevelopmentTeamService
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +31,33 @@ class ToolRunnerService:
             project_manager: "ProjectManager",
             mission_log_service: MissionLogService,
             vector_context_service: Optional[VectorContextService] = None,
+            development_team_service: Optional["DevelopmentTeamService"] = None,
+            llm_client: Optional["LLMClient"] = None
     ):
         self.event_bus = event_bus
         self.foundry_manager = foundry_manager
         self.project_manager = project_manager
         self.mission_log_service = mission_log_service
         self.vector_context_service = vector_context_service
+        self.development_team_service = development_team_service
+        self.llm_client = llm_client
 
         self.PATH_PARAM_KEYS = ['path', 'source_path', 'destination_path', 'requirements_path']
-        self.SERVICE_MAP = {
+        logger.info("ToolRunnerService initialized.")
+
+    def _get_service_map(self):
+        """
+        Dynamically creates the service map to ensure it always has the latest
+        service instances, especially after a project change.
+        """
+        return {
             'project_manager': self.project_manager,
             'mission_log_service': self.mission_log_service,
             'vector_context_service': self.vector_context_service,
+            'development_team_service': self.development_team_service,
+            'llm_client': self.llm_client,
             'event_bus': self.event_bus,
         }
-        logger.info("ToolRunnerService initialized.")
 
     async def run_tool_by_dict(self, tool_call_dict: dict) -> Optional[Any]:
         """Convenience method to run a tool from a dictionary."""
@@ -78,9 +92,14 @@ class ToolRunnerService:
 
         try:
             prepared_params = self._prepare_parameters(action_function, invocation.parameters)
-            result = action_function(**prepared_params)
 
-            status = "FAILURE" if isinstance(result, str) and result.strip().lower().startswith("error:") else "SUCCESS"
+            # Support both async and sync actions
+            if inspect.iscoroutinefunction(action_function):
+                result = await action_function(**prepared_params)
+            else:
+                result = action_function(**prepared_params)
+
+            status = "FAILURE" if isinstance(result, str) and result.strip().lower().startswith("error") else "SUCCESS"
 
             print(f"✅ Result from {action_id}: {result}")
             self.event_bus.emit(
@@ -105,32 +124,24 @@ class ToolRunnerService:
         """
         resolved_params = action_params.copy()
         base_path: Optional[Path] = self.project_manager.active_project_path
-
-        # Get the function's signature to inspect its parameters
         sig = inspect.signature(action_function)
 
-        # --- Path Resolution (Now handles defaults!) ---
+        service_map = self._get_service_map()
+
         if base_path:
             for key in self.PATH_PARAM_KEYS:
-                # Check if the function signature accepts this path key
                 if key in sig.parameters:
-                    # Get the path value from the call, or fall back to the function's default
                     relative_path = action_params.get(key, sig.parameters[key].default)
-
-                    # Ensure we have a valid path string to resolve
                     if isinstance(relative_path, str) and relative_path:
                         if not Path(relative_path).is_absolute():
                             resolved_path = (base_path / relative_path).resolve()
                             resolved_params[key] = str(resolved_path)
 
-        # --- Service and Context Injection ---
-        for param_name in sig.parameters:
-            if param_name in self.SERVICE_MAP and param_name not in resolved_params:
-                # Ensure service exists before injecting
-                if self.SERVICE_MAP[param_name] is not None:
-                    resolved_params[param_name] = self.SERVICE_MAP[param_name]
-            elif param_name == 'project_context' and 'project_context' not in resolved_params:
-                if self.project_manager.active_project_path:
-                    resolved_params['project_context'] = self.project_manager.active_project_context
+        for param_name, param in sig.parameters.items():
+            if param_name in service_map:
+                if service_map[param_name] is not None:
+                    resolved_params[param_name] = service_map[param_name]
+            elif param_name == 'project_context':
+                resolved_params['project_context'] = self.project_manager.active_project_context
 
         return resolved_params

@@ -51,30 +51,40 @@ class ServiceManager:
         self.log_to_event_bus("info", "[ServiceManager] Initialized")
 
     def _on_project_activated(self, event: ProjectCreated):
-        """Initializes or re-initializes services that depend on an active project."""
+        """
+        Initializes or re-initializes services that depend on an active project.
+        This is the central point for ensuring all services are synced after a
+        project change.
+        """
         self.log_to_event_bus("info",
-                              f"Project activated: {event.project_name}. Initializing project-specific services.")
+                              f"Project activated: {event.project_name}. Synchronizing project-specific services.")
         project_path = Path(event.project_path)
 
-        # Create a project-specific RAG database path
-        rag_db_path = project_path / ".rag_db"
+        # 1. Create a new Mission Log service for the new project context.
+        self.mission_log_service = MissionLogService(self.project_manager, self.event_bus)
+        self.mission_log_service.load_log_for_active_project()
 
-        # Instantiate the VectorContextService with the isolated path
+        # 2. Create the RAG database service for the new project context.
+        rag_db_path = project_path / ".rag_db"
         self.vector_context_service = VectorContextService(db_path=str(rag_db_path))
 
-        # Now that we have the new service, re-initialize the ToolRunnerService
-        # to ensure it has the correct (and latest) instance.
+        # 3. Create a new Tool Runner with the new services.
         self._initialize_tool_runner()
 
-        # Update the conductor with the new tool runner that has the vector service
+        # 4. *** THE FIX IS HERE: ***
+        # Ensure all major services are updated with the NEW instances of the services
+        # they depend on, guaranteeing everyone is using the same objects.
         if self.conductor_service:
             self.conductor_service.tool_runner_service = self.tool_runner_service
+            self.conductor_service.mission_log_service = self.mission_log_service
+            self.log_to_event_bus("info", "ConductorService references updated.")
 
-        # Update the dev team with the new vector service
-        if self.development_team_service and self.development_team_service.coder:
-            self.development_team_service.coder.vector_context_service = self.vector_context_service
+        if self.development_team_service:
+            self.development_team_service.vector_context_service = self.vector_context_service
+            self.development_team_service.mission_log_service = self.mission_log_service
+            self.log_to_event_bus("info", "DevelopmentTeamService references updated.")
 
-        self.log_to_event_bus("success", "Project-specific services initialized.")
+        self.log_to_event_bus("success", "Project-specific services synchronized.")
 
     def log_to_event_bus(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "ServiceManager", level, message)
@@ -92,12 +102,14 @@ class ServiceManager:
         self.log_to_event_bus("info", "[ServiceManager] Initializing services...")
 
         self.app_state_service = AppStateService(self.event_bus)
-        self.mission_log_service = MissionLogService(self.project_manager, self.event_bus)
-        self.development_team_service = DevelopmentTeamService(self.event_bus, self)
 
-        # ToolRunner is now initialized separately when a project is active.
+        # Services that get re-created when a project is activated
+        self.mission_log_service = MissionLogService(self.project_manager, self.event_bus)
+        self.vector_context_service = None  # Will be created on project activation
         self._initialize_tool_runner()
 
+        # Services that persist
+        self.development_team_service = DevelopmentTeamService(self.event_bus, self)
         self.conductor_service = ConductorService(
             self.event_bus,
             self.mission_log_service,
@@ -114,9 +126,9 @@ class ServiceManager:
             self.foundry_manager,
             self.project_manager,
             self.mission_log_service,
-            self.vector_context_service  # Pass the (potentially new) instance
+            self.vector_context_service
         )
-        self.log_to_event_bus("info", "ToolRunnerService has been configured with project-specific context.")
+        self.log_to_event_bus("info", "ToolRunnerService has been configured.")
 
     async def launch_background_servers(self, timeout: int = 15):
         python_executable_to_use: str

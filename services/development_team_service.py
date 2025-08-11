@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from event_bus import EventBus
 from prompts.creative import AURA_PLANNER_PROMPT
-from services.agents import ReviewerService, CoderService
+from prompts.coder import CODER_PROMPT
+from prompts.master_rules import JSON_OUTPUT_RULE
+from services.agents import ReviewerService
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -26,16 +28,11 @@ class DevelopmentTeamService:
         self.llm_client = service_manager.get_llm_client()
         self.project_manager = service_manager.get_project_manager()
         self.mission_log_service = service_manager.mission_log_service
+        self.vector_context_service = service_manager.vector_context_service
+        self.foundry_manager = service_manager.foundry_manager
 
         # Instantiate specialist services
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
-        self.coder = CoderService(
-            self.event_bus,
-            self.llm_client,
-            self.service_manager.vector_context_service,
-            self.project_manager,
-            self.service_manager.foundry_manager,
-        )
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
@@ -82,8 +79,61 @@ class DevelopmentTeamService:
         self,
         current_task: str
     ) -> Optional[Dict[str, str]]:
-        """Delegates the coding task to the specialized CoderService."""
-        return await self.coder.run_coding_task(current_task)
+        """
+        Phase 2: The Coder translates a single task into a tool call using RAG.
+        This logic is now integrated directly within the DevelopmentTeamService.
+        """
+        self.log("info", f"Coder translating task to tool call: {current_task}")
+        self.event_bus.emit("agent_status_changed", "Coder", f"Planning action for: {current_task}...", "fa5s.cogs")
+
+        # 1. Get relevant context using RAG
+        relevant_context = "No existing code snippets were found. You are likely creating a new file or starting a new project."
+        try:
+            if self.vector_context_service and self.vector_context_service.collection.count() > 0:
+                retrieved_chunks = self.vector_context_service.query(current_task, n_results=5)
+                if retrieved_chunks:
+                    context_parts = ["Here are the most relevant code snippets based on the task:\n"]
+                    for chunk in retrieved_chunks:
+                        metadata = chunk['metadata']
+                        source_info = f"From file: {metadata.get('file_path', 'N/A')} ({metadata.get('node_type', 'N/A')}: {metadata.get('node_name', 'N/A')})"
+                        context_parts.append(f"```python\n# {source_info}\n{chunk['document']}\n```")
+                    relevant_context = "\n\n".join(context_parts)
+            else:
+                self.log("warning", "Vector database is empty. Proceeding without RAG context.")
+        except Exception as e:
+            self.log("error", f"Failed to query vector context: {e}")
+            relevant_context = f"Error: Could not retrieve context from the vector database. Details: {e}"
+
+        # 2. Get the file tree and available tools
+        file_structure = "\n".join(sorted(list(self.project_manager.get_project_files().keys()))) or "The project is currently empty."
+        available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
+
+        # 3. Build the prompt
+        prompt = CODER_PROMPT.format(
+            current_task=current_task,
+            available_tools=available_tools,
+            file_structure=file_structure,
+            relevant_code_snippets=relevant_context,
+            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE.strip()
+        )
+
+        provider, model = self.llm_client.get_model_for_role("coder")
+        if not provider or not model:
+            self.log("error", "No 'coder' model configured.")
+            return None
+
+        response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
+
+        try:
+            tool_call = self._parse_json_response(response_str)
+            if "tool_name" not in tool_call or "arguments" not in tool_call:
+                raise ValueError("Coder response must be a JSON object with 'tool_name' and 'arguments' keys.")
+            return tool_call
+        except (ValueError, json.JSONDecodeError) as e:
+            self.log("error", f"Coder generation failure. Raw response: {response_str}. Error: {e}")
+            self.handle_error("Coder", f"I failed to generate a valid tool call for the task. The raw response from the AI has been logged for debugging. Error: {e}")
+            return None
+
 
     async def run_review_and_fix_phase(self, error_report: str, git_diff: str, full_code_context: Dict[str, str]):
         self.log("info", "Review and Fix phase initiated.")

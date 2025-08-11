@@ -20,22 +20,39 @@ class ModelConfigurationDialog(QDialog):
         self.setMinimumWidth(500)
 
         # The roles are now dynamically determined from the client, not hardcoded.
-        self.roles = list(self.llm_client.get_role_assignments().keys())
+        self.roles = sorted(list(self.llm_client.get_role_assignments().keys()))
         self.model_combos: dict[str, QComboBox] = {}
         self.temp_spins: dict[str, QDoubleSpinBox] = {}
         self.available_models = {}
 
         main_layout = QVBoxLayout(self)
+        self.grid_layout = QGridLayout()
+        self.grid_layout.setColumnStretch(1, 1)
+        main_layout.addLayout(self.grid_layout)
 
-        grid_layout = QGridLayout()
-        grid_layout.setColumnStretch(1, 1)
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        main_layout.addWidget(button_box)
+
+    def _clear_layout(self):
+        """Removes all widgets from the grid layout, preparing for a refresh."""
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def _populate_grid(self):
+        """Populates the grid with role configuration widgets."""
+        self._clear_layout()
 
         header_role = QLabel("<b>Role</b>")
         header_model = QLabel("<b>Assigned Model</b>")
         header_temp = QLabel("<b>Temperature</b>")
-        grid_layout.addWidget(header_role, 0, 0)
-        grid_layout.addWidget(header_model, 0, 1)
-        grid_layout.addWidget(header_temp, 0, 2)
+        self.grid_layout.addWidget(header_role, 0, 0)
+        self.grid_layout.addWidget(header_model, 0, 1)
+        self.grid_layout.addWidget(header_temp, 0, 2)
 
         for i, role in enumerate(self.roles, 1):
             role_label = QLabel(role.capitalize())
@@ -48,19 +65,16 @@ class ModelConfigurationDialog(QDialog):
             self.model_combos[role] = model_combo
             self.temp_spins[role] = temp_spin
 
-            grid_layout.addWidget(role_label, i, 0)
-            grid_layout.addWidget(model_combo, i, 1)
-            grid_layout.addWidget(temp_spin, i, 2)
-
-        main_layout.addLayout(grid_layout)
-
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        main_layout.addWidget(button_box)
+            self.grid_layout.addWidget(role_label, i, 0)
+            self.grid_layout.addWidget(model_combo, i, 1)
+            self.grid_layout.addWidget(temp_spin, i, 2)
 
     async def populate_models_async(self):
         """Fetches available models from the LLM client."""
+        # Refresh the roles list each time, in case the config file changed
+        self.roles = sorted(list(self.llm_client.get_role_assignments().keys()))
+        self._populate_grid() # Rebuild the UI with the correct roles
+
         self.available_models = await self.llm_client.get_available_models()
         if not self.available_models:
             print("[ModelConfigurationDialog] Warning: No models were returned from the server.")

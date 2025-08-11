@@ -30,19 +30,12 @@ CODER_PROMPT = textwrap.dedent("""
 
     1.  **CHOOSE ONE TOOL:** You must analyze the CURRENT TASK and choose the single most appropriate tool from the AVAILABLE TOOLS list.
     2.  **PROVIDE ARGUMENTS:** You must provide all required arguments for the chosen tool. Use the project context to determine the correct values (e.g., file paths).
-    3.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call. It must have "tool_name" and "arguments" keys.
+    3.  **STRICT CODE QUALITY:** If you use the `write_file` tool, the value for the `content` argument **MUST** be 100% syntactically correct and runnable Python code. Do not use invalid syntax like `function(arg_name: value)`.
+        - **BAD:** `"content": "result = add(a: 5, b: 3)"`
+        - **GOOD:** `"content": "result = add(5, 3)"`
+    4.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call. It must have "tool_name" and "arguments" keys.
 
     {JSON_OUTPUT_RULE}
-
-    **EXAMPLE OF A CORRECT RESPONSE (for creating a directory):**
-    ```json
-    {{
-      "tool_name": "create_directory",
-      "arguments": {{
-        "path": "src/components"
-      }}
-    }}
-    ```
 
     **EXAMPLE OF A CORRECT RESPONSE (for writing a file):**
     ```json
@@ -50,10 +43,10 @@ CODER_PROMPT = textwrap.dedent("""
       "tool_name": "write_file",
       "arguments": {{
         "path": "src/main.py",
-        "content": "import os\\n\\nprint('Hello, World!')"
+        "content": "import os\\n\\ndef main():\\n    print('Hello, World!')\\n\\nif __name__ == '__main__':\\n    main()\\n"
       }}
     }}
     ```
 
-    Now, generate the JSON tool call to accomplish the current task.
+    Now, generate the JSON tool call to accomplish the current task, following all directives.
     """)
