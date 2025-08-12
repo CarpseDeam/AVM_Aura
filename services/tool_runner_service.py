@@ -51,6 +51,7 @@ class ToolRunnerService:
         Dynamically creates the service map to ensure it always has the latest
         service instances, especially after a project change.
         """
+        # I am adding 'llm_client' to this map for injection.
         return {
             'project_manager': self.project_manager,
             'mission_log_service': self.mission_log_service,
@@ -159,16 +160,18 @@ class ToolRunnerService:
     def _create_display_params(self, execution_params: dict) -> dict:
         """
         Creates a copy of parameters for display purposes, making paths relative.
+        This version avoids deepcopying un-copyable service objects.
         """
-        display_params = copy.deepcopy(execution_params)
+        display_params = {}
+        service_keys = list(self._get_service_map().keys()) + ['project_context']
+
+        # First, filter out all complex service objects, leaving only simple data types.
+        for key, value in execution_params.items():
+            if key not in service_keys:
+                display_params[key] = value
+
+        # Now, safely perform path manipulation on the clean dictionary.
         base_path = self.project_manager.active_project_path
-
-        # Remove injected services from the display version
-        service_keys = self._get_service_map().keys()
-        for key in list(display_params.keys()):  # Use list to allow removal during iteration
-            if key in service_keys or key == 'project_context':
-                del display_params[key]
-
         if base_path:
             for key in self.PATH_PARAM_KEYS:
                 if key in display_params and isinstance(display_params[key], str):
@@ -179,5 +182,4 @@ class ToolRunnerService:
                     except ValueError:
                         # Path is not within the project, leave it as absolute for clarity
                         pass
-
         return display_params

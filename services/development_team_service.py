@@ -29,7 +29,7 @@ class DevelopmentTeamService:
         self.project_manager = service_manager.get_project_manager()
         self.mission_log_service = service_manager.mission_log_service
         self.vector_context_service = service_manager.vector_context_service
-        self.foundry_manager = service_manager.foundry_manager
+        self.foundry_manager = service_manager.get_foundry_manager()
 
         # Instantiate specialist services
         self.reviewer = ReviewerService(self.event_bus, self.llm_client)
@@ -117,18 +117,28 @@ class DevelopmentTeamService:
 
     async def run_coding_task(
         self,
-        current_task: str
+        task: Dict[str, any]
     ) -> Optional[Dict[str, str]]:
         """
-        Phase 2: The Coder translates a single task into a tool call using RAG.
+        The authoritative method for turning a task into an executable tool call.
+        If the task already has a tool_call, it returns it.
+        Otherwise, it uses the Coder LLM to generate one.
         """
-        self.log("info", f"Coder translating task to tool call: {current_task}")
-        self.event_bus.emit("agent_status_changed", "Aura", f"Coding task: {current_task}...", "fa5s.cogs")
+        # --- REFACTORED LOGIC ---
+        # 1. Be efficient: If the plan already specified a tool call, use it.
+        if task.get("tool_call"):
+            self.log("info", f"Using pre-defined tool call for task: {task['description']}")
+            return task["tool_call"]
+
+        # 2. If not, delegate to the Coder to figure it out.
+        current_task_description = task['description']
+        self.log("info", f"Coder translating task to tool call: {current_task_description}")
+        self.event_bus.emit("agent_status_changed", "Aura", f"Coding task: {current_task_description}...", "fa5s.cogs")
 
         relevant_context = "No existing code snippets were found. You are likely creating a new file or starting a new project."
         try:
             if self.vector_context_service and self.vector_context_service.collection.count() > 0:
-                retrieved_chunks = self.vector_context_service.query(current_task, n_results=5)
+                retrieved_chunks = self.vector_context_service.query(current_task_description, n_results=5)
                 if retrieved_chunks:
                     context_parts = ["Here are the most relevant code snippets based on the task:\n"]
                     for chunk in retrieved_chunks:
@@ -146,7 +156,7 @@ class DevelopmentTeamService:
         available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
 
         prompt = CODER_PROMPT.format(
-            current_task=current_task,
+            current_task=current_task_description,
             available_tools=available_tools,
             file_structure=file_structure,
             relevant_code_snippets=relevant_context,

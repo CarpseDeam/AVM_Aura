@@ -69,6 +69,7 @@ class StreamCodeChunk:
     """Published by the Coder agent with a piece of generated code for a file."""
     filename: str
     chunk: str
+    is_first_chunk: bool = False
 
 @dataclass
 class CodeGenerationComplete:

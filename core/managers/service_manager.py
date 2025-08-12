@@ -122,11 +122,12 @@ class ServiceManager:
     def _initialize_tool_runner(self):
         """Helper to create or update the tool runner with the latest services."""
         self.tool_runner_service = ToolRunnerService(
-            self.event_bus,
-            self.foundry_manager,
-            self.project_manager,
-            self.mission_log_service,
-            self.vector_context_service
+            event_bus=self.event_bus,
+            foundry_manager=self.foundry_manager,
+            project_manager=self.project_manager,
+            mission_log_service=self.mission_log_service,
+            vector_context_service=self.vector_context_service,
+            llm_client=self.llm_client  # This line was missing
         )
         self.log_to_event_bus("info", "ToolRunnerService has been configured.")
 

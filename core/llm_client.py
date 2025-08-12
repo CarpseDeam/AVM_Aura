@@ -5,17 +5,20 @@ from typing import Dict, Optional, Any, List
 import aiohttp
 from pathlib import Path
 
+
 class LLMClient:
     """
     A lightweight client that communicates with the local LLM and RAG server processes.
     It does NOT load any heavy AI libraries itself.
     """
+
     def __init__(self, project_root: Path, llm_server_url="http://127.0.0.1:8002"):
         self.llm_server_url = llm_server_url
         self.project_root = project_root
         self.config_dir = project_root / "config"
         self.config_dir.mkdir(exist_ok=True, parents=True)
         self.assignments_file = self.config_dir / "role_assignments.json"
+        self.default_assignments_file = self.config_dir / "default_role_assignments.json"
         self.role_assignments = {}
         self.role_temperatures = {}
         self.load_assignments()
@@ -23,62 +26,65 @@ class LLMClient:
 
     def load_assignments(self):
         """Loads role assignments and temperatures from JSON, with smart, self-healing defaults."""
-        default_assignments = {
-            "architect": "google/gemini-2.5-pro",
-            "coder": "google/gemini-2.5-pro",
-            "tester": "ollama/deepseek-coder",
-            "chat": "google/gemini-2.5-flash",
-            "reviewer": "google/gemini-2.5-pro",
-            "finalizer": "google/gemini-2.5-pro"
-        }
-        default_temperatures = {
-            "architect": 0.35, "coder": 0.16, "tester": 0.1, "chat": 0.7,
-            "reviewer": 0.2, "finalizer": 0.1
-        }
+        # Step 1: Load the hard-coded defaults from the default config file.
+        try:
+            with open(self.default_assignments_file, 'r') as f:
+                default_config = json.load(f)
+            default_assignments = default_config.get("role_assignments", {})
+            default_temperatures = default_config.get("role_temperatures", {})
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(
+                f"[LLMClient] CRITICAL: Could not load default_role_assignments.json: {e}. Cannot proceed with defaults.")
+            # In a real-world scenario, you might have an emergency hardcoded fallback here.
+            # For now, we'll assume the file is part of the application distribution.
+            default_assignments = {}
+            default_temperatures = {}
 
+        # Step 2: Load the user's custom settings.
         loaded_assignments = {}
         loaded_temperatures = {}
-
         if self.assignments_file.exists():
             try:
                 with open(self.assignments_file, 'r') as f:
-                    config_data = json.load(f)
-                loaded_assignments = config_data.get("role_assignments", {})
-                loaded_temperatures = config_data.get("role_temperatures", {})
+                    user_config = json.load(f)
+                loaded_assignments = user_config.get("role_assignments", {})
+                loaded_temperatures = user_config.get("role_temperatures", {})
             except (json.JSONDecodeError, TypeError) as e:
-                print(f"[LLMClient] Warning: Could not parse role_assignments.json: {e}. Will use defaults and attempt to repair.")
+                print(
+                    f"[LLMClient] Warning: Could not parse role_assignments.json: {e}. Will use defaults and attempt to repair.")
 
-        # Start with a clean copy of the defaults
+        # Step 3: Merge user settings over the defaults.
         final_assignments = default_assignments.copy()
         final_temperatures = default_temperatures.copy()
 
-        # Merge loaded configs over defaults
         if isinstance(loaded_assignments, dict):
             final_assignments.update(loaded_assignments)
         if isinstance(loaded_temperatures, dict):
             final_temperatures.update(loaded_temperatures)
 
-
-        # Clean up any null/empty values by restoring the default
+        # Step 4: Self-heal any missing or invalid entries by restoring from the defaults.
         for role, model in final_assignments.items():
-            if not model:
-                final_assignments[role] = default_assignments.get(role)
+            if not model and role in default_assignments:
+                final_assignments[role] = default_assignments[role]
+
+        for role in default_assignments:
+            if role not in final_assignments:
+                final_assignments[role] = default_assignments[role]
 
         self.role_assignments = final_assignments
         self.role_temperatures = final_temperatures
 
-        # Save the potentially repaired config back to the file
+        # Step 5: Save the potentially repaired config back to the user's file.
         self.save_assignments()
 
-
     def save_assignments(self):
-        """Saves the current role assignments and temperatures to the JSON file."""
+        """Saves the current role assignments and temperatures to the user's JSON file."""
         config_data = {
             "role_assignments": self.role_assignments,
             "role_temperatures": self.role_temperatures
         }
         with open(self.assignments_file, 'w') as f:
-            json.dump(config_data, f, indent=2)
+            json.dump(config_data, f, indent=4)
 
     async def get_available_models(self) -> dict:
         """Fetches the list of available models from the LLM server."""
