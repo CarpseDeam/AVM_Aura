@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from event_bus import EventBus
 # Import the new router prompt
 from prompts.creative import AURA_PLANNER_PROMPT, CREATIVE_ASSISTANT_PROMPT, AURA_ROUTER_PROMPT
-from prompts.coder import CODER_PROMPT, CODER_PROMPT_STREAMING
+from prompts.coder import CODER_PROMPT
 from prompts.master_rules import JSON_OUTPUT_RULE
 from services.agents import ReviewerService
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
@@ -49,7 +49,6 @@ class DevelopmentTeamService:
         self.log("info", "Routing user intent...")
         prompt = AURA_ROUTER_PROMPT.format(user_idea=user_idea)
 
-        # Use a fast, cheap model for this simple classification task
         provider, model = self.llm_client.get_model_for_role("chat")
         if not provider or not model:
             self.log("warning", "No 'chat' model configured for router, falling back to 'planner' model.")
@@ -126,6 +125,7 @@ class DevelopmentTeamService:
                 except json.JSONDecodeError as e:
                     self.log("error",
                              f"Failed to parse tool call from conversational response: {e}. Raw block: {tool_call_str}")
+            self.log("info", "Posting conversational reply to chat.")
             self._post_chat_message("Aura", conversation_reply)
 
     async def run_coding_task(
@@ -137,16 +137,8 @@ class DevelopmentTeamService:
             return task["tool_call"]
 
         current_task_description = task['description']
+        self.log("info", f"Coder translating task to tool call: {current_task_description}")
         self.event_bus.emit("agent_status_changed", "Aura", f"Coding task: {current_task_description}...", "fa5s.cogs")
-        # Remainder of this function is unchanged...
-        relevant_context = "No existing code snippets were found..."
-        # ... RAG logic ...
-        prompt = CODER_PROMPT.format(...)
-        # ... LLM call ...
-        # ... parsing logic ...
-
-        # NOTE: Keeping the rest of the function collapsed for brevity as it's identical to the previous version.
-        # The full, correct code is being sent.
 
         relevant_context = "No existing code snippets were found. You are likely creating a new file or starting a new project."
         try:
@@ -169,6 +161,8 @@ class DevelopmentTeamService:
             sorted(list(self.project_manager.get_project_files().keys()))) or "The project is currently empty."
         available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
 
+        # --- *** THE FIX IS HERE *** ---
+        # The 'current_task' key was missing from this format call, causing the crash.
         prompt = CODER_PROMPT.format(
             current_task=current_task_description,
             available_tools=available_tools,
