@@ -13,25 +13,32 @@ CODER_PROMPT = textwrap.dedent("""
     1.  **CURRENT TASK:** Your immediate objective. You must select one tool to fulfill this task.
         `{current_task}`
 
-    2.  **AVAILABLE TOOLS:** This is your complete toolbox. You must choose one function name from this list.
+    2.  **MISSION LOG (HISTORY):** A record of all previously executed steps and their results.
+        ```
+        {mission_log}
+        ```
+
+    3.  **AVAILABLE TOOLS:** This is your complete toolbox. You must choose one function name from this list.
         ```json
         {available_tools}
         ```
 
-    3.  **PROJECT FILE STRUCTURE:** A list of all files currently in the project. Use this to determine correct file paths and to understand the project layout.
-        ```        {file_structure}
+    4.  **PROJECT FILE STRUCTURE:** A list of all files currently in the project. Use this to determine correct file paths and to understand the project layout.
+        ```
+        {file_structure}
         ```
 
-    4.  **RELEVANT CODE SNIPPETS:** These are the most relevant existing code snippets from the project, based on the current task. Use these to understand existing code.
+    5.  **RELEVANT CODE SNIPPETS:** These are the most relevant existing code snippets from the project, based on the current task. Use these to understand existing code.
         ```
         {relevant_code_snippets}
         ```
 
     **YOUR DIRECTIVES (UNBREAKABLE LAWS):**
 
-    1.  **CHOOSE ONE TOOL:** You must analyze the CURRENT TASK and choose the single most appropriate tool from the AVAILABLE TOOLS list.
-    2.  **PROVIDE ARGUMENTS:** You must provide all required arguments for the chosen tool. The `task_description` for `stream_and_write_file` must be a complete and detailed instruction for the coding AI.
-    3.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call.
+    1.  **LEARN FROM HISTORY:** Analyze the MISSION LOG. If a previous step failed, you MUST try a different tool or a different approach to make forward progress. Do NOT repeat a failed action.
+    2.  **CHOOSE ONE TOOL:** You must analyze the CURRENT TASK and choose the single most appropriate tool from the AVAILABLE TOOLS list.
+    3.  **PROVIDE ARGUMENTS:** You must provide all required arguments for the chosen tool. The `task_description` for `stream_and_write_file` must be a complete and detailed instruction for the coding AI.
+    4.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call.
 
     {JSON_OUTPUT_RULE}
 

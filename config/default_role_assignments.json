@@ -1,16 +1,12 @@
 {
   "role_assignments": {
     "coder": "google/gemini-2.5-pro",
-    "tester": "google/gemini-2.5-pro",
     "chat": "google/gemini-2.5-flash",
-    "reviewer": "google/gemini-2.5-pro",
     "planner": "google/gemini-2.5-pro"
   },
   "role_temperatures": {
     "coder": 0.16,
-    "tester": 0.1,
     "chat": 0.7,
-    "reviewer": 0.2,
     "planner": 0.35
   }
 }

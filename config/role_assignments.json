@@ -1,0 +1,12 @@
+{
+    "role_assignments": {
+        "coder": "google/gemini-2.5-pro",
+        "chat": "google/gemini-2.5-pro",
+        "planner": "google/gemini-2.5-pro"
+    },
+    "role_temperatures": {
+        "coder": 0.16,
+        "chat": 0.7,
+        "planner": 0.35
+    }
+}

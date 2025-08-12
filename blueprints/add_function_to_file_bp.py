@@ -18,7 +18,7 @@ params = {
 
 blueprint = Blueprint(
     id="add_function_to_file",
-    description="Adds a new function to an existing Python file without overwriting the file's other contents. This is the preferred way to add test cases or helper functions to a file.",
+    description="Adds a new function to an existing Python file without overwriting the file's other contents. This is the preferred way to add new functions or helper methods to a file.",
     parameters=params,
     action_function_name="add_function_to_file"
 )

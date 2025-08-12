@@ -57,11 +57,6 @@ class PlanReadyForReview:
     """Published by the Dev Team when the Architect's plan is in the Mission Log."""
     pass
 
-@dataclass
-class SystemAlertTriggered:
-    """Published when the self-correction loop is initiated."""
-    pass
-
 # --- Code Generation & Streaming Events ---
 
 @dataclass

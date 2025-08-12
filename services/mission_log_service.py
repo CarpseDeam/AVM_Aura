@@ -1,7 +1,6 @@
 # services/mission_log_service.py
 import logging
 import json
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
@@ -25,6 +24,7 @@ class MissionLogService:
         self.event_bus = event_bus
         self.tasks: List[Dict[str, Any]] = []
         self._next_task_id = 1
+        self._initial_user_goal = ""
         self.event_bus.subscribe("project_created", self.handle_project_created)
         logger.info("MissionLogService initialized.")
 
@@ -41,19 +41,21 @@ class MissionLogService:
 
     def _save_and_notify(self):
         """Saves the current list of tasks to disk and notifies the UI."""
+        data_to_save = {
+            "initial_goal": self._initial_user_goal,
+            "tasks": self.tasks
+        }
         self.event_bus.emit("mission_log_updated", MissionLogUpdated(tasks=self.get_tasks()))
         logger.debug(f"UI notified of mission log update. Task count: {len(self.tasks)}")
 
         log_path = self._get_log_path()
         if not log_path:
-            logger.debug("Cannot save mission log to disk, no active project path set yet.")
             return
 
         log_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
             with open(log_path, 'w', encoding='utf-8') as f:
-                json.dump(self.tasks, f, indent=2)
+                json.dump(data_to_save, f, indent=2)
             logger.debug(f"Mission Log saved to disk at {log_path}.")
         except IOError as e:
             logger.error(f"Failed to save mission log to {log_path}: {e}")
@@ -63,11 +65,14 @@ class MissionLogService:
         log_path = self._get_log_path()
         self.tasks = []
         self._next_task_id = 1
+        self._initial_user_goal = ""
 
         if log_path and log_path.exists():
             try:
                 with open(log_path, 'r', encoding='utf-8') as f:
-                    self.tasks = json.load(f)
+                    saved_data = json.load(f)
+                    self.tasks = saved_data.get("tasks", [])
+                    self._initial_user_goal = saved_data.get("initial_goal", "")
                 if self.tasks:
                     valid_ids = [task.get('id', 0) for task in self.tasks]
                     self._next_task_id = max(valid_ids) + 1 if valid_ids else 1
@@ -77,13 +82,13 @@ class MissionLogService:
                 self.tasks = []
         else:
             logger.info("No existing mission log found for this project. Starting fresh.")
-
         self._save_and_notify()
 
-    def set_initial_plan(self, plan_steps: List[str]):
-        """Clears all tasks and sets a new plan, including the initial indexing task."""
+    def set_initial_plan(self, plan_steps: List[str], user_goal: str):
+        """Clears all tasks and sets a new plan, storing the original user goal."""
         self.tasks = []
         self._next_task_id = 1
+        self._initial_user_goal = user_goal
 
         self.add_task(
             description="Index the project to build a contextual map.",
@@ -93,34 +98,25 @@ class MissionLogService:
 
         for step in plan_steps:
             self.add_task(description=step, notify=False)
-
         self._save_and_notify()
         logger.info(f"Initial plan with {len(self.tasks)} steps has been set.")
 
     def add_task(self, description: str, tool_call: Optional[Dict] = None, notify: bool = True) -> Dict[str, Any]:
-        """
-        Adds a new task to the mission log.
-        """
+        """Adds a new task to the mission log."""
         if not description:
             raise ValueError("Task description cannot be empty.")
-
         new_task = {
             "id": self._next_task_id,
             "description": description,
             "done": False,
-            "tool_call": tool_call
+            "tool_call": tool_call,
+            "last_error": None
         }
         self.tasks.append(new_task)
         self._next_task_id += 1
         logger.info(f"Added task {new_task['id']}: '{description}'")
-
-        # --- AUTOMATION RULE REMOVED ---
-        # The AI Planner is now solely responsible for creating test-related tasks.
-        # This prevents conflicts and redundant steps.
-
         if notify:
             self._save_and_notify()
-
         return new_task
 
     def mark_task_as_done(self, task_id: int) -> bool:
@@ -129,6 +125,7 @@ class MissionLogService:
             if task.get('id') == task_id:
                 if not task.get('done'):
                     task['done'] = True
+                    task['last_error'] = None # Clear error on success
                     self._save_and_notify()
                     logger.info(f"Marked task {task_id} as done.")
                 return True
@@ -137,39 +134,44 @@ class MissionLogService:
 
     def get_tasks(self, done: Optional[bool] = None) -> List[Dict[str, Any]]:
         """Returns a copy of the current tasks, optionally filtered by done status."""
-        return [task for task in self.tasks if done is None or task.get('done') == done]
+        if done is None:
+            return list(self.tasks)
+        return [task for task in self.tasks if task.get('done') == done]
 
     def clear_all_tasks(self):
         """Removes all tasks from the log."""
         if self.tasks:
             self.tasks = []
             self._next_task_id = 1
+            self._initial_user_goal = ""
             self._save_and_notify()
             logger.info("All tasks cleared from the Mission Log.")
 
-    def replace_all_tasks_with_tool_plan(self, tool_plan: List[Dict[str, Any]]):
-        """Atomically replaces all tasks with a new, executable tool-based plan."""
-        self.tasks = []
-        self._next_task_id = 1
+    def replace_tasks_from_id(self, start_task_id: int, new_plan_steps: List[str]):
+        """
+        Replaces a block of tasks starting from a given ID with a new plan.
+        The failed task and all subsequent tasks are removed.
+        """
+        start_index = -1
+        for i, task in enumerate(self.tasks):
+            if task.get('id') == start_task_id:
+                start_index = i
+                break
 
-        def _summarize_tool_call(tool_call: dict) -> str:
-            tool_name = tool_call.get('tool_name', 'unknown_tool')
-            args = tool_call.get('arguments', {})
-            summary = ' '.join(word.capitalize() for word in tool_name.split('_'))
-            path = args.get('path') or args.get('source_path')
-            if path:
-                summary += f": '{Path(path).name}'"
-            elif 'dependency' in args:
-                summary += f": '{args['dependency']}'"
-            return summary
+        if start_index == -1:
+            logger.error(f"Could not find task with ID {start_task_id} to start replacement.")
+            return
 
-        # Use the main add_task method so the auto-test rule still applies to fixes
-        for tool_call in tool_plan:
-            self.add_task(
-                description=_summarize_tool_call(tool_call),
-                tool_call=tool_call,
-                notify=False # Delay notification until all tasks are added
-            )
+        # Remove the failed task and all subsequent tasks
+        self.tasks = self.tasks[:start_index]
+
+        # Add the new plan steps
+        for step in new_plan_steps:
+            self.add_task(description=step, notify=False)
 
         self._save_and_notify()
-        logger.info(f"Mission Log replaced with executable plan of {len(self.tasks)} steps.")
+        logger.info(f"Replaced tasks from ID {start_task_id} with new plan of {len(new_plan_steps)} steps.")
+
+    def get_initial_goal(self) -> str:
+        """Returns the initial user goal that started the mission."""
+        return self._initial_user_goal
