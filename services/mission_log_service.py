@@ -99,8 +99,7 @@ class MissionLogService:
 
     def add_task(self, description: str, tool_call: Optional[Dict] = None, notify: bool = True) -> Dict[str, Any]:
         """
-        Adds a new task. If the task is for creating a Python file, it
-        automatically adds a follow-up task to generate tests.
+        Adds a new task to the mission log.
         """
         if not description:
             raise ValueError("Task description cannot be empty.")
@@ -115,27 +114,9 @@ class MissionLogService:
         self._next_task_id += 1
         logger.info(f"Added task {new_task['id']}: '{description}'")
 
-        # --- AUTOMATIC TEST GENERATION RULE (HARDENED) ---
-        # If the task is for creating a .py file AND is NOT a test-generation task itself.
-        match = re.search(r"['`\"](.+?\.py)['`\"]", description, re.IGNORECASE)
-        is_test_generation_task = 'test' in description.lower()
-
-        if match and not is_test_generation_task:
-            py_filename = match.group(1)
-            test_task_desc = f"Generate tests for {py_filename}"
-            test_task = {
-                "id": self._next_task_id,
-                "description": test_task_desc,
-                "done": False,
-                "tool_call": {
-                    "tool_name": "generate_tests_for_file",
-                    "arguments": {"path": py_filename}
-                }
-            }
-            self.tasks.append(test_task)
-            self._next_task_id += 1
-            logger.info(f"AUTO-TASK: Added task {test_task['id']}: '{test_task_desc}'")
-        # --- END OF RULE ---
+        # --- AUTOMATION RULE REMOVED ---
+        # The AI Planner is now solely responsible for creating test-related tasks.
+        # This prevents conflicts and redundant steps.
 
         if notify:
             self._save_and_notify()

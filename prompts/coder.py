@@ -2,9 +2,11 @@
 import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 
-# This prompt is a placeholder. The full prompt will be constructed dynamically.
+# This prompt is used by the Conductor to select the correct tool for a high-level task.
 CODER_PROMPT = textwrap.dedent("""
     You are an expert programmer and tool-use agent. Your current, specific task is to translate a human-readable instruction into a single, precise JSON tool call. You must choose the single best tool to accomplish the task.
+
+    **CRITICAL RULE:** For any task that involves writing new code or tests, you **MUST** use the `stream_and_write_file` tool. Do not use the older `write_file` tool for AI code generation.
 
     **CONTEXT BUNDLE:**
 
@@ -17,8 +19,7 @@ CODER_PROMPT = textwrap.dedent("""
         ```
 
     3.  **PROJECT FILE STRUCTURE:** A list of all files currently in the project. Use this to determine correct file paths and to understand the project layout.
-        ```
-        {file_structure}
+        ```        {file_structure}
         ```
 
     4.  **RELEVANT CODE SNIPPETS:** These are the most relevant existing code snippets from the project, based on the current task. Use these to understand existing code.
@@ -29,24 +30,45 @@ CODER_PROMPT = textwrap.dedent("""
     **YOUR DIRECTIVES (UNBREAKABLE LAWS):**
 
     1.  **CHOOSE ONE TOOL:** You must analyze the CURRENT TASK and choose the single most appropriate tool from the AVAILABLE TOOLS list.
-    2.  **PROVIDE ARGUMENTS:** You must provide all required arguments for the chosen tool. Use the project context to determine the correct values (e.g., file paths).
-    3.  **STRICT CODE QUALITY:** If you use the `write_file` tool, the value for the `content` argument **MUST** be 100% syntactically correct and runnable Python code. Do not use invalid syntax like `function(arg_name: value)`.
-        - **BAD:** `"content": "result = add(a: 5, b: 3)"`
-        - **GOOD:** `"content": "result = add(5, 3)"`
-    4.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call. It must have "tool_name" and "arguments" keys.
+    2.  **PROVIDE ARGUMENTS:** You must provide all required arguments for the chosen tool. The `task_description` for `stream_and_write_file` must be a complete and detailed instruction for the coding AI.
+    3.  **STRICT JSON OUTPUT:** Your entire response MUST be a single JSON object representing the tool call.
 
     {JSON_OUTPUT_RULE}
 
-    **EXAMPLE OF A CORRECT RESPONSE (for writing a file):**
+    **EXAMPLE OF A CORRECT RESPONSE (for generating a file):**
     ```json
     {{
-      "tool_name": "write_file",
+      "tool_name": "stream_and_write_file",
       "arguments": {{
         "path": "src/main.py",
-        "content": "import os\\n\\ndef main():\\n    print('Hello, World!')\\n\\nif __name__ == '__main__':\\n    main()\\n"
+        "task_description": "Create a simple Python script that defines a main function to print 'Hello, World!' and executes it under an `if __name__ == '__main__':` block."
       }}
     }}
     ```
 
     Now, generate the JSON tool call to accomplish the current task, following all directives.
+    """)
+
+
+# This prompt is used INSIDE the stream_and_write_file action.
+# It's a pure code generation prompt.
+CODER_PROMPT_STREAMING = textwrap.dedent("""
+    You are an expert Python programmer. Your sole task is to generate the complete, raw source code for a single file based on the provided instructions.
+
+    **CONTEXT: PROJECT FILE STRUCTURE**
+    This is the current file structure of the project you are working in. Use this to understand dependencies and module paths.
+    ```
+    {file_tree}
+    ```
+
+    **YOUR ASSIGNMENT:**
+    - **File Path:** `{path}`
+    - **Task Description:** `{task_description}`
+
+    **CODING DIRECTIVES (UNBREAKABLE LAWS):**
+    1.  {TYPE_HINTING_RULE}
+    2.  {DOCSTRING_RULE}
+    3.  {RAW_CODE_OUTPUT_RULE}
+
+    Now, generate the complete code for the file `{path}`.
     """)
