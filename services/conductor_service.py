@@ -48,54 +48,52 @@ class ConductorService:
             self.event_bus.emit("agent_status_changed", "Conductor", "Mission dispatched...", "fa5s.play-circle")
             self._post_chat_message("Conductor", "Mission received. Beginning autonomous TDD execution loop.")
 
-            # This loop will continue as long as there are tasks and the mission is active
             while self.is_mission_active:
                 pending_tasks = self.mission_log_service.get_tasks(done=False)
                 if not pending_tasks:
                     self.log("success", "All tasks completed.")
-                    break # Exit the loop if there are no more tasks
+                    break
 
                 current_task = pending_tasks[0]
                 self.log("info", f"Executing task {current_task['id']}: {current_task['description']}")
 
-                # --- *** THE FIX IS HERE: TDD-AWARE LOGIC *** ---
-                # Determine if this is a "Red" step (an expected test failure)
-                is_expected_to_fail = "confirm they fail" in current_task['description'].lower()
+                # --- *** THE FIX IS HERE: ROBUST TDD CHECK *** ---
+                task_desc_lower = current_task['description'].lower()
+                is_a_test_run_step = 'run the tests' in task_desc_lower or 'run the test suite' in task_desc_lower
+                is_failure_expected = 'fail' in task_desc_lower or 'error' in task_desc_lower
+                is_red_step = is_a_test_run_step and is_failure_expected
+                # --- END OF FIX ---
 
-                # Delegate the "how-to" to the Development Team to get the right tool call
                 tool_call = await self.development_team_service.run_coding_task(current_task)
                 if not tool_call:
                     raise RuntimeError(f"Could not determine a tool call for task: '{current_task['description']}'")
 
-                # Execute the tool
                 result = await self.tool_runner_service.run_tool_by_dict(tool_call)
 
-                # Now, evaluate the result based on whether it was expected to fail
                 is_actual_failure = False
-                if isinstance(result, dict) and 'status' in result: # This is a test result
-                    if is_expected_to_fail and result['status'] in ["failure", "error"]:
+                if isinstance(result, dict) and 'status' in result:
+                    if is_red_step and result['status'] in ["failure", "error"]:
                         self.log("success", "TDD 'Red' step successful: Tests failed as expected.")
                         self._post_chat_message("Conductor", "Tests failed as expected. Proceeding to implementation.")
-                    elif not is_expected_to_fail and result['status'] in ["failure", "error"]:
-                        is_actual_failure = True # This is a real bug
+                    elif not is_red_step and result['status'] in ["failure", "error"]:
+                        is_actual_failure = True
                         await self._execute_analysis_and_fix_phase(result)
-                        # The fix phase adds new tasks, so we break to restart the loop from the top
                         break
-                    elif is_expected_to_fail and result['status'] == 'success':
-                        self.log("warning", "TDD 'Red' step warning: Tests passed unexpectedly. The implementation may already exist.")
+                    elif is_red_step and result['status'] == 'success':
+                        self.log("warning",
+                                 "TDD 'Red' step warning: Tests passed unexpectedly. The implementation may already exist.")
 
                 elif isinstance(result, str) and result.lower().strip().startswith("error"):
-                    is_actual_failure = True # This is a tool execution error
+                    is_actual_failure = True
                     raise RuntimeError(f"Tool execution failed for task '{current_task['description']}': {result}")
 
-                # If we've reached here without an actual failure, the step was a success
                 if not is_actual_failure:
                     self.mission_log_service.mark_task_as_done(current_task['id'])
                     self._post_chat_message("Conductor", f"Task completed: {current_task['description']}")
                     await asyncio.sleep(0.5)
 
-            # After the loop, check if all tasks are done
-            if not self.mission_log_service.get_tasks(done=False):
+            # This check is now outside the loop; it runs only when the loop breaks.
+            if self.is_mission_active and not self.mission_log_service.get_tasks(done=False):
                 self.log("success", "Mission Accomplished! All tasks completed and verified.")
                 self.event_bus.emit("agent_status_changed", "Aura", "Mission Accomplished!", "fa5s.rocket")
                 self.event_bus.emit("mission_accomplished", MissionAccomplished())
@@ -110,16 +108,23 @@ class ConductorService:
             self.log("info", "Conductor has finished its cycle and is now idle.")
 
     async def _execute_analysis_and_fix_phase(self, test_result: dict):
-        """Triggers the reviewer to analyze the failure and propose a new plan."""
-        self._post_chat_message("Conductor", "A real failure was detected. Initiating self-correction protocol.", is_error=True)
+        """
+        Triggers the reviewer to analyze the failure, propose a new plan, and then
+        awaits the user's command to proceed.
+        """
+        self._post_chat_message("Conductor", "A failure was detected. Initiating self-correction protocol.",
+                                is_error=True)
         error_details = test_result.get('full_output', 'No detailed output available from test run.')
+
         await self.development_team_service.run_review_and_fix_phase(
             error_report=error_details,
             git_diff=self.development_team_service.project_manager.get_git_diff(),
             full_code_context=self.development_team_service.project_manager.get_project_files()
         )
-        self._post_chat_message("Aura", "I have analyzed the failure and created a new plan to fix it. Please review the Agent TODO list and click 'Dispatch Aura' to try again.", is_error=True)
 
+        self._post_chat_message("Aura",
+                                "I have analyzed the failure and created a new plan to fix it. Please review the Agent TODO list and click 'Dispatch Aura' to try again.",
+                                is_error=True)
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
