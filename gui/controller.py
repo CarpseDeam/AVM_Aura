@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QInputD
 from event_bus import EventBus
 from events import (
     UserPromptEntered, UserCommandEntered, PlanReadyForReview, AIWorkflowFinished, PostChatMessage,
-    ToolCallInitiated, ToolCallCompleted, MissionAccomplished, SystemAlertTriggered
+    ToolCallInitiated, ToolCallCompleted, MissionAccomplished
 )
 from services import MissionLogService, CommandHandler
 from .code_viewer import CodeViewerWindow
@@ -52,7 +52,6 @@ class GUIController(QObject):
         self.event_bus.subscribe("tool_call_initiated", self.on_tool_call_initiated)
         self.event_bus.subscribe("tool_call_completed", self.on_tool_call_completed)
         self.event_bus.subscribe("mission_accomplished", self.on_mission_accomplished)
-        self.event_bus.subscribe("system_alert_triggered", self.on_system_alert_triggered)
 
         self.project_manager: Optional["ProjectManager"] = None
         self.mission_log_service: Optional[MissionLogService] = None
@@ -75,11 +74,6 @@ class GUIController(QObject):
     def register_ui_elements(self, command_input, autocomplete_popup):
         self.command_input = command_input
         self.autocomplete_popup = autocomplete_popup
-
-    def on_system_alert_triggered(self, event: SystemAlertTriggered):
-        self._on_workflow_finished()
-        widget = SystemAlertWidget()
-        self._insert_widget(widget)
 
     def on_mission_accomplished(self, event: MissionAccomplished):
         self._on_workflow_finished()
@@ -116,8 +110,6 @@ class GUIController(QObject):
             "AURA": {"logo": "( O )", "name": "AURA"},
             "CONDUCTOR": {"logo": "⚙", "name": "CONDUCTOR"},
             "CODER": {"logo": "< >", "name": "CODER"},
-            "TESTER": {"logo": "✓", "name": "TESTER"},
-            "REVIEWER": {"logo": "⚲", "name": "REVIEWER"},
             "ARCHITECT": {"logo": "¶", "name": "ARCHITECT"},
             "FINALIZER": {"logo": "§", "name": "FINALIZER"},
         }
@@ -236,7 +228,7 @@ class GUIController(QObject):
             if isinstance(widget, UserMessageWidget):
                 history.append({"role": "user", "content": widget.message_label.text()})
             elif isinstance(widget, AIMessageWidget):
-                history.append({"role": "model", "content": widget.message_label.text()})
+                history.append({"role": "model", "content": widget.text})
         return history
 
     def get_full_chat_text(self) -> str:
@@ -246,7 +238,7 @@ class GUIController(QObject):
             if isinstance(widget, UserMessageWidget):
                 text_parts.append(f"User: {widget.message_label.text()}")
             elif isinstance(widget, AIMessageWidget):
-                history.append({"role": "model", "parts": [widget.message_label.text()]})
+                text_parts.append(f"Aura: {widget.text}")
         return "\n".join(text_parts)
 
     def on_text_changed(self):

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from event_bus import EventBus
 from events import StreamCodeChunk
 from prompts.coder import CODER_PROMPT_STREAMING
-from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE
+from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE, CLEAN_CODE_RULE
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
@@ -47,6 +47,7 @@ async def stream_and_write_file(path: str, task_description: str, project_manage
         file_tree=file_tree,
         TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
         DOCSTRING_RULE=DOCSTRING_RULE.strip(),
+        CLEAN_CODE_RULE=CLEAN_CODE_RULE.strip(),
         RAW_CODE_OUTPUT_RULE=RAW_CODE_OUTPUT_RULE.strip()
     )
 

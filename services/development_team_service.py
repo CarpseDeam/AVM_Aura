@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Any
 from event_bus import EventBus
 from prompts.creative import AURA_PLANNER_PROMPT, AURA_REPLANNER_PROMPT, AURA_MISSION_SUMMARY_PROMPT
 from prompts.coder import CODER_PROMPT
-from prompts.master_rules import JSON_OUTPUT_RULE
+from prompts.master_rules import JSON_OUTPUT_RULE, SENIOR_ARCHITECT_HEURISTIC_RULE
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -24,9 +24,9 @@ class DevelopmentTeamService:
         self.event_bus = event_bus
         self.service_manager = service_manager
         self.llm_client = service_manager.get_llm_client()
-        self.project_manager = service_manager.get_project_manager()
+        self.project_manager = service_manager.project_manager
         self.mission_log_service = service_manager.mission_log_service
-        self.vector_context_service = service_manager.get_vector_context_service()
+        self.vector_context_service = service_manager.vector_context_service
         self.foundry_manager = service_manager.get_foundry_manager()
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
@@ -52,6 +52,7 @@ class DevelopmentTeamService:
 
         self.event_bus.emit("agent_status_changed", "Aura", "Formulating an efficient plan...", "fa5s.lightbulb")
         prompt = AURA_PLANNER_PROMPT.format(
+            SENIOR_ARCHITECT_HEURISTIC_RULE=SENIOR_ARCHITECT_HEURISTIC_RULE.strip(),
             conversation_history="\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history]),
             user_idea=user_idea
         )
