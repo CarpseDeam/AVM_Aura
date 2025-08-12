@@ -1,3 +1,4 @@
+# services/tool_runner_service.py
 import logging
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
@@ -51,7 +52,6 @@ class ToolRunnerService:
         Dynamically creates the service map to ensure it always has the latest
         service instances, especially after a project change.
         """
-        # I am adding 'llm_client' to this map for injection.
         return {
             'project_manager': self.project_manager,
             'mission_log_service': self.mission_log_service,
@@ -84,10 +84,7 @@ class ToolRunnerService:
             print(error_msg)
             return error_msg
 
-        # Prepare parameters for ACTUAL EXECUTION (always with absolute paths)
         execution_params = self._prepare_parameters(action_function, invocation.parameters)
-
-        # Prepare separate parameters for DISPLAY (with relative paths)
         display_params = self._create_display_params(execution_params)
 
         print(f"▶️  Executing: {action_id} with params {display_params}")
@@ -102,13 +99,19 @@ class ToolRunnerService:
         result = None
         status = "FAILURE"
         try:
-            # Support both async and sync actions
             if inspect.iscoroutinefunction(action_function):
                 result = await action_function(**execution_params)
             else:
                 result = action_function(**execution_params)
 
-            status = "FAILURE" if isinstance(result, str) and result.strip().lower().startswith("error") else "SUCCESS"
+            # --- *** THE FIX IS HERE: INTELLIGENT STATUS CHECKING *** ---
+            if isinstance(result, str) and result.strip().lower().startswith("error"):
+                status = "FAILURE"
+            elif isinstance(result, dict) and result.get('status') in ["failure", "error"]:
+                status = "FAILURE"
+            else:
+                status = "SUCCESS"
+            # --- END OF FIX ---
 
             if status == "SUCCESS":
                 self.event_bus.emit("refresh_file_tree", RefreshFileTree())
@@ -165,12 +168,10 @@ class ToolRunnerService:
         display_params = {}
         service_keys = list(self._get_service_map().keys()) + ['project_context']
 
-        # First, filter out all complex service objects, leaving only simple data types.
         for key, value in execution_params.items():
             if key not in service_keys:
                 display_params[key] = value
 
-        # Now, safely perform path manipulation on the clean dictionary.
         base_path = self.project_manager.active_project_path
         if base_path:
             for key in self.PATH_PARAM_KEYS:
@@ -180,6 +181,5 @@ class ToolRunnerService:
                         if abs_path.is_absolute():
                             display_params[key] = str(abs_path.relative_to(base_path))
                     except ValueError:
-                        # Path is not within the project, leave it as absolute for clarity
                         pass
         return display_params

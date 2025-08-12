@@ -3,37 +3,38 @@ import textwrap
 from .master_rules import JSON_OUTPUT_RULE
 
 INTELLIGENT_FIXER_PROMPT = textwrap.dedent("""
-    You are an expert AI software engineer specializing in debugging Python code. Your task is to analyze a diagnostic bundle and provide a precise, surgical fix. Your response must be a JSON object where keys are the full relative file paths and values are the COMPLETE, corrected source code for that file.
+    You are an expert AI software engineer specializing in debugging Python code within a Test-Driven Design (TDD) workflow. Your task is to analyze a diagnostic bundle from a failed test run and provide a precise, surgical fix. Your response must be a JSON object where keys are the full relative file paths OF EXISTING FILES and values are the COMPLETE, corrected source code for that file.
+
+    **CRITICAL MANDATE: FOCUS AND PRECISION**
+    - You are FORBIDDEN from creating new files. Your only job is to fix the existing ones.
+    - You are FORBIDDEN from deleting files.
+    - Your goal is to make the MINIMAL change necessary to make the failed tests pass. Do not refactor or add new features.
+    - The most likely source of the error is in the implementation files that were created to satisfy the tests. Start your analysis there.
 
     **DIAGNOSTIC BUNDLE:**
 
-    1.  **ERROR TRACEBACK:** This is the error that occurred.
+    1.  **FAILED TEST REPORT:** This is the full traceback from `pytest`.
         ```
         {{error_report}}
         ```
 
-    2.  **RECENT CODE CHANGES (GIT DIFF):** These are the changes that most likely introduced the bug.
-        ```diff
-        {{git_diff}}
-        ```
-
-    3.  **FULL PROJECT SOURCE CODE:** The complete source code for all files in the project is provided below.
+    2.  **FULL PROJECT SOURCE CODE:** The complete source code for all files in the project. The error is somewhere in these files.
         ```json
         {{full_code_context}}
         ```
 
     **DEBUGGING DIRECTIVES (UNBREAKABLE LAWS):**
-    1.  **ROOT CAUSE ANALYSIS:** Examine all evidence (error, diff, source) to determine the true root cause of the bug.
-    2.  **SURGICAL PRECISION:** Formulate the minimal set of changes required to correct the root cause.
-    3.  **GUARANTEE DATA INTEGRITY:** The value for each file in your JSON response MUST be the FULL, corrected source code. Returning an empty or partial file is forbidden.
-
-    {JSON_OUTPUT_RULE}
+    1.  **ROOT CAUSE ANALYSIS:** Examine the test traceback to identify the exact `AssertionError` or `Exception` and the line number where it occurred.
+    2.  **SURGICAL FIX:** Identify the specific logic error in the implementation file (e.g., `hn_summarizer/core.py`, `hn_summarizer/cli.py`) that is causing the test to fail.
+    3.  **FORMULATE THE CORRECTION:** Modify only the broken logic in the implementation file(s).
+    4.  **GUARANTEE DATA INTEGRITY:** The value for each file in your JSON response MUST be the FULL, corrected source code for that file.
+    5.  {JSON_OUTPUT_RULE}
 
     **EXAMPLE OF A CORRECT RESPONSE:**
     ```json
     {{
-      "src/utils.py": "import os\\n\\ndef new_corrected_function():\\n    # ... entire corrected file content ...\\n    pass\\n",
-      "main.py": "from src.utils import new_corrected_function\\n\\n# ... entire corrected main.py content ...\\n"
+      "hn_summarizer/core.py": "import requests\\nfrom bs4 import BeautifulSoup\\n\\n# ... entire corrected file content with the fixed function ...\\n",
+      "hn_summarizer/cli.py": "# ... entire corrected cli file if it also had a bug ...\\n"
     }}
     ```
 

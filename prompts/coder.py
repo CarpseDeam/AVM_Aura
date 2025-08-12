@@ -55,6 +55,13 @@ CODER_PROMPT = textwrap.dedent("""
 CODER_PROMPT_STREAMING = textwrap.dedent("""
     You are an expert Python programmer. Your sole task is to generate the complete, raw source code for a single file based on the provided instructions.
 
+    **LAW: CORRECT REFERENCING**
+    When importing from another file within this project or using `mocker.patch`, the path MUST start with the project's package name (e.g., `hn_summary`), not a generic name like `core`.
+    - **BAD:** `from core import summarize_story`
+    - **BAD:** `mocker.patch('core.requests.get')`
+    - **GOOD:** `from hn_summary.core import summarize_story`
+    - **GOOD:** `mocker.patch('hn_summary.core.requests.get')`
+
     **CONTEXT: PROJECT FILE STRUCTURE**
     This is the current file structure of the project you are working in. Use this to understand dependencies and module paths.
     ```
