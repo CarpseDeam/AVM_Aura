@@ -133,11 +133,22 @@ class MessageRendererWidget(QScrollArea):
         # Create message block
         message_block = MessageBlock(message)
         
-        # Insert before the stretch
-        self.layout.insertWidget(self.layout.count() - 1, message_block)
+        # Insert the widget
+        self.add_widget(message_block)
         
         # Emit signal
         self.message_added.emit(message)
+
+    def add_widget(self, widget: QWidget):
+        """
+        Add a generic QWidget to the message display.
+        This is used for custom interactive widgets that aren't simple messages.
+        """
+        if not widget:
+            return
+        
+        # Insert before the stretch
+        self.layout.insertWidget(self.layout.count() - 1, widget)
         
         # Auto-scroll after a short delay for better UX
         self.scroll_timer.start(50)
@@ -166,7 +177,7 @@ class MessageRendererWidget(QScrollArea):
         self.messages.clear()
     
     def get_messages(self) -> List[AuraMessage]:
-        """Get all messages currently displayed"""
+        """Get all AuraMessage objects currently displayed"""
         return self.messages.copy()
     
     def _scroll_to_bottom(self):
@@ -194,49 +205,49 @@ class MessageRendererWidget(QScrollArea):
             
             /* Message Type Labels */
             QLabel[objectName^="MessageType_system"] {
-                color: #4CAF50;
+                color: #FFB74D; /* Amber */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_user_input"] {
-                color: #2196F3;
+                color: #4FC3F7; /* Bright Cyan/Blue */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_agent_thought"] {
-                color: #9E9E9E;
+                color: #78909C; /* Blue Grey */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_agent_response"] {
-                color: #FFB74D;
+                color: #AED581; /* Light Green */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_tool_call"] {
-                color: #9C27B0;
+                color: #CE93D8; /* Light Purple */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_tool_result"] {
-                color: #00BCD4;
+                color: #80CBC4; /* Teal */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
             }
             
             QLabel[objectName^="MessageType_error"] {
-                color: #F44336;
+                color: #F44336; /* Red */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
@@ -244,14 +255,14 @@ class MessageRendererWidget(QScrollArea):
             
             /* Message Content */
             QLabel[objectName^="MessageContent_system"] {
-                color: #4CAF50;
+                color: #FFB74D; /* Amber */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 13px;
                 padding: 4px 0px;
             }
             
             QLabel[objectName^="MessageContent_user_input"] {
-                color: #E3F2FD;
+                color: #E1F5FE; /* Lighter Cyan/Blue */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 14px;
                 font-weight: 500;
@@ -259,18 +270,18 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel[objectName^="MessageContent_agent_thought"] {
-                color: #757575;
+                color: #90A4AE; /* Lighter Blue Grey */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
                 font-style: italic;
                 padding: 3px 0px;
-                background-color: rgba(158, 158, 158, 0.05);
-                border-left: 2px solid #9E9E9E;
+                background-color: rgba(144, 164, 174, 0.05);
+                border-left: 2px solid #546E7A;
                 padding-left: 8px;
             }
             
             QLabel[objectName^="MessageContent_agent_response"] {
-                color: #FFB74D;
+                color: #DCE775; /* Lime */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 14px;
                 font-weight: 500;
@@ -279,7 +290,7 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel[objectName^="MessageContent_tool_call"] {
-                color: #CE93D8;
+                color: #E1BEE7; /* Lighter Purple */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
                 padding: 4px 0px;
@@ -289,20 +300,20 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel[objectName^="MessageContent_tool_result"] {
-                color: #4DD0E1;
+                color: #A7FFEB; /* Lighter Teal */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
                 padding: 4px 0px;
             }
             
             QLabel[objectName^="MessageContent_error"] {
-                color: #FFCDD2;
+                color: #FFCDD2; /* Light Red */
                 background-color: rgba(244, 67, 54, 0.1);
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 13px;
                 padding: 8px;
                 border-radius: 4px;
-                border-left: 3px solid #F44336;
+                border-left: 3px solid #E53935;
             }
             
             /* Timestamps and Metadata */
@@ -313,7 +324,7 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel#MessageMetadata {
-                color: #9E9E9E;
+                color: #B0BEC5; /* Blue Grey */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 11px;
                 font-style: italic;
