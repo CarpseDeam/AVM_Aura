@@ -12,9 +12,20 @@ class CreativeAssistantPrompt:
 
     _process = """
     **YOUR PROCESS:**
-    1.  **CONVERSE NATURALLY:** Your primary goal is to have a natural, helpful, plain-text conversation.
-    2.  **IDENTIFY TASKS:** As you and the user identify concrete, high-level steps for the project, you must decide to call a tool to add that step to the shared to-do list.
-    3.  **APPEND TOOL CALL:** If you decide to add a task, you **MUST** append a special block to the very end of your conversational response. The block must be formatted exactly like this: `[TOOL_CALL]{"tool_name": "add_task_to_mission_log", "arguments": {"description": "The task to be added"}}[/TOOL_CALL]`
+    1.  **THINK THROUGH THE REQUEST:** Start by analyzing the user's message in a <thought> section to understand their needs and identify any tasks.
+    2.  **PROVIDE YOUR RESPONSE:** Give your natural, helpful response in a <response> section.
+    3.  **EXECUTE TOOLS IF NEEDED:** If you identified concrete tasks during your thinking, append tool calls after your response using the standard format.
+
+    **OUTPUT STRUCTURE:**
+    <thought>
+    Your internal reasoning about the user's message. What are they asking for? Should I add any tasks to the mission log?
+    </thought>
+
+    <response>
+    Your natural, conversational response to the user.
+    </response>
+
+    [If adding tasks, include tool calls here using the existing format]
     """
 
     _tool_definition = """
@@ -30,10 +41,24 @@ class CreativeAssistantPrompt:
 
     _examples = """
     **EXAMPLE RESPONSE (A task was identified):**
-    Great idea! Saving favorites is a must-have. I've added it to our list. What should we think about next?[TOOL_CALL]{"tool_name": "add_task_to_mission_log", "arguments": {"description": "Allow users to save their favorite recipes"}}[/TOOL_CALL]
+    <thought>
+    The user mentioned wanting to save favorite recipes. This is a concrete feature that should be added to our project plan.
+    </thought>
+
+    <response>
+    Great idea! Saving favorites is a must-have feature. I've added it to our list. What should we think about next?
+    </response>
+
+    [TOOL_CALL]{"tool_name": "add_task_to_mission_log", "arguments": {"description": "Allow users to save their favorite recipes"}}[/TOOL_CALL]
 
     **EXAMPLE RESPONSE (Just chatting, no new task):**
+    <thought>
+    The user is asking about what functionality should come first. This is exploratory conversation, not a concrete task yet.
+    </thought>
+
+    <response>
     That sounds delicious! What's the first thing a user should be able to do? Search for recipes?
+    </response>
     """
 
     def render(self, user_idea: str, conversation_history: str) -> str:

@@ -12,6 +12,7 @@ from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
 from .widgets.thinking_scanner_widget import ThinkingScannerWidget
+from .widgets.message_renderer_widget import MessageRendererWidget
 from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class AuraMainWindow(QMainWindow):
             logger.warning(f"Window icon not found at {icon_path}")
 
         self._setup_ui()
-        self.controller = GUIController(self, self.event_bus, self.chat_layout, self.scroll_area)
+        self.controller = GUIController(self, self.event_bus, self.message_renderer)
         self.controller.register_ui_elements(
             command_input=self.command_input,
             autocomplete_popup=self.autocomplete_popup
@@ -73,19 +74,9 @@ class AuraMainWindow(QMainWindow):
         self.thinking_scanner.hide()
         left_column_layout.addWidget(self.thinking_scanner)
 
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setObjectName("ScrollArea")
-        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-
-        chat_container = QWidget()
-        self.chat_layout = QVBoxLayout(chat_container)
-        self.chat_layout.setContentsMargins(10, 10, 10, 10)
-        self.chat_layout.setSpacing(10)
-        self.chat_layout.addStretch(1)
-
-        self.scroll_area.setWidget(chat_container)
-        left_column_layout.addWidget(self.scroll_area)
+        # Add the new MessageRendererWidget instead of old scroll area
+        self.message_renderer = MessageRendererWidget()
+        left_column_layout.addWidget(self.message_renderer)
 
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")

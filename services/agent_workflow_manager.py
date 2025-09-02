@@ -1,10 +1,12 @@
 from __future__ import annotations
 import json
 import re
-from typing import TYPE_CHECKING, Dict, List, Any
+from typing import TYPE_CHECKING, Dict, List, Any, Generator, AsyncGenerator
 
 from core.prompt_templates.creative import CreativeAssistantPrompt
 from core.prompt_templates.iterative_architect import IterativeArchitectPrompt
+from core.models.messages import AuraMessage, MessageType
+from core.stream_parser import parse_llm_stream_async
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -55,10 +57,19 @@ class AgentWorkflowManager:
         handler = workflow["handler"]
         await handler(user_idea, conversation_history)
 
+    def _post_structured_message(self, message: AuraMessage):
+        """Post a structured message to the command deck"""
+        if message.content and message.content.strip():
+            self.event_bus.emit("post_structured_message", message)
+    
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
-        from events import PostChatMessage
+        """Legacy method - converts to structured message"""
         if message and message.strip():
-            self.event_bus.emit("post_chat_message", PostChatMessage(sender, message, is_error))
+            if is_error:
+                structured_msg = AuraMessage.error(message)
+            else:
+                structured_msg = AuraMessage.agent_response(message)
+            self._post_structured_message(structured_msg)
 
     def _parse_json_response(self, response: str) -> dict:
         match = re.search(r'\{.*\}', response, re.DOTALL)
@@ -69,7 +80,7 @@ class AgentWorkflowManager:
     def handle_error(self, agent: str, error_msg: str):
         self.log("error", f"{agent} failed: {error_msg}")
         self.event_bus.emit("agent_status_changed", "Aura", "Failed", "fa5s.exclamation-triangle")
-        self._post_chat_message("Aura", error_msg, is_error=True)
+        self._post_structured_message(AuraMessage.error(error_msg))
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "AgentWorkflowManager", level, message)
@@ -85,18 +96,33 @@ class AgentWorkflowManager:
             return
 
         history = conversation_history + [{"role": "user", "content": user_idea}]
-        prompt = "You are Aura, a helpful AI assistant. Respond to the user conversationally."
+        prompt = """You are Aura, a helpful AI assistant. Respond to the user conversationally.
+
+Structure your response as follows:
+<thought>
+Brief analysis of what the user is asking and how you should respond.
+</thought>
+
+<response>
+Your natural, conversational response to the user.
+</response>"""
         
         # Signal processing start
         self.event_bus.emit("processing_started")
         
-        response_str = "".join(
-            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)])
-        
-        # Signal processing complete
-        self.event_bus.emit("processing_finished")
-        
-        self._post_chat_message("Aura", response_str)
+        try:
+            # Stream and parse messages in real-time
+            stream_chunks = self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)
+            structured_messages = parse_llm_stream_async(stream_chunks)
+            
+            async for message in structured_messages:
+                self._post_structured_message(message)
+                
+        except Exception as e:
+            self.handle_error("Aura", f"Chat workflow failed: {str(e)}")
+        finally:
+            # Signal processing complete
+            self.event_bus.emit("processing_finished")
 
     async def _run_creative_assistant_workflow(self, user_idea: str, conversation_history: list):
         """
@@ -117,29 +143,47 @@ class AgentWorkflowManager:
         # Signal processing start
         self.event_bus.emit("processing_started")
         
-        response_str = "".join(
-            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "planner")])
-
-        # Signal processing complete
-        self.event_bus.emit("processing_finished")
-
-        tool_call_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', response_str, re.DOTALL)
-        conversational_text = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', response_str).strip()
-
-        if conversational_text:
-            self._post_chat_message("Aura", conversational_text)
-
-        if tool_call_match:
-            try:
-                from events import PlanReadyForReview
-                tool_call_str = tool_call_match.group(1)
-                tool_call_data = json.loads(tool_call_str)
-                self.log("info", f"Creative assistant identified a task: {tool_call_data}")
-                await self.tool_runner_service.run_tool_by_dict(tool_call_data)
-                self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
-            except (json.JSONDecodeError, KeyError) as e:
-                self.handle_error("Aura", f"Invalid tool call format from creative assistant: {e}")
-                self.log("error", f"Creative assistant tool call failure. Raw block: {tool_call_match.group(0)}")
+        try:
+            # Stream and parse messages in real-time
+            stream_chunks = self.llm_client.stream_chat(provider, model, prompt, "planner")
+            structured_messages = parse_llm_stream_async(stream_chunks)
+            
+            tool_calls_found = []
+            
+            async for message in structured_messages:
+                self._post_structured_message(message)
+                
+                # Check if this is a tool call message to process later
+                if message.type == MessageType.TOOL_CALL:
+                    tool_calls_found.append(message)
+            
+            # Process any tool calls that were found
+            for tool_message in tool_calls_found:
+                try:
+                    from events import PlanReadyForReview
+                    # Try to extract JSON from the tool call content
+                    tool_call_match = re.search(r'\{.*\}', tool_message.content, re.DOTALL)
+                    if tool_call_match:
+                        tool_call_data = json.loads(tool_call_match.group(0))
+                        self.log("info", f"Creative assistant identified a task: {tool_call_data}")
+                        
+                        # Post tool execution message
+                        self._post_structured_message(AuraMessage.tool_result(
+                            f"Executing {tool_call_data.get('tool_name', 'unknown tool')}...",
+                            tool_name=tool_call_data.get('tool_name')
+                        ))
+                        
+                        await self.tool_runner_service.run_tool_by_dict(tool_call_data)
+                        self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
+                except (json.JSONDecodeError, KeyError) as e:
+                    self.handle_error("Aura", f"Invalid tool call format from creative assistant: {e}")
+                    self.log("error", f"Creative assistant tool call failure: {str(e)}")
+                    
+        except Exception as e:
+            self.handle_error("Aura", f"Creative assistant workflow failed: {str(e)}")
+        finally:
+            # Signal processing complete
+            self.event_bus.emit("processing_finished")
 
     async def _run_iterative_architect_workflow(self, user_request: str, conversation_history: list):
         """

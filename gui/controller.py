@@ -13,6 +13,7 @@ from events import (
     ToolCallInitiated, ToolCallCompleted, MissionAccomplished
 )
 from services import MissionLogService, CommandHandler
+from core.models.messages import AuraMessage, MessageType
 from .code_viewer import CodeViewerWindow
 from .node_viewer_placeholder import NodeViewerWindow
 from .mission_log_window import MissionLogWindow
@@ -22,6 +23,7 @@ from .chat_widgets import (
     MissionAccomplishedWidget, SystemAlertWidget
 )
 from .command_input_widget import CommandInputWidget
+from .widgets.message_renderer_widget import MessageRendererWidget
 from services import view_formatter
 
 if TYPE_CHECKING:
@@ -38,15 +40,16 @@ class GUIController(QObject):
     add_system_message_signal = Signal(str)
     update_status_signal = Signal(str, str, bool, object, object)
 
-    def __init__(self, main_window, event_bus: EventBus, chat_layout: QVBoxLayout, scroll_area: QScrollArea):
+    def __init__(self, main_window, event_bus: EventBus, message_renderer: MessageRendererWidget):
         super().__init__()
         self.main_window = main_window
         self.event_bus = event_bus
-        self.chat_layout = chat_layout
-        self.scroll_area = scroll_area
+        self.message_renderer = message_renderer
 
+        # Subscribe to event bus events
         self.event_bus.subscribe("agent_status_changed", self.on_status_update)
-        self.event_bus.subscribe("post_chat_message", self.on_post_chat_message)
+        self.event_bus.subscribe("post_chat_message", self.on_post_chat_message)  # Legacy support
+        self.event_bus.subscribe("post_structured_message", self.on_post_structured_message)  # New system
         self.event_bus.subscribe("ai_workflow_finished", self._on_workflow_finished)
         self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
         self.event_bus.subscribe("tool_call_initiated", self.on_tool_call_initiated)
@@ -94,8 +97,17 @@ class GUIController(QObject):
             logger.warning(f"Received ToolCallCompleted for unknown widget_id: {event.widget_id}")
 
     def on_post_chat_message(self, event: PostChatMessage):
-        """Event handler to post a message from a service to the chat."""
-        self.add_ai_message_signal.emit(event.message, event.sender)
+        """Legacy event handler - converts to structured message"""
+        # Convert legacy PostChatMessage to structured AuraMessage
+        if event.is_error:
+            message = AuraMessage.error(event.message)
+        else:
+            message = AuraMessage.agent_response(event.message)
+        self.message_renderer.add_message(message)
+    
+    def on_post_structured_message(self, message: AuraMessage):
+        """New event handler for structured messages"""
+        self.message_renderer.add_message(message)
 
     def on_status_update(self, agent_name: str, status_text: str, icon_name: str):
         """Event handler that receives status updates from any thread."""
@@ -183,10 +195,16 @@ class GUIController(QObject):
             self.event_bus.emit("user_request_submitted", event)
 
     def post_welcome_message(self):
-        boot_widget = BootSequenceWidget()
-        # Add the widget with explicit left alignment to override layout centering.
-        self.chat_layout.insertWidget(self.chat_layout.count() - 1, boot_widget, 0, Qt.AlignmentFlag.AlignLeft)
-        QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(boot_widget))
+        """Post the system startup message"""
+        welcome_msg = """AURA Command Deck Initialized
+        
+Status: READY
+System: Online
+Mode: Interactive
+
+Enter your commands or describe what you want to build..."""
+        
+        self.message_renderer.add_message(AuraMessage.system(welcome_msg))
 
     @Slot()
     def _on_workflow_finished(self, event=None):
@@ -200,16 +218,14 @@ class GUIController(QObject):
 
     @Slot(str)
     def _add_system_message(self, message: str):
-        self._on_workflow_finished()
-        widget = QLabel(message)
-        widget.setWordWrap(True)
-        widget.setObjectName("SystemMessage")
-        self._insert_widget(widget)
+        """Add system message to the new structured message renderer"""
+        self.message_renderer.add_message(AuraMessage.system(message))
 
     @Slot(str)
     def _add_user_message(self, text: str):
-        widget = UserMessageWidget(text)
-        self._insert_widget(widget)
+        """Add user message to the new structured message renderer"""
+        message = AuraMessage.user_input(text)
+        self.message_renderer.add_message(message)
 
     @Slot(str, str)
     def _add_ai_message(self, text: str, author: str):
