@@ -1,11 +1,27 @@
-# GUI Framework - Essential for the application's user interface
+# GUI Framework
 PySide6
-
-# Asyncio support for PySide6 - Enables running async code with the GUI
 qasync
 
-# Asynchronous HTTP client for communicating with the AI server
+# LLM & AI Core
+litellm
+google-generativeai
+sentence-transformers
+tiktoken
+
+# Vector Database
+chromadb-client
+
+# API Server
+fastapi
+uvicorn[standard]
+pydantic
 aiohttp
 
-# Environment variable management
+# Utilities
 python-dotenv
+PyYAML
+GitPython
+
+# Development & Testing
+pytest
+watchdog

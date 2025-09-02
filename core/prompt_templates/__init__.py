@@ -6,12 +6,24 @@ for a specific AI agent in the system.
 """
 from .architect import ArchitectPrompt
 from .coder import CoderPrompt
+from .commit_author import CommitAuthorPrompt
+from .creative import CreativeAssistantPrompt
+from .dispatcher import DispatcherPrompt
+from .inquisitor import InquisitorPrompt
+from .iterative_architect import IterativeArchitectPrompt
 from .replan import RePlannerPrompt
+from .sentry import SENTRY_PROMPT
 from .summarizer import MissionSummarizerPrompt
 
 __all__ = [
     "ArchitectPrompt",
     "CoderPrompt",
+    "CommitAuthorPrompt",
+    "CreativeAssistantPrompt",
+    "DispatcherPrompt",
+    "InquisitorPrompt",
+    "IterativeArchitectPrompt",
     "RePlannerPrompt",
+    "SENTRY_PROMPT",
     "MissionSummarizerPrompt",
 ]
