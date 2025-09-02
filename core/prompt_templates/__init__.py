@@ -8,7 +8,7 @@ from .architect import ArchitectPrompt
 from .coder import CoderPrompt
 from .commit_author import CommitAuthorPrompt
 from .creative import CreativeAssistantPrompt
-from .dispatcher import DispatcherPrompt
+from .dispatcher import ChiefOfStaffDispatcherPrompt
 from .inquisitor import InquisitorPrompt
 from .iterative_architect import IterativeArchitectPrompt
 from .replan import RePlannerPrompt
@@ -20,7 +20,7 @@ __all__ = [
     "CoderPrompt",
     "CommitAuthorPrompt",
     "CreativeAssistantPrompt",
-    "DispatcherPrompt",
+    "ChiefOfStaffDispatcherPrompt",
     "InquisitorPrompt",
     "IterativeArchitectPrompt",
     "RePlannerPrompt",
