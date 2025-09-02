@@ -1,0 +1,23 @@
+# Web server framework for the LLM API
+fastapi
+
+# ASGI server to run FastAPI
+uvicorn[standard]
+
+# OpenAI library for GPT and DeepSeek models
+openai
+
+# Anthropic library for Claude models
+anthropic
+
+# Google Generative AI library for Gemini models
+google-generativeai
+
+# Asynchronous HTTP client for connecting to Ollama
+aiohttp
+
+# For loading environment variables from .env files
+python-dotenv
+
+# For parsing YAML configuration files
+PyYAML

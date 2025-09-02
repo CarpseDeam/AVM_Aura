@@ -1,3 +1,11 @@
-requests
+# GUI Framework - Essential for the application's user interface
+PySide6
+
+# Asyncio support for PySide6 - Enables running async code with the GUI
+qasync
+
+# Asynchronous HTTP client for communicating with the AI server
+aiohttp
+
+# Environment variable management
 python-dotenv
-airtable-python-wrapper
