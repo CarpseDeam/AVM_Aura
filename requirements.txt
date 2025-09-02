@@ -1,35 +1,3 @@
-PySide6
-qasync
-qtawesome
-Pygments
-unidiff
-aiohttp
-GitPython
-openai
-anthropic
-google-generativeai
-googleapis-common-protos
-proto-plus
-protobuf
-grpcio
-Pillow
-
-# RAG & Vector DB
-chromadb
-sentence-transformers
-langchain-community
-
-# Web Server for local APIs
-fastapi
-uvicorn[standard]
+requests
 python-dotenv
-aiohttp
-
-
-# --- Professional Testing & QA Suite ---
-python-lsp-server[all]
-pytest          # The core testing framework
-pytest-mock     # For creating mock objects (essential for service testing)
-pytest-asyncio  # For running async tests correctly
-pytest-cov      # For measuring test coverage
-ruff            # Modern, high-performance linter and code formatter
+airtable-python-wrapper

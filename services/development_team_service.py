@@ -5,9 +5,10 @@ import re
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 from event_bus import EventBus
-from prompts.creative import AURA_PLANNER_PROMPT, AURA_REPLANNER_PROMPT, AURA_MISSION_SUMMARY_PROMPT
-from prompts.coder import CODER_PROMPT
-from prompts.master_rules import JSON_OUTPUT_RULE, SENIOR_ARCHITECT_HEURISTIC_RULE
+from core.prompt_templates.creative import AURA_PLANNER_PROMPT, AURA_REPLANNER_PROMPT, AURA_MISSION_SUMMARY_PROMPT
+from core.prompt_templates.coder import CODER_PROMPT
+from core.prompt_templates.sentry import SENTRY_PROMPT
+from core.prompt_templates.master_rules import JSON_OUTPUT_RULE, SENIOR_ARCHITECT_HEURISTIC_RULE
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -136,6 +137,51 @@ class DevelopmentTeamService:
             return tool_call
         except (ValueError, json.JSONDecodeError) as e:
             self.log("error", f"Coder generation failure. Raw response: {response_str}. Error: {e}")
+            return None
+
+    async def run_sentry_task(self, task: Dict[str, any]) -> Optional[Dict[str, str]]:
+        """
+        Asks the Sentry AI to analyze a file for bugs and generate a failing test.
+        """
+        file_path = task.get("file_path")
+        if not file_path:
+            self.log("error", "Sentry task requires a 'file_path' in the task arguments.")
+            return None
+
+        self.log("info", f"Sentry analyzing file for bugs: {file_path}")
+        self.event_bus.emit("agent_status_changed", "Aura", f"Analyzing for bugs: {file_path}...", "fa5s.search")
+
+        code_content = self.project_manager.read_file(file_path)
+        if code_content is None:
+            self.log("error", f"Sentry could not read the file: {file_path}")
+            self.handle_error("Sentry", f"Could not read file: {file_path}")
+            return None
+
+        prompt = SENTRY_PROMPT.format(
+            file_path=file_path,
+            code_content=code_content
+        )
+
+        provider, model = self.llm_client.get_model_for_role("sentry")
+        if not provider or not model:
+            self.log("error", "No 'sentry' model configured.")
+            self.handle_error("Sentry", "No 'sentry' model configured.")
+            return None
+
+        response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "sentry")])
+
+        try:
+            tool_call = self._parse_json_response(response_str)
+            if "tool_name" not in tool_call or "arguments" not in tool_call:
+                raise ValueError("Sentry response must be a JSON object with 'tool_name' and 'arguments' keys.")
+            
+            if tool_call.get("tool_name") != "stream_and_write_file":
+                 self.log("warning", f"Sentry returned an unexpected tool: {tool_call.get('tool_name')}")
+
+            return tool_call
+        except (ValueError, json.JSONDecodeError) as e:
+            self.log("error", f"Sentry generation failure. Raw response: {response_str}. Error: {e}")
+            self.handle_error("Sentry", f"Failed to generate a valid test: {e}")
             return None
 
     async def run_strategic_replan(self, original_goal: str, failed_task: Dict, mission_log: List[Dict]):
