@@ -1,4 +1,4 @@
-from prompts.master_rules import SENIOR_ARCHITECT_HEURISTIC_RULE
+from core.prompt_templates.rules import SENIOR_ARCHITECT_HEURISTIC_RULE
 
 
 class AuraPlannerPrompt:

@@ -5,10 +5,13 @@ import re
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 from event_bus import EventBus
-from core.prompt_templates.creative import AURA_PLANNER_PROMPT, AURA_REPLANNER_PROMPT, AURA_MISSION_SUMMARY_PROMPT
-from core.prompt_templates.coder import CODER_PROMPT
+from core.prompt_templates.architect import ArchitectPrompt
+from core.prompt_templates.creative import CreativeAssistantPrompt
+from core.prompt_templates.iterative_architect import IterativeArchitectPrompt
+from core.prompt_templates.coder import CoderPrompt
+from core.prompt_templates.replan import RePlannerPrompt
 from core.prompt_templates.sentry import SENTRY_PROMPT
-from core.prompt_templates.master_rules import JSON_OUTPUT_RULE, SENIOR_ARCHITECT_HEURISTIC_RULE
+from core.prompt_templates.summarizer import MissionSummarizerPrompt
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -29,6 +32,7 @@ class DevelopmentTeamService:
         self.mission_log_service = service_manager.mission_log_service
         self.vector_context_service = service_manager.vector_context_service
         self.foundry_manager = service_manager.get_foundry_manager()
+        self.tool_runner_service = service_manager.tool_runner_service
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         if message and message.strip():
@@ -39,6 +43,107 @@ class DevelopmentTeamService:
         if not match:
             raise ValueError(f"No JSON object found in the response. Raw response: {response}")
         return json.loads(match.group(0))
+
+    async def handle_user_prompt(self, user_idea: str, conversation_history: list):
+        """
+        Primary entry point for a user's message.
+        Routes to the appropriate workflow based on the mission log's state.
+        """
+        pending_tasks = self.mission_log_service.get_tasks(done=False)
+        if not pending_tasks:
+            self.log("info", "No pending tasks. Starting creative assistant workflow.")
+            await self.run_creative_assistant_workflow(user_idea, conversation_history)
+        else:
+            self.log("info", "Pending tasks exist. Starting iterative architect workflow.")
+            await self.run_iterative_architect_workflow(user_idea, conversation_history)
+
+    async def run_creative_assistant_workflow(self, user_idea: str, conversation_history: list):
+        """
+        Handles the initial brainstorming and collaborative planning with the user.
+        """
+        self.log("info", f"Creative assistant workflow initiated for: '{user_idea[:50]}...'")
+        self.event_bus.emit("agent_status_changed", "Aura", "Brainstorming ideas...", "fa5s.lightbulb")
+
+        provider, model = self.llm_client.get_model_for_role("planner")
+        if not provider or not model:
+            self.handle_error("Aura", "No 'planner' model configured.")
+            return
+
+        prompt_template = CreativeAssistantPrompt()
+        conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
+        prompt = prompt_template.render(user_idea=user_idea, conversation_history=conv_history_str)
+
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "planner")])
+
+        # Look for a tool call block
+        tool_call_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', response_str, re.DOTALL)
+        conversational_text = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', response_str).strip()
+
+        # Post the conversational part back to the user
+        if conversational_text:
+            self._post_chat_message("Aura", conversational_text)
+
+        # If a tool call was found, execute it
+        if tool_call_match:
+            try:
+                tool_call_str = tool_call_match.group(1)
+                tool_call_data = json.loads(tool_call_str)
+                self.log("info", f"Creative assistant identified a task: {tool_call_data}")
+                # This will add the task to the mission log
+                await self.tool_runner_service.run_tool_by_dict(tool_call_data)
+                self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
+            except (json.JSONDecodeError, KeyError) as e:
+                self.handle_error("Aura", f"Invalid tool call format from creative assistant: {e}")
+                self.log("error", f"Creative assistant tool call failure. Raw block: {tool_call_match.group(0)}")
+
+
+    async def run_iterative_architect_workflow(self, user_request: str, conversation_history: list):
+        """
+        Handles a user's request to modify an existing plan or codebase.
+        """
+        self.log("info", f"Iterative architect workflow initiated for: '{user_request[:50]}...'")
+        self.event_bus.emit("agent_status_changed", "Aura", "Updating the plan...", "fa5s.pencil-ruler")
+
+        provider, model = self.llm_client.get_model_for_role("architect")
+        if not provider or not model:
+            self.handle_error("Aura", "No 'architect' model configured.")
+            return
+
+        # Gather context
+        file_structure = "\n".join(sorted(self.project_manager.get_project_files().keys())) or "The project is currently empty."
+        available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
+        
+        # For now, we'll pass an empty string for RAG snippets. This can be enhanced later.
+        relevant_code_snippets = "No relevant code snippets were retrieved for this modification."
+
+        prompt_template = IterativeArchitectPrompt()
+        prompt = prompt_template.render(
+            user_request=user_request,
+            file_structure=file_structure,
+            relevant_code_snippets=relevant_code_snippets,
+            available_tools=available_tools
+        )
+
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "architect")])
+
+        try:
+            response_data = self._parse_json_response(response_str)
+            new_tasks = response_data.get("plan", [])
+            if not new_tasks:
+                raise ValueError("Iterative architect returned an empty plan.")
+
+            for task in new_tasks:
+                self.mission_log_service.add_task(task)
+            
+            self._post_chat_message("Aura", "I've updated the plan with your requested changes. Please review the new tasks in the 'Agent TODO' list.")
+            self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
+
+        except (ValueError, json.JSONDecodeError) as e:
+            self.handle_error("Aura", f"Failed to update the plan: {e}")
+            self.log("error", f"Iterative architect failure. Raw response: {response_str}")
+
 
     async def run_aura_planner_workflow(self, user_idea: str, conversation_history: list):
         """
@@ -52,11 +157,11 @@ class DevelopmentTeamService:
             return
 
         self.event_bus.emit("agent_status_changed", "Aura", "Formulating an efficient plan...", "fa5s.lightbulb")
-        prompt = AURA_PLANNER_PROMPT.format(
-            SENIOR_ARCHITECT_HEURISTIC_RULE=SENIOR_ARCHITECT_HEURISTIC_RULE.strip(),
-            conversation_history="\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history]),
-            user_idea=user_idea
-        )
+        
+        prompt_template = ArchitectPrompt()
+        conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
+        prompt = prompt_template.render(user_idea=user_idea, conversation_history=conv_history_str)
+
         response_str = "".join(
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "planner")])
 
@@ -86,7 +191,6 @@ class DevelopmentTeamService:
         self.log("info", f"Coder translating task to tool call: {current_task_description}")
         self.event_bus.emit("agent_status_changed", "Aura", f"Coding task: {current_task_description}...", "fa5s.cogs")
 
-        # Get history from Mission Log
         log_tasks = self.mission_log_service.get_tasks()
         mission_log_history = "\n".join(
             [f"- ID {t['id']} ({'Done' if t['done'] else 'Pending'}): {t['description']}" for t in log_tasks])
@@ -96,7 +200,6 @@ class DevelopmentTeamService:
         if last_error:
             current_task_description += f"\n\n**PREVIOUS ATTEMPT FAILED!** The last attempt to perform this task failed with the following error: `{last_error}`. You MUST analyze this error and try a different tool or different arguments to succeed."
 
-        # Get RAG context
         vector_context = "No existing code snippets were found."
         if self.vector_context_service and self.vector_context_service.collection.count() > 0:
             try:
@@ -109,18 +212,17 @@ class DevelopmentTeamService:
             except Exception as e:
                 self.log("error", f"Failed to query vector context: {e}")
 
-        # Get other context
         file_structure = "\n".join(
             sorted(self.project_manager.get_project_files().keys())) or "The project is currently empty."
         available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
 
-        prompt = CODER_PROMPT.format(
+        prompt_template = CoderPrompt()
+        prompt = prompt_template.render(
             current_task=current_task_description,
             mission_log=mission_log_history,
             available_tools=available_tools,
             file_structure=file_structure,
-            relevant_code_snippets=vector_context,
-            JSON_OUTPUT_RULE=JSON_OUTPUT_RULE.strip()
+            relevant_code_snippets=vector_context
         )
 
         provider, model = self.llm_client.get_model_for_role("coder")
@@ -197,7 +299,8 @@ class DevelopmentTeamService:
         failed_task_str = f"ID {failed_task['id']}: {failed_task['description']}"
         error_message = failed_task.get('last_error', 'No specific error message was recorded.')
 
-        prompt = AURA_REPLANNER_PROMPT.format(
+        prompt_template = RePlannerPrompt()
+        prompt = prompt_template.render(
             user_goal=original_goal,
             mission_log=mission_log_str,
             failed_task=failed_task_str,
@@ -233,7 +336,8 @@ class DevelopmentTeamService:
         if not task_descriptions:
             return "Mission accomplished, although no specific tasks were marked as completed in the log."
 
-        prompt = AURA_MISSION_SUMMARY_PROMPT.format(completed_tasks=task_descriptions)
+        prompt_template = MissionSummarizerPrompt()
+        prompt = prompt_template.render(completed_tasks=task_descriptions)
 
         provider, model = self.llm_client.get_model_for_role("chat")
         if not provider or not model:

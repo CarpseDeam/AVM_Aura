@@ -8,8 +8,8 @@ from core.llm_client import LLMClient
 from services.vector_context_service import VectorContextService
 from core.managers.project_manager import ProjectManager
 from foundry import FoundryManager
-from prompts import CODER_PROMPT
-from prompts.master_rules import JSON_OUTPUT_RULE
+from core.prompt_templates.coder import CODER_PROMPT
+from core.prompt_templates.rules import JSON_OUTPUT_RULE
 
 
 class CoderService:

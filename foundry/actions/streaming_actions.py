@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 from event_bus import EventBus
 from events import StreamCodeChunk
-from prompts.coder import CODER_PROMPT_STREAMING
-from prompts.master_rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE, CLEAN_CODE_RULE
+from core.prompt_templates.coder import CODER_PROMPT_STREAMING
+from core.prompt_templates.rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE, CLEAN_CODE_RULE
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
