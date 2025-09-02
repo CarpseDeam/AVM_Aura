@@ -175,3 +175,17 @@ class MissionLogService:
     def get_initial_goal(self) -> str:
         """Returns the initial user goal that started the mission."""
         return self._initial_user_goal
+
+    def get_log_as_string_summary(self) -> str:
+        """Returns a concise string summary of the mission log state."""
+        tasks = self.get_tasks()
+        if not tasks:
+            return "State: EMPTY. No tasks in the mission log."
+        
+        pending = [t for t in tasks if not t['done']]
+        done = [t for t in tasks if t['done']]
+        
+        if pending:
+            return f"State: IN_PROGRESS. {len(done)} tasks done, {len(pending)} tasks pending. Next up: '{pending[0]['description']}'"
+        else:
+            return f"State: COMPLETE. All {len(done)} tasks are done."

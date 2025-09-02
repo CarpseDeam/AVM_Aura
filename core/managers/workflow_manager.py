@@ -29,7 +29,7 @@ class WorkflowManager:
     def handle_user_request(self, event: UserPromptEntered):
         """
         The central router for all user chat input.
-        This workflow always interprets user input as a request to create a high-level plan.
+        It passes the request to the DevelopmentTeamService's intelligent dispatcher.
         """
         prompt = event.prompt_text
         if not prompt.strip() and not event.image_bytes:
@@ -37,8 +37,8 @@ class WorkflowManager:
 
         dev_team_service = self.service_manager.get_development_team_service()
 
-        # The user's prompt is a direct instruction to have Aura create a plan.
-        workflow_coroutine = dev_team_service.run_aura_planner_workflow(
+        # The user's prompt is now sent to the intelligent dispatcher.
+        workflow_coroutine = dev_team_service.handle_user_prompt(
             user_idea=prompt,
             conversation_history=event.conversation_history
         )

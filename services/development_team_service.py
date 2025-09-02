@@ -12,6 +12,7 @@ from core.prompt_templates.coder import CoderPrompt
 from core.prompt_templates.replan import RePlannerPrompt
 from core.prompt_templates.sentry import SENTRY_PROMPT
 from core.prompt_templates.summarizer import MissionSummarizerPrompt
+from core.prompt_templates.dispatcher import ChiefOfStaffDispatcherPrompt
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
 
 if TYPE_CHECKING:
@@ -47,15 +48,74 @@ class DevelopmentTeamService:
     async def handle_user_prompt(self, user_idea: str, conversation_history: list):
         """
         Primary entry point for a user's message.
-        Routes to the appropriate workflow based on the mission log's state.
+        Uses the Chief of Staff dispatcher to determine the user's intent and
+        routes to the appropriate workflow.
         """
-        pending_tasks = self.mission_log_service.get_tasks(done=False)
-        if not pending_tasks:
-            self.log("info", "No pending tasks. Starting creative assistant workflow.")
-            await self.run_creative_assistant_workflow(user_idea, conversation_history)
-        else:
-            self.log("info", "Pending tasks exist. Starting iterative architect workflow.")
-            await self.run_iterative_architect_workflow(user_idea, conversation_history)
+        self.log("info", "Chief of Staff received a new prompt. Analyzing intent...")
+        self.event_bus.emit("agent_status_changed", "Chief of Staff", "Analyzing request...", "fa5s.user-tie")
+
+        # 1. Gather intelligence briefing
+        conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
+        mission_log_summary = self.mission_log_service.get_log_as_string_summary()
+
+        # 2. Instantiate and render the dispatcher prompt
+        prompt_template = ChiefOfStaffDispatcherPrompt()
+        prompt = prompt_template.render(
+            user_prompt=user_idea,
+            conversation_history=conv_history_str,
+            mission_log_state=mission_log_summary
+        )
+
+        # 3. Call the LLM to get the dispatch decision
+        provider, model = self.llm_client.get_model_for_role("dispatcher")
+        if not provider or not model:
+            self.handle_error("Chief of Staff", "No 'dispatcher' model configured.")
+            return
+
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "dispatcher")])
+
+        try:
+            # 4. Parse the decision and route
+            decision_data = self._parse_json_response(response_str)
+            dispatch_to = decision_data.get("dispatch_to")
+            self.log("info", f"Chief of Staff dispatched to: {dispatch_to}")
+
+            if dispatch_to == "CREATIVE_ASSISTANT":
+                await self.run_creative_assistant_workflow(user_idea, conversation_history)
+            elif dispatch_to == "ITERATIVE_ARCHITECT":
+                await self.run_iterative_architect_workflow(user_idea, conversation_history)
+            elif dispatch_to == "CONDUCTOR":
+                self.log("info", "User requested to start the build. Dispatching to Conductor.")
+                self._post_chat_message("Aura", "Okay, I'll start the build process now.")
+                self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
+            elif dispatch_to == "GENERAL_CHAT":
+                await self.run_general_chat_workflow(user_idea, conversation_history)
+            else:
+                self.handle_error("Chief of Staff", f"Unknown dispatch target: {dispatch_to}")
+
+        except (ValueError, json.JSONDecodeError) as e:
+            self.handle_error("Chief of Staff", f"Failed to get a valid dispatch decision: {e}")
+            self.log("error", f"Chief of Staff failure. Raw response: {response_str}")
+
+    async def run_general_chat_workflow(self, user_idea: str, conversation_history: list):
+        """Handles a general conversational turn that isn't a direct command."""
+        self.log("info", "Handling general chat.")
+        self.event_bus.emit("agent_status_changed", "Aura", "Thinking...", "fa5s.comment-dots")
+
+        provider, model = self.llm_client.get_model_for_role("chat")
+        if not provider or not model:
+            self.handle_error("Aura", "No 'chat' model configured.")
+            return
+
+        # Simple conversational prompt
+        history = conversation_history + [{"role": "user", "content": user_idea}]
+        prompt = "You are Aura, a helpful AI assistant. Respond to the user conversationally."
+        
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)])
+        
+        self._post_chat_message("Aura", response_str)
 
     async def run_creative_assistant_workflow(self, user_idea: str, conversation_history: list):
         """
