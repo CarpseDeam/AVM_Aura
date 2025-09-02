@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from event_bus import EventBus
 from events import StreamCodeChunk
-from core.prompt_templates.rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE, CLEAN_CODE_RULE
+from core.prompt_templates.rules import MasterRules
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _robustly_clean_llm_output(content: str) -> str:
-    """Cleans markdown and other noise from the LLM's code output."""
+    """Cleans markdown and other noise from the LLM's code output.""" 
     content = content.strip()
     code_block_regex = re.compile(r'```(?:python)?\n(.*?)\n```', re.DOTALL)
     match = code_block_regex.search(content)
@@ -40,16 +40,16 @@ async def stream_and_write_file(path: str, task_description: str, project_manage
     # Get project context for the Coder prompt
     file_tree = "\n".join(sorted(list(project_manager.get_project_files().keys()))) or "The project is currently empty."
 
-    # Define the streaming coder prompt directly within the action, as it was removed from the templates.
+    # Define the streaming coder prompt directly within the action
     coder_prompt_streaming = f"""
     You are an expert Python programmer. Your sole task is to write the code for a single file based on the user's request.
     You will be given the file path, a detailed task description, and the overall project file structure for context.
 
     **CODING RULES (UNBREAKABLE):**
-    1.  {TYPE_HINTING_RULE.strip()}
-    2.  {DOCSTRING_RULE.strip()}
-    3.  {CLEAN_CODE_RULE.strip()}
-    4.  {RAW_CODE_OUTPUT_RULE.strip()}
+    1.  {MasterRules.TYPE_HINTING_RULE.strip()}
+    2.  {MasterRules.DOCSTRING_RULE.strip()}
+    3.  {MasterRules.CLEAN_CODE_RULE.strip()}
+    4.  {MasterRules.RAW_CODE_OUTPUT_RULE.strip()}
 
     **CONTEXT:**
     - **File to write:** `{relative_path}`

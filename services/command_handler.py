@@ -1,58 +1,57 @@
 # services/command_handler.py
 import logging
-import re
-from typing import Callable, Dict, TYPE_CHECKING
-from foundry import FoundryManager
-from .view_formatter import format_as_box
-from events import DisplayFileInEditor, DirectToolInvocationRequest, UserPromptEntered, UserCommandEntered
+from typing import Callable, Dict, TYPE_CHECKING, List, Any
+
+from core.models.messages import AuraMessage, MessageType
+from events import DisplayFileInEditor, UserPromptEntered, UserCommandEntered, PostChatMessage
 from event_bus import EventBus
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
+    from foundry import FoundryManager
 
 logger = logging.getLogger(__name__)
 
 
 class CommandHandler:
     """
-    Handles direct, CLI-style slash commands from the user. It provides a fast,
-    deterministic path for actions that don't require LLM reasoning.
+    Handles direct, CLI-style slash commands from the user.
     """
 
-    def __init__(self, foundry_manager: FoundryManager, event_bus: EventBus,
-                 project_manager: "ProjectManager", display_callback, output_log_text_fetcher: Callable[[], str]):
+    def __init__(self, foundry_manager: "FoundryManager", event_bus: EventBus,
+                 project_manager: "ProjectManager", conversation_history_fetcher: Callable[[], List[Dict[str, Any]]]):
         self.foundry = foundry_manager
         self.event_bus = event_bus
         self.project_manager = project_manager
-        self.display = display_callback
-        self.output_log_text_fetcher = output_log_text_fetcher
+        self.conversation_history_fetcher = conversation_history_fetcher
         self.last_aura_response = ""
 
         self.commands = {
-            "build": "Sends the last prompt from Plan mode to Build mode.",
+            "build": "Sends the last AI response to the main prompt workflow.",
             "help": "Shows the detailed help message.",
             "index": "Re-indexes the project for the AI.",
             "list_files": "Lists files in the active project.",
             "read": "Reads a file into the Code Viewer.",
-            "lint": "Lints a Python file."
         }
-
         logger.info("CommandHandler initialized and ready.")
 
     def get_available_commands(self) -> Dict[str, str]:
-        """Returns the dictionary of available commands for the autocomplete popup."""
         return self.commands
 
+    def _post_message(self, message: str, msg_type: MessageType = MessageType.SYSTEM):
+        self.event_bus.emit("post_structured_message", AuraMessage(content=message, type=msg_type))
+
     def _update_last_aura_response(self):
-        """Scan the log to find the last message from Aura."""
-        full_text = self.output_log_text_fetcher()
-        matches = list(re.finditer(r'\[ Aura \]\n(.*?)\s*$', full_text, re.S | re.M))
-        if matches:
-            self.last_aura_response = matches[-1].group(1).strip()
-            logger.info(f"Captured last Aura response for /build command.")
-        else:
-            self.last_aura_response = ""
-            logger.warning("Could not find a previous 'Aura' response to use for /build.")
+        """Scan the conversation history to find the last message from the AI."""
+        history = self.conversation_history_fetcher()
+        # Iterate in reverse to find the most recent agent response
+        for message in reversed(history):
+            if message.get("role") == "model":
+                self.last_aura_response = message.get("content", "").strip()
+                logger.info(f"Captured last Aura response for /build command.")
+                return
+        self.last_aura_response = ""
+        logger.warning("Could not find a previous 'Aura' response to use for /build.")
 
     def handle(self, event: UserCommandEntered):
         self._update_last_aura_response()
@@ -68,29 +67,26 @@ class CommandHandler:
                 self._handle_list_files(args)
             elif command == "read":
                 self._handle_read_file(args)
-            elif command == "lint":
-                self._handle_lint(args)
             elif command == "index":
                 self._handle_index()
             elif command == "help":
                 self._handle_help()
             else:
-                error_text = f"Unknown command: /{command}\nType /help to see a list of available commands."
-                self.display(format_as_box(f"Error: Unknown Command", error_text), "avm_error")
+                self._post_message(f"Unknown command: /{command}\nType /help to see a list of available commands.", MessageType.ERROR)
         except Exception as e:
             error_message = f"An unexpected error occurred while executing '/{command}': {e}"
             logger.error(error_message, exc_info=True)
-            self.display(format_as_box(f"Error: {command}", error_message), "avm_error")
+            self._post_message(error_message, MessageType.ERROR)
 
     def _handle_build(self):
         if not self.last_aura_response:
-            self.display(format_as_box("Error", "No previous response from Aura to build from."), "avm_error")
+            self._post_message("No previous response from Aura to build from.", MessageType.ERROR)
             return
 
-        self.display(f"▶️ Sending last prompt to Build Mode...", "system_message")
+        self._post_message(f"▶️ Sending last prompt to Build Mode...")
         event = UserPromptEntered(
             prompt_text=self.last_aura_response,
-            conversation_history=[]
+            conversation_history=[]  # Start a fresh context for the build
         )
         self.event_bus.emit("user_request_submitted", event)
 
@@ -98,60 +94,40 @@ class CommandHandler:
         list_files_action = self.foundry.get_action("list_files")
         relative_path = args[0] if args else "."
         if not self.project_manager.active_project_path:
-            self.display(format_as_box("Error", "No active project."), "avm_error")
+            self._post_message("No active project.", MessageType.ERROR)
             return
         resolved_path = self.project_manager.active_project_path / relative_path
         result = list_files_action(path=str(resolved_path))
-        display_path = self.project_manager.active_project_name or "Current Directory"
-        if relative_path != ".":
-            display_path = f"{display_path}/{relative_path}"
-        formatted_output = format_as_box(f"Directory Listing: {display_path}", result)
-        self.display(formatted_output, "avm_output")
+        self._post_message(f"Directory Listing: {resolved_path}\n\n{result}")
 
     def _handle_read_file(self, args: list):
         if not args:
-            self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /read <path/to/file>"),
-                         "avm_error")
+            self._post_message("Usage: /read <path/to/file>", MessageType.ERROR)
             return
         read_file_action = self.foundry.get_action("read_file")
         relative_path = args[0]
         if not self.project_manager.active_project_path:
-            self.display(format_as_box("Error", "No active project."), "avm_error")
+            self._post_message("No active project.", MessageType.ERROR)
             return
         resolved_path = self.project_manager.active_project_path / relative_path
         content = read_file_action(path=str(resolved_path))
         if content.strip().startswith("Error:"):
-            self.display(format_as_box(f"Error reading file", content), "avm_error")
+            self._post_message(f"Error reading file: {content}", MessageType.ERROR)
             return
         self.event_bus.emit("display_file_in_editor", DisplayFileInEditor(file_path=str(resolved_path), file_content=content))
-        self.display(f"Opened `{relative_path}` in Code Viewer.", "system_message")
-
-    def _handle_lint(self, args: list):
-        if not args:
-            self.display(format_as_box("Usage Error", "Please provide a file path.\nUsage: /lint <path/to/file>"),
-                         "avm_error")
-            return
-        lint_action = self.foundry.get_action("lint_file")
-        relative_path = args[0]
-        if not self.project_manager.active_project_path:
-            self.display(format_as_box("Error", "No active project."), "avm_error")
-            return
-        resolved_path = self.project_manager.active_project_path / relative_path
-        result = lint_action(path=str(resolved_path))
-        formatted_output = format_as_box(f"Lint Report: {relative_path}", result)
-        self.display(formatted_output, "avm_output")
+        self._post_message(f"Opened `{relative_path}` in Code Viewer.")
 
     def _handle_index(self):
         if not self.project_manager.active_project_path:
-            self.display(format_as_box("Error", "No active project. Please create or load a project first."),
-                         "avm_error")
+            self._post_message("No active project. Please create or load a project first.", MessageType.ERROR)
             return
-        self.display("Starting project re-indexing...", "system_message")
-        self.event_bus.emit('direct_tool_invocation_request', DirectToolInvocationRequest(tool_id='index_project_context', params={
-            'path': str(self.project_manager.active_project_path)}))
+        self._post_message("Starting project re-indexing...")
+        # This should probably be a direct tool invocation request
+        # For now, we assume an event handles this.
+        self.event_bus.emit("reindex_project_requested")
 
     def _handle_help(self):
         help_text = "Aura Direct Commands:\n\n"
         for cmd, desc in self.commands.items():
             help_text += f"/{cmd.ljust(18)} - {desc}\n"
-        self.display(format_as_box("Aura Help", help_text), "avm_output")
+        self._post_message(help_text)

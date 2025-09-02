@@ -72,7 +72,7 @@ class Application:
                 foundry_manager=self.service_manager.get_foundry_manager(),
                 event_bus=self.event_bus,
                 project_manager=self.project_manager,
-                output_log_text_fetcher=controller.get_full_chat_text
+                conversation_history_fetcher=controller.get_conversation_history
             )
             controller.wire_up_command_handler(self.command_handler)
             controller.set_project_manager(self.project_manager)
