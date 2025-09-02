@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from event_bus import EventBus
 from events import StreamCodeChunk
-from core.prompt_templates.coder import CODER_PROMPT_STREAMING
 from core.prompt_templates.rules import RAW_CODE_OUTPUT_RULE, TYPE_HINTING_RULE, DOCSTRING_RULE, CLEAN_CODE_RULE
 
 if TYPE_CHECKING:
@@ -41,15 +40,31 @@ async def stream_and_write_file(path: str, task_description: str, project_manage
     # Get project context for the Coder prompt
     file_tree = "\n".join(sorted(list(project_manager.get_project_files().keys()))) or "The project is currently empty."
 
-    prompt = CODER_PROMPT_STREAMING.format(
-        path=relative_path,
-        task_description=task_description,
-        file_tree=file_tree,
-        TYPE_HINTING_RULE=TYPE_HINTING_RULE.strip(),
-        DOCSTRING_RULE=DOCSTRING_RULE.strip(),
-        CLEAN_CODE_RULE=CLEAN_CODE_RULE.strip(),
-        RAW_CODE_OUTPUT_RULE=RAW_CODE_OUTPUT_RULE.strip()
-    )
+    # Define the streaming coder prompt directly within the action, as it was removed from the templates.
+    coder_prompt_streaming = f"""
+    You are an expert Python programmer. Your sole task is to write the code for a single file based on the user's request.
+    You will be given the file path, a detailed task description, and the overall project file structure for context.
+
+    **CODING RULES (UNBREAKABLE):**
+    1.  {TYPE_HINTING_RULE.strip()}
+    2.  {DOCSTRING_RULE.strip()}
+    3.  {CLEAN_CODE_RULE.strip()}
+    4.  {RAW_CODE_OUTPUT_RULE.strip()}
+
+    **CONTEXT:**
+    - **File to write:** `{relative_path}`
+    - **Project file structure:**
+    ```
+    {file_tree}
+    ```
+
+    **TASK:**
+    {task_description}
+
+    **YOUR CODE OUTPUT:**
+    """
+
+    prompt = coder_prompt_streaming
 
     provider, model = llm_client.get_model_for_role("coder")
     if not provider or not model:

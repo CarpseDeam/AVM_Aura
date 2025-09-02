@@ -72,7 +72,6 @@ class Application:
                 foundry_manager=self.service_manager.get_foundry_manager(),
                 event_bus=self.event_bus,
                 project_manager=self.project_manager,
-                display_callback=controller.get_display_callback(),
                 output_log_text_fetcher=controller.get_full_chat_text
             )
             controller.wire_up_command_handler(self.command_handler)

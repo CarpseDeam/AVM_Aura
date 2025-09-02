@@ -25,3 +25,4 @@ GitPython
 # Development & Testing
 pytest
 watchdog
+pycodestyle
