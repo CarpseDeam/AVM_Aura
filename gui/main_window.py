@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent
 
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
+from .widgets.thinking_scanner_widget import ThinkingScannerWidget
 from event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class AuraMainWindow(QMainWindow):
         )
         self.controller.post_welcome_message()
         self._apply_stylesheet()
+        self._setup_scanner_signals()
 
     def closeEvent(self, event: QCloseEvent):
         """
@@ -59,6 +61,17 @@ class AuraMainWindow(QMainWindow):
         left_column_layout = QVBoxLayout(left_column_widget)
         left_column_layout.setContentsMargins(0, 0, 0, 0)
         left_column_layout.setSpacing(0)
+
+        # Add persistent identity banner
+        self.identity_banner = QLabel("AURA // AUTONOMOUS VIRTUAL MACHINE")
+        self.identity_banner.setObjectName("IdentityBanner")
+        self.identity_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_column_layout.addWidget(self.identity_banner)
+
+        # Add thinking scanner widget (hidden by default)
+        self.thinking_scanner = ThinkingScannerWidget()
+        self.thinking_scanner.hide()
+        left_column_layout.addWidget(self.thinking_scanner)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -153,20 +166,42 @@ class AuraMainWindow(QMainWindow):
     def get_controller(self) -> GUIController:
         return self.controller
 
+    def _setup_scanner_signals(self):
+        """Connect processing signals to scanner widget visibility"""
+        self.event_bus.subscribe("processing_started", self._show_scanner)
+        self.event_bus.subscribe("processing_finished", self._hide_scanner)
+
+    def _show_scanner(self):
+        """Show the thinking scanner when processing starts"""
+        self.thinking_scanner.show()
+
+    def _hide_scanner(self):
+        """Hide the thinking scanner when processing finishes"""
+        self.thinking_scanner.hide()
+
     def _apply_stylesheet(self):
         self.setStyleSheet("""
             QMainWindow, QWidget {
-                background-color: #1a1a1a;
+                background-color: #000000;
                 color: #d4d4d4;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 14px;
             }
+            #IdentityBanner {
+                background-color: #000000;
+                color: #FFB74D;
+                font-family: "JetBrains Mono", "Consolas", monospace;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 15px;
+                border-bottom: 1px solid #333333;
+            }
             #ScrollArea {
-                background-color: #0d0d0d;
+                background-color: #000000;
                 border: none;
             }
             #ControlStrip {
-                background-color: #1a1a1a;
+                background-color: #0A0A0A;
                 border-top: 1px solid #333333;
             }
             #CommandInput {
@@ -179,13 +214,13 @@ class AuraMainWindow(QMainWindow):
             QTextEdit::placeholderText { color: #777777; }
             #SendButton {
                 background-color: #FFB74D;
-                color: #0d0d0d;
+                color: #000000;
                 font-weight: bold;
                 border-radius: 4px;
             }
             #SendButton:hover { background-color: #FFA726; }
             #ToolBar {
-                background-color: #1c1c1c;
+                background-color: #0A0A0A;
                 border-left: 1px solid #333333;
             }
             #ToolButton {

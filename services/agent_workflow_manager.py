@@ -87,8 +87,14 @@ class AgentWorkflowManager:
         history = conversation_history + [{"role": "user", "content": user_idea}]
         prompt = "You are Aura, a helpful AI assistant. Respond to the user conversationally."
         
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         response_str = "".join(
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)])
+        
+        # Signal processing complete
+        self.event_bus.emit("processing_finished")
         
         self._post_chat_message("Aura", response_str)
 
@@ -108,8 +114,14 @@ class AgentWorkflowManager:
         conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
         prompt = prompt_template.render(user_idea=user_idea, conversation_history=conv_history_str)
 
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         response_str = "".join(
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "planner")])
+
+        # Signal processing complete
+        self.event_bus.emit("processing_finished")
 
         tool_call_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', response_str, re.DOTALL)
         conversational_text = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', response_str).strip()
@@ -154,8 +166,14 @@ class AgentWorkflowManager:
             available_tools=available_tools
         )
 
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         response_str = "".join(
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "architect")])
+
+        # Signal processing complete
+        self.event_bus.emit("processing_finished")
 
         try:
             from events import PlanReadyForReview
