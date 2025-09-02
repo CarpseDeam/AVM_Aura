@@ -6,14 +6,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 from event_bus import EventBus
 from core.prompt_templates.architect import ArchitectPrompt
-from core.prompt_templates.creative import CreativeAssistantPrompt
-from core.prompt_templates.iterative_architect import IterativeArchitectPrompt
 from core.prompt_templates.coder import CoderPrompt
 from core.prompt_templates.replan import RePlannerPrompt
 from core.prompt_templates.sentry import SENTRY_PROMPT
 from core.prompt_templates.summarizer import MissionSummarizerPrompt
 from core.prompt_templates.dispatcher import ChiefOfStaffDispatcherPrompt
 from events import PlanReadyForReview, MissionDispatchRequest, PostChatMessage
+from services.agent_workflow_manager import AgentWorkflowManager
 
 if TYPE_CHECKING:
     from core.managers.service_manager import ServiceManager
@@ -34,6 +33,7 @@ class DevelopmentTeamService:
         self.vector_context_service = service_manager.vector_context_service
         self.foundry_manager = service_manager.get_foundry_manager()
         self.tool_runner_service = service_manager.tool_runner_service
+        self.workflow_manager = AgentWorkflowManager(self.llm_client, self.service_manager, self.event_bus)
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         if message and message.strip():
@@ -54,11 +54,9 @@ class DevelopmentTeamService:
         self.log("info", "Chief of Staff received a new prompt. Analyzing intent...")
         self.event_bus.emit("agent_status_changed", "Chief of Staff", "Analyzing request...", "fa5s.user-tie")
 
-        # 1. Gather intelligence briefing
         conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
         mission_log_summary = self.mission_log_service.get_log_as_string_summary()
 
-        # 2. Instantiate and render the dispatcher prompt
         prompt_template = ChiefOfStaffDispatcherPrompt()
         prompt = prompt_template.render(
             user_prompt=user_idea,
@@ -66,7 +64,6 @@ class DevelopmentTeamService:
             mission_log_state=mission_log_summary
         )
 
-        # 3. Call the LLM to get the dispatch decision
         provider, model = self.llm_client.get_model_for_role("dispatcher")
         if not provider or not model:
             self.handle_error("Chief of Staff", "No 'dispatcher' model configured.")
@@ -76,134 +73,22 @@ class DevelopmentTeamService:
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "dispatcher")])
 
         try:
-            # 4. Parse the decision and route
             decision_data = self._parse_json_response(response_str)
             dispatch_to = decision_data.get("dispatch_to")
             self.log("info", f"Chief of Staff dispatched to: {dispatch_to}")
 
-            if dispatch_to == "CREATIVE_ASSISTANT":
-                await self.run_creative_assistant_workflow(user_idea, conversation_history)
-            elif dispatch_to == "ITERATIVE_ARCHITECT":
-                await self.run_iterative_architect_workflow(user_idea, conversation_history)
-            elif dispatch_to == "CONDUCTOR":
+            if dispatch_to == "CONDUCTOR":
                 self.log("info", "User requested to start the build. Dispatching to Conductor.")
                 self._post_chat_message("Aura", "Okay, I'll start the build process now.")
                 self.event_bus.emit("mission_dispatch_requested", MissionDispatchRequest())
-            elif dispatch_to == "GENERAL_CHAT":
-                await self.run_general_chat_workflow(user_idea, conversation_history)
+            elif dispatch_to:
+                await self.workflow_manager.run_workflow(dispatch_to, user_idea, conversation_history)
             else:
-                self.handle_error("Chief of Staff", f"Unknown dispatch target: {dispatch_to}")
+                self.handle_error("Chief of Staff", "Unknown dispatch target.")
 
         except (ValueError, json.JSONDecodeError) as e:
             self.handle_error("Chief of Staff", f"Failed to get a valid dispatch decision: {e}")
             self.log("error", f"Chief of Staff failure. Raw response: {response_str}")
-
-    async def run_general_chat_workflow(self, user_idea: str, conversation_history: list):
-        """Handles a general conversational turn that isn't a direct command."""
-        self.log("info", "Handling general chat.")
-        self.event_bus.emit("agent_status_changed", "Aura", "Thinking...", "fa5s.comment-dots")
-
-        provider, model = self.llm_client.get_model_for_role("chat")
-        if not provider or not model:
-            self.handle_error("Aura", "No 'chat' model configured.")
-            return
-
-        # Simple conversational prompt
-        history = conversation_history + [{"role": "user", "content": user_idea}]
-        prompt = "You are Aura, a helpful AI assistant. Respond to the user conversationally."
-        
-        response_str = "".join(
-            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)])
-        
-        self._post_chat_message("Aura", response_str)
-
-    async def run_creative_assistant_workflow(self, user_idea: str, conversation_history: list):
-        """
-        Handles the initial brainstorming and collaborative planning with the user.
-        """
-        self.log("info", f"Creative assistant workflow initiated for: '{user_idea[:50]}...'")
-        self.event_bus.emit("agent_status_changed", "Aura", "Brainstorming ideas...", "fa5s.lightbulb")
-
-        provider, model = self.llm_client.get_model_for_role("planner")
-        if not provider or not model:
-            self.handle_error("Aura", "No 'planner' model configured.")
-            return
-
-        prompt_template = CreativeAssistantPrompt()
-        conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
-        prompt = prompt_template.render(user_idea=user_idea, conversation_history=conv_history_str)
-
-        response_str = "".join(
-            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "planner")])
-
-        # Look for a tool call block
-        tool_call_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', response_str, re.DOTALL)
-        conversational_text = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', response_str).strip()
-
-        # Post the conversational part back to the user
-        if conversational_text:
-            self._post_chat_message("Aura", conversational_text)
-
-        # If a tool call was found, execute it
-        if tool_call_match:
-            try:
-                tool_call_str = tool_call_match.group(1)
-                tool_call_data = json.loads(tool_call_str)
-                self.log("info", f"Creative assistant identified a task: {tool_call_data}")
-                # This will add the task to the mission log
-                await self.tool_runner_service.run_tool_by_dict(tool_call_data)
-                self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
-            except (json.JSONDecodeError, KeyError) as e:
-                self.handle_error("Aura", f"Invalid tool call format from creative assistant: {e}")
-                self.log("error", f"Creative assistant tool call failure. Raw block: {tool_call_match.group(0)}")
-
-
-    async def run_iterative_architect_workflow(self, user_request: str, conversation_history: list):
-        """
-        Handles a user's request to modify an existing plan or codebase.
-        """
-        self.log("info", f"Iterative architect workflow initiated for: '{user_request[:50]}...'")
-        self.event_bus.emit("agent_status_changed", "Aura", "Updating the plan...", "fa5s.pencil-ruler")
-
-        provider, model = self.llm_client.get_model_for_role("architect")
-        if not provider or not model:
-            self.handle_error("Aura", "No 'architect' model configured.")
-            return
-
-        # Gather context
-        file_structure = "\n".join(sorted(self.project_manager.get_project_files().keys())) or "The project is currently empty."
-        available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
-        
-        # For now, we'll pass an empty string for RAG snippets. This can be enhanced later.
-        relevant_code_snippets = "No relevant code snippets were retrieved for this modification."
-
-        prompt_template = IterativeArchitectPrompt()
-        prompt = prompt_template.render(
-            user_request=user_request,
-            file_structure=file_structure,
-            relevant_code_snippets=relevant_code_snippets,
-            available_tools=available_tools
-        )
-
-        response_str = "".join(
-            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "architect")])
-
-        try:
-            response_data = self._parse_json_response(response_str)
-            new_tasks = response_data.get("plan", [])
-            if not new_tasks:
-                raise ValueError("Iterative architect returned an empty plan.")
-
-            for task in new_tasks:
-                self.mission_log_service.add_task(task)
-            
-            self._post_chat_message("Aura", "I've updated the plan with your requested changes. Please review the new tasks in the 'Agent TODO' list.")
-            self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
-
-        except (ValueError, json.JSONDecodeError) as e:
-            self.handle_error("Aura", f"Failed to update the plan: {e}")
-            self.log("error", f"Iterative architect failure. Raw response: {response_str}")
-
 
     async def run_aura_planner_workflow(self, user_idea: str, conversation_history: list):
         """
