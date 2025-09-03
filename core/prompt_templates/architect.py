@@ -19,16 +19,12 @@ class ArchitectPrompt:
     4.  **EFFICIENCY MANDATE:** Your primary goal is to minimize the number of steps. Batch similar operations.
     """
 
-    _reasoning_structure = """
-    **REASONING PROCESS:**
-    In a <thought> block, you must deconstruct the user's request, brainstorm an initial plan, and then ruthlessly critique your own plan against your directives (The Sinclair Method). 
-    Formulate the final, refined mission plan based on your self-critique. 
-    Do not narrate your process with a numbered list. State your conclusions and the resulting plan directly.
-    """
-
     _output_format = f"""
     **YOUR OUTPUT FORMAT:**
-    Your response must start with your reasoning in a <thought> block, followed by the final JSON plan.
+    Your entire response MUST be a single JSON object.
+    This object must have two keys:
+    1.  `"thought"`: A string containing your reasoning. This involves deconstructing the request, brainstorming a plan, and then critiquing it using 'The Sinclair Method' to arrive at the most efficient solution.
+    2.  `"plan"`: An array of JSON objects, where each object represents a single, precise tool call to be executed.
     {MasterRules.JSON_OUTPUT_RULE}
     """
 
@@ -39,8 +35,6 @@ class ArchitectPrompt:
 
         {self._directives}
 
-        {self._reasoning_structure}
-
         {self._output_format}
 
         **CONTEXT: CONVERSATION HISTORY**
@@ -49,5 +43,5 @@ class ArchitectPrompt:
         **USER'S REQUEST:**
         "{user_idea}"
 
-        Now, provide your concise architectural reasoning in a <thought> block, and then provide the final JSON output containing the plan.
+        Now, provide the final JSON output.
         """

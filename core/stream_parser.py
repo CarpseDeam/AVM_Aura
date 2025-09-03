@@ -1,5 +1,6 @@
 # core/stream_parser.py
 import re
+import json
 from typing import Generator, AsyncGenerator
 from core.models.messages import AuraMessage, MessageType
 
@@ -8,7 +9,6 @@ class LLMStreamParser:
     """
     Parses LLM streaming responses and extracts structured messages from tags
     like <thought>, <response>, and [TOOL_CALL].
-    Handles partial chunks and maintains state across streaming calls.
     """
 
     def __init__(self):
@@ -20,9 +20,22 @@ class LLMStreamParser:
         """
         self.buffer += chunk
 
+        # First, try to handle complete JSON blocks from architect agents
+        if self.buffer.strip().startswith('{'):
+            try:
+                # Attempt to parse the entire buffer as a JSON object
+                parsed_json = json.loads(self.buffer)
+                # If successful, we have a complete plan. Yield it and clear the buffer.
+                yield AuraMessage(type=MessageType.AGENT_PLAN_JSON, content=self.buffer)
+                self.buffer = ""
+                return
+            except json.JSONDecodeError:
+                # The buffer is not a complete JSON object yet, so continue buffering.
+                pass
+
+        # If not a JSON block, process for other tags
         while True:
             matches = []
-            # Find the first complete match for each tag type
             thought_match = re.search(r'<thought>(.*?)</thought>', self.buffer, re.DOTALL)
             if thought_match:
                 matches.append({'type': 'thought', 'match': thought_match})
@@ -31,30 +44,21 @@ class LLMStreamParser:
             if response_match:
                 matches.append({'type': 'response', 'match': response_match})
 
-            tool_match = re.search(r'\\\[TOOL_CALL\\\](.*?)\\\[/TOOL_CALL\\\]', self.buffer, re.DOTALL)
+            tool_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', self.buffer, re.DOTALL)
             if tool_match:
                 matches.append({'type': 'tool', 'match': tool_match})
 
             if not matches:
-                break  # No complete blocks found, wait for more data
+                break
 
-            # Find the match that appears earliest in the buffer
             first_match_info = min(matches, key=lambda m: m['match'].start())
-
             match_obj = first_match_info['match']
             match_type = first_match_info['type']
 
-            # Check if there is any text before this first match
             pre_match_content = self.buffer[:match_obj.start()].strip()
             if pre_match_content:
-                # This is untagged content. Could be a final JSON object or conversational text.
-                # We'll yield it based on whether it looks like JSON.
-                if pre_match_content.startswith('{') and pre_match_content.endswith('}'):
-                    yield AuraMessage.tool_call(pre_match_content)
-                else:
-                    yield AuraMessage.agent_response(pre_match_content)
+                yield AuraMessage.agent_response(pre_match_content)
 
-            # Process the matched block
             content = match_obj.group(1).strip()
             if content:
                 if match_type == 'thought':
@@ -64,9 +68,7 @@ class LLMStreamParser:
                 elif match_type == 'tool':
                     yield AuraMessage.tool_call(content)
 
-            # Update buffer to remove everything up to the end of the processed match
             self.buffer = self.buffer[match_obj.end():]
-            # Continue loop to process rest of buffer
 
     def finalize(self) -> Generator[AuraMessage, None, None]:
         """
@@ -74,53 +76,18 @@ class LLMStreamParser:
         """
         content = self.buffer.strip()
         if content:
-            # Check if the remaining content is a JSON object
-            if content.startswith('{') and content.endswith('}'):
-                yield AuraMessage.tool_call(content)
-            else:
-                # Otherwise, it's a final conversational response
+            # If there's remaining content that isn't a JSON plan, treat as a final response.
+            if not content.startswith('{'):
                 yield AuraMessage.agent_response(content)
         self.buffer = ""
 
 
 async def parse_llm_stream_async(stream_chunks: AsyncGenerator[str, None]) -> AsyncGenerator[AuraMessage, None]:
-    """
-    Async version for parsing async generators from LLM streams.
-
-    Args:
-        stream_chunks: AsyncGenerator yielding string chunks from LLM
-
-    Yields:
-        AuraMessage objects extracted from the stream
-    """
     parser = LLMStreamParser()
-
     try:
         async for chunk in stream_chunks:
             for message in parser.parse_chunk(chunk):
                 yield message
     finally:
-        # Process any remaining content
         for message in parser.finalize():
             yield message
-
-
-def parse_llm_stream(stream_chunks: Generator[str, None, None]) -> Generator[AuraMessage, None, None]:
-    """
-    Convenience function to parse an entire LLM stream into AuraMessage objects.
-
-    Args:
-        stream_chunks: Generator yielding string chunks from LLM
-
-    Yields:
-        AuraMessage objects extracted from the stream
-    """
-    parser = LLMStreamParser()
-
-    try:
-        for chunk in stream_chunks:
-            yield from parser.parse_chunk(chunk)
-    finally:
-        # Process any remaining content
-        yield from parser.finalize()
-

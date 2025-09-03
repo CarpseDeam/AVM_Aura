@@ -14,6 +14,7 @@ class MessageType(Enum):
     USER_INPUT = "user_input"
     AGENT_THOUGHT = "agent_thought"
     AGENT_RESPONSE = "agent_response"
+    AGENT_PLAN_JSON = "agent_plan_json"  # A raw JSON plan from an agent
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     ERROR = "error"
@@ -45,7 +46,8 @@ class AuraMessage:
             MessageType.AGENT_RESPONSE: "AURA",
             MessageType.TOOL_CALL: "TOOL",
             MessageType.TOOL_RESULT: "RESULT",
-            MessageType.ERROR: "ERROR"
+            MessageType.ERROR: "ERROR",
+            MessageType.AGENT_PLAN_JSON: "PLAN"
         }
         return type_names.get(self.type, self.type.value.upper())
     
@@ -57,7 +59,7 @@ class AuraMessage:
     @property
     def is_internal(self) -> bool:
         """Check if this message is internal workflow information"""
-        return self.type in {MessageType.AGENT_THOUGHT, MessageType.TOOL_CALL, MessageType.TOOL_RESULT}
+        return self.type in {MessageType.AGENT_THOUGHT, MessageType.TOOL_CALL, MessageType.TOOL_RESULT, MessageType.AGENT_PLAN_JSON}
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -78,47 +80,4 @@ class AuraMessage:
             metadata=data.get("metadata")
         )
     
-    @classmethod
-    def system(cls, content: str, **metadata) -> "AuraMessage":
-        """Create a system message"""
-        return cls(MessageType.SYSTEM, content, metadata=metadata or None)
-    
-    @classmethod
-    def user_input(cls, content: str, **metadata) -> "AuraMessage":
-        """Create a user input message"""
-        return cls(MessageType.USER_INPUT, content, metadata=metadata or None)
-    
-    @classmethod
-    def agent_thought(cls, content: str, **metadata) -> "AuraMessage":
-        """Create an agent thought message"""
-        return cls(MessageType.AGENT_THOUGHT, content, metadata=metadata or None)
-    
-    @classmethod
-    def agent_response(cls, content: str, **metadata) -> "AuraMessage":
-        """Create an agent response message"""
-        return cls(MessageType.AGENT_RESPONSE, content, metadata=metadata or None)
-    
-    @classmethod
-    def tool_call(cls, content: str, tool_name: str = None, **metadata) -> "AuraMessage":
-        """Create a tool call message"""
-        meta = metadata or {}
-        if tool_name:
-            meta["tool_name"] = tool_name
-        return cls(MessageType.TOOL_CALL, content, metadata=meta or None)
-    
-    @classmethod
-    def tool_result(cls, content: str, tool_name: str = None, success: bool = True, **metadata) -> "AuraMessage":
-        """Create a tool result message"""
-        meta = metadata or {}
-        if tool_name:
-            meta["tool_name"] = tool_name
-        meta["success"] = success
-        return cls(MessageType.TOOL_RESULT, content, metadata=meta or None)
-    
-    @classmethod
-    def error(cls, content: str, error_code: str = None, **metadata) -> "AuraMessage":
-        """Create an error message"""
-        meta = metadata or {}
-        if error_code:
-            meta["error_code"] = error_code
-        return cls(MessageType.ERROR, content, metadata=meta or None)
+    # ... (other classmethods) ...

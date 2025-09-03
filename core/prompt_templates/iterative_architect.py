@@ -23,17 +23,12 @@ class IterativeArchitectPrompt:
     4.  **SAFETY FIRST:** If a change is complex or potentially destructive, your first step should be to use the `copy_file` tool to create a backup of the file you are about to modify.
     """
 
-    _reasoning_structure = """
-    **REASONING PROCESS:**
-    In a <thought> block, deconstruct the user's change request and perform an impact analysis on the provided file structure and code.
-    Select the most precise, surgical tools for the job and formulate a clear, step-by-step plan.
-    Do not narrate your process with a numbered list. State your conclusions and the resulting plan directly.
-    """
-
     _output_format = f"""
     **YOUR OUTPUT FORMAT:**
-    Your response must start with your reasoning in a <thought> block, followed by the final JSON plan.
-    Your plan should result in a list of new tasks to be added to the mission log.
+    Your entire response MUST be a single JSON object.
+    This object must have two keys:
+    1.  `"thought"`: A string containing your reasoning. This involves deconstructing the change request, performing an impact analysis, selecting the most precise tools, and formulating the final plan.
+    2.  `"plan"`: An array of JSON objects, where each object represents a single, precise tool call to be executed.
     {MasterRules.JSON_OUTPUT_RULE}
     """
 
@@ -43,8 +38,6 @@ class IterativeArchitectPrompt:
         {self._persona}
 
         {self._directives}
-
-        {self._reasoning_structure}
 
         {self._output_format}
 
@@ -68,5 +61,5 @@ class IterativeArchitectPrompt:
             {available_tools}
             ```
 
-        Now, provide your concise reasoning in a <thought> block, and then provide the final JSON output containing the plan.
+        Now, provide the final JSON output.
         """

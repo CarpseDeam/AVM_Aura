@@ -1,6 +1,6 @@
 # gui/widgets/thinking_scanner_widget.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, Property
 from PySide6.QtGui import QColor, QPainter, QBrush
 
 class ThinkingScannerWidget(QWidget):
