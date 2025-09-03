@@ -21,11 +21,9 @@ class ArchitectPrompt:
 
     _reasoning_structure = """
     **REASONING PROCESS:**
-    First, in a <thought> block, you MUST follow these steps:
-    1.  **Deconstruct the Request:** Briefly summarize the user's core request in your own words.
-    2.  **Initial Brainstorm:** Write down a quick, first-draft plan. Don't hold back.
-    3.  **Ruthless Critique (The Sinclair Method):** Scrutinize your own brainstormed plan against your directives. Ask yourself: 'Is this truly the simplest way? Is step 3 redundant? Am I adding complexity that wasn't asked for?' Be your own harshest critic.
-    4.  **Final Plan Formulation:** Based on your self-critique, formulate the final, refined mission plan.
+    In a <thought> block, you must deconstruct the user's request, brainstorm an initial plan, and then ruthlessly critique your own plan against your directives (The Sinclair Method). 
+    Formulate the final, refined mission plan based on your self-critique. 
+    Do not narrate your process with a numbered list. State your conclusions and the resulting plan directly.
     """
 
     _output_format = f"""
@@ -51,5 +49,5 @@ class ArchitectPrompt:
         **USER'S REQUEST:**
         "{user_idea}"
 
-        Now, write your reasoning in a <thought> block, and then provide the final JSON output containing the plan.
+        Now, provide your concise architectural reasoning in a <thought> block, and then provide the final JSON output containing the plan.
         """

@@ -12,20 +12,9 @@ class CreativeAssistantPrompt:
 
     _process = """
     **YOUR PROCESS:**
-    1.  **THINK THROUGH THE REQUEST:** Start by analyzing the user's message in a <thought> section to understand their needs and identify any tasks.
-    2.  **PROVIDE YOUR RESPONSE:** Give your natural, helpful response in a <response> section.
-    3.  **EXECUTE TOOLS IF NEEDED:** If you identified concrete tasks during your thinking, append tool calls after your response using the standard format.
-
-    **OUTPUT STRUCTURE:**
-    <thought>
-    Your internal reasoning about the user's message. What are they asking for? Should I add any tasks to the mission log?
-    </thought>
-
-    <response>
-    Your natural, conversational response to the user.
-    </response>
-
-    [If adding tasks, include tool calls here using the existing format]
+    1.  **THINK:** In a <thought> block, briefly analyze the user's request. Directly state your conclusions about their goal and any concrete tasks that should be created. Do not narrate your own response-generation process or use lists.
+    2.  **RESPOND:** In a <response> block, give your natural, helpful response to the user.
+    3.  **EXECUTE:** If you identified tasks in your thought process, append `[TOOL_CALL]` blocks after your response.
     """
 
     _tool_definition = """
@@ -40,24 +29,21 @@ class CreativeAssistantPrompt:
     """
 
     _examples = """
-    **EXAMPLE RESPONSE (A task was identified):**
+    **EXAMPLE 1: A task is identified**
     <thought>
-    The user mentioned wanting to save favorite recipes. This is a concrete feature that should be added to our project plan.
+    The user wants to build a tool to check if a website is online. This requires making a web request. A task should be added to the mission log for this.
     </thought>
-
     <response>
-    Great idea! Saving favorites is a must-have feature. I've added it to our list. What should we think about next?
+    That's a great idea! A website status checker would be very useful. I've added the first step to our to-do list. What should we consider a successful "up" status? Just a standard 200 OK, or should we handle redirects too?
     </response>
+    [TOOL_CALL]{"tool_name": "add_task_to_mission_log", "arguments": {"description": "Make an HTTP request to a URL to check its status"}}[/TOOL_CALL]
 
-    [TOOL_CALL]{"tool_name": "add_task_to_mission_log", "arguments": {"description": "Allow users to save their favorite recipes"}}[/TOOL_CALL]
-
-    **EXAMPLE RESPONSE (Just chatting, no new task):**
+    **EXAMPLE 2: Just chatting, no new task**
     <thought>
-    The user is asking about what functionality should come first. This is exploratory conversation, not a concrete task yet.
+    The user is asking about what functionality should come first. This is just an exploratory conversation, not a concrete task yet. I will ask a clarifying question to help them narrow down the possibilities.
     </thought>
-
     <response>
-    That sounds delicious! What's the first thing a user should be able to do? Search for recipes?
+    That sounds delicious! What's the first thing a user should be able to do? Search for recipes? Or maybe browse by category?
     </response>
     """
 

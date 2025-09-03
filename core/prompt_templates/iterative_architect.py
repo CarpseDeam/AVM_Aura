@@ -25,11 +25,9 @@ class IterativeArchitectPrompt:
 
     _reasoning_structure = """
     **REASONING PROCESS:**
-    First, in a <thought> block, you MUST follow these steps:
-    1.  **Deconstruct the Change Request:** What is the core goal of the user's modification request?
-    2.  **Impact Analysis:** Based on the file structure and provided code context, which files will be affected by this change? If the user wants to change a class, what other files import and use that class?
-    3.  **Surgical Tool Selection:** For each affected file, identify the most precise, single-purpose tool from the AVAILABLE TOOLS list to perform the change.
-    4.  **Plan Formulation:** Assemble the selected tool calls into a clear, step-by-step plan. Order the steps logically.
+    In a <thought> block, deconstruct the user's change request and perform an impact analysis on the provided file structure and code.
+    Select the most precise, surgical tools for the job and formulate a clear, step-by-step plan.
+    Do not narrate your process with a numbered list. State your conclusions and the resulting plan directly.
     """
 
     _output_format = f"""
@@ -70,5 +68,5 @@ class IterativeArchitectPrompt:
             {available_tools}
             ```
 
-        Now, write your reasoning in a <thought> block, and then provide the final JSON output containing the plan.
+        Now, provide your concise reasoning in a <thought> block, and then provide the final JSON output containing the plan.
         """

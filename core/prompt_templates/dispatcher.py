@@ -28,10 +28,10 @@ class ChiefOfStaffDispatcherPrompt:
 
     _reasoning_structure = """
     **REASONING PROCESS:**
-    First, in a <thought> block, you MUST follow these steps:
-    1.  **Analyze Mission State:** Review the `CURRENT MISSION LOG STATE`. Is it empty, in progress, or complete? This provides the primary context for the user's request.
-    2.  **Analyze User Request:** Read the `USER'S LATEST MESSAGE`. What is their literal command, question, or statement?
-    3.  **Synthesize and Decide:** Based on the mission state AND the user's request, what is their true intent? Which single specialist agent is the perfect fit for this specific task? For example, if the mission log is empty and the user says "build a flask app," the intent is `CREATIVE_ASSISTANT` to start the plan. If the log is full and the user says "add a new field," the intent is `ITERATIVE_ARCHITECT`.
+    In a <thought> block, analyze the user's request in the context of the conversation history and mission log.
+    Synthesize your findings to determine the user's true intent and decide which specialist agent is the perfect fit for the task.
+    Do not use a numbered list or narrate your reasoning process. State your conclusion directly.
+    For example: "The user wants to add a new feature to the existing plan, so the ITERATIVE_ARCHITECT is the correct choice."
     """
 
     _output_format = f"""
@@ -64,5 +64,5 @@ class ChiefOfStaffDispatcherPrompt:
         3.  **USER'S LATEST MESSAGE:**
             "{user_prompt}"
         ---
-        Now, write your reasoning in a <thought> block, and then provide the final JSON output.
+        Now, provide your concise reasoning in a <thought> block, and then provide the final JSON output.
         """

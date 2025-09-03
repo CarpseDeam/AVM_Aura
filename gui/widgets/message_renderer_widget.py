@@ -233,7 +233,7 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel[objectName^="MessageType_tool_call"] {
-                color: #CE93D8; /* Light Purple */
+                color: #F06292; /* Magenta */
                 font-weight: bold;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
@@ -290,11 +290,11 @@ class MessageRendererWidget(QScrollArea):
             }
             
             QLabel[objectName^="MessageContent_tool_call"] {
-                color: #E1BEE7; /* Lighter Purple */
+                color: #F8BBD0; /* Lighter Magenta */
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
                 padding: 4px 0px;
-                background-color: rgba(156, 39, 176, 0.1);
+                background-color: rgba(240, 98, 146, 0.1);
                 border-radius: 4px;
                 padding: 6px;
             }

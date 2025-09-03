@@ -180,8 +180,9 @@ class AuraMainWindow(QMainWindow):
             QMainWindow, QWidget {
                 background-color: #000000;
                 color: #d4d4d4;
-                font-family: "JetBrains Mono", "Consolas", monospace;
-                font-size: 14px;
+                font-family: "SF Mono", "JetBrains Mono", "Consolas", monospace;
+                font-size: 15px;
+                font-weight: 500;
             }
             #IdentityBanner {
                 background-color: #000000;
