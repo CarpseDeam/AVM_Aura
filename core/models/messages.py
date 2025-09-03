@@ -79,5 +79,48 @@ class AuraMessage:
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else None,
             metadata=data.get("metadata")
         )
-    
-    # ... (other classmethods) ...
+
+    @classmethod
+    def system(cls, content: str, **metadata) -> "AuraMessage":
+        """Create a system message"""
+        return cls(MessageType.SYSTEM, content, metadata=metadata or None)
+
+    @classmethod
+    def user_input(cls, content: str, **metadata) -> "AuraMessage":
+        """Create a user input message"""
+        return cls(MessageType.USER_INPUT, content, metadata=metadata or None)
+
+    @classmethod
+    def agent_thought(cls, content: str, **metadata) -> "AuraMessage":
+        """Create an agent thought message"""
+        return cls(MessageType.AGENT_THOUGHT, content, metadata=metadata or None)
+
+    @classmethod
+    def agent_response(cls, content: str, **metadata) -> "AuraMessage":
+        """Create an agent response message"""
+        return cls(MessageType.AGENT_RESPONSE, content, metadata=metadata or None)
+
+    @classmethod
+    def tool_call(cls, content: str, tool_name: str = None, **metadata) -> "AuraMessage":
+        """Create a tool call message"""
+        meta = metadata or {}
+        if tool_name:
+            meta["tool_name"] = tool_name
+        return cls(MessageType.TOOL_CALL, content, metadata=meta or None)
+
+    @classmethod
+    def tool_result(cls, content: str, tool_name: str = None, success: bool = True, **metadata) -> "AuraMessage":
+        """Create a tool result message"""
+        meta = metadata or {}
+        if tool_name:
+            meta["tool_name"] = tool_name
+        meta["success"] = success
+        return cls(MessageType.TOOL_RESULT, content, metadata=meta or None)
+
+    @classmethod
+    def error(cls, content: str, error_code: str = None, **metadata) -> "AuraMessage":
+        """Create an error message"""
+        meta = metadata or {}
+        if error_code:
+            meta["error_code"] = error_code
+        return cls(MessageType.ERROR, content, metadata=meta or None)
