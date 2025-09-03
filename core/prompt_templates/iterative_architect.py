@@ -24,11 +24,19 @@ class IterativeArchitectPrompt:
     """
 
     _reasoning_structure = """
-    First, in an internal <scratchpad> that you will not show in the final output, you MUST follow these steps:
+    **REASONING PROCESS:**
+    First, in a <thought> block, you MUST follow these steps:
     1.  **Deconstruct the Change Request:** What is the core goal of the user's modification request?
     2.  **Impact Analysis:** Based on the file structure and provided code context, which files will be affected by this change? If the user wants to change a class, what other files import and use that class?
     3.  **Surgical Tool Selection:** For each affected file, identify the most precise, single-purpose tool from the AVAILABLE TOOLS list to perform the change.
     4.  **Plan Formulation:** Assemble the selected tool calls into a clear, step-by-step plan. Order the steps logically.
+    """
+
+    _output_format = f"""
+    **YOUR OUTPUT FORMAT:**
+    Your response must start with your reasoning in a <thought> block, followed by the final JSON plan.
+    Your plan should result in a list of new tasks to be added to the mission log.
+    {MasterRules.JSON_OUTPUT_RULE}
     """
 
     def render(self, user_request: str, file_structure: str, relevant_code_snippets: str, available_tools: str) -> str:
@@ -39,6 +47,8 @@ class IterativeArchitectPrompt:
         {self._directives}
 
         {self._reasoning_structure}
+
+        {self._output_format}
 
         **CONTEXT BUNDLE:**
 
@@ -60,7 +70,5 @@ class IterativeArchitectPrompt:
             {available_tools}
             ```
 
-        **YOUR OUTPUT:**
-        Your plan should result in a list of new tasks to be added to the mission log.
-        {MasterRules.JSON_OUTPUT_RULE}
+        Now, write your reasoning in a <thought> block, and then provide the final JSON output containing the plan.
         """

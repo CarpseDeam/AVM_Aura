@@ -7,11 +7,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QLabel, QSizePolicy, QPushButton
 )
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent
+from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent, QFont
 
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
-from .widgets.thinking_scanner_widget import ThinkingScannerWidget
+from .utils import get_aura_banner
 from .widgets.message_renderer_widget import MessageRendererWidget
 from event_bus import EventBus
 
@@ -39,16 +39,13 @@ class AuraMainWindow(QMainWindow):
         )
         self.controller.post_welcome_message()
         self._apply_stylesheet()
-        self._setup_scanner_signals()
 
     def closeEvent(self, event: QCloseEvent):
         """
         Overrides the default close event to trigger a graceful shutdown.
         """
         logger.info("Main window close event triggered. Initiating application shutdown.")
-        # This signal will be caught by main.py to start the full shutdown.
         self.event_bus.emit("application_shutdown")
-        # We accept the event to allow the window to close. The app itself will wait.
         event.accept()
 
     def _setup_ui(self):
@@ -64,19 +61,18 @@ class AuraMainWindow(QMainWindow):
         left_column_layout.setSpacing(0)
 
         # Add persistent identity banner
-        self.identity_banner = QLabel("AURA // AUTONOMOUS VIRTUAL MACHINE")
+        banner_text = f"<pre>{get_aura_banner()}</pre>"
+        self.identity_banner = QLabel(banner_text)
+        self.identity_banner.setTextFormat(Qt.TextFormat.RichText)
         self.identity_banner.setObjectName("IdentityBanner")
         self.identity_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        left_column_layout.addWidget(self.identity_banner)
+        # Add with stretch factor 0 to prevent it from being collapsed
+        left_column_layout.addWidget(self.identity_banner, 0)
 
-        # Add thinking scanner widget (hidden by default)
-        self.thinking_scanner = ThinkingScannerWidget()
-        self.thinking_scanner.hide()
-        left_column_layout.addWidget(self.thinking_scanner)
-
-        # Add the new MessageRendererWidget instead of old scroll area
+        # Add the new MessageRendererWidget
         self.message_renderer = MessageRendererWidget()
-        left_column_layout.addWidget(self.message_renderer)
+        # Add with stretch factor 1 to make it take up the remaining space
+        left_column_layout.addWidget(self.message_renderer, 1)
 
         self.control_strip = QFrame()
         self.control_strip.setObjectName("ControlStrip")
@@ -99,7 +95,8 @@ class AuraMainWindow(QMainWindow):
         input_area_layout.addWidget(self.send_button)
 
         strip_layout.addLayout(input_area_layout, 1)
-        left_column_layout.addWidget(self.control_strip)
+        # Add with stretch factor 0
+        left_column_layout.addWidget(self.control_strip, 0)
 
         right_column_widget = QWidget()
         right_column_widget.setObjectName("ToolBar")
@@ -157,19 +154,6 @@ class AuraMainWindow(QMainWindow):
     def get_controller(self) -> GUIController:
         return self.controller
 
-    def _setup_scanner_signals(self):
-        """Connect processing signals to scanner widget visibility"""
-        self.event_bus.subscribe("processing_started", self._show_scanner)
-        self.event_bus.subscribe("processing_finished", self._hide_scanner)
-
-    def _show_scanner(self):
-        """Show the thinking scanner when processing starts"""
-        self.thinking_scanner.show()
-
-    def _hide_scanner(self):
-        """Hide the thinking scanner when processing finishes"""
-        self.thinking_scanner.hide()
-
     def _apply_stylesheet(self):
         self.setStyleSheet("""
             QMainWindow, QWidget {
@@ -180,11 +164,12 @@ class AuraMainWindow(QMainWindow):
             }
             #IdentityBanner {
                 background-color: #000000;
-                color: #FFB74D;
-                font-family: "JetBrains Mono", "Consolas", monospace;
-                font-size: 16px;
+                color: #FFB74D; /* Amber */
+                font-family: "Courier New", monospace;
+                font-size: 10px;
                 font-weight: bold;
-                padding: 15px;
+                line-height: 1.0;
+                padding: 10px 0;
                 border-bottom: 1px solid #333333;
             }
             #ScrollArea {

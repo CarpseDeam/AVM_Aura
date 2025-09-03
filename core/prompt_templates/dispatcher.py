@@ -28,7 +28,7 @@ class ChiefOfStaffDispatcherPrompt:
 
     _reasoning_structure = """
     **REASONING PROCESS:**
-    First, in an internal <scratchpad> that you will not show in the final output, you MUST follow these steps:
+    First, in a <thought> block, you MUST follow these steps:
     1.  **Analyze Mission State:** Review the `CURRENT MISSION LOG STATE`. Is it empty, in progress, or complete? This provides the primary context for the user's request.
     2.  **Analyze User Request:** Read the `USER'S LATEST MESSAGE`. What is their literal command, question, or statement?
     3.  **Synthesize and Decide:** Based on the mission state AND the user's request, what is their true intent? Which single specialist agent is the perfect fit for this specific task? For example, if the mission log is empty and the user says "build a flask app," the intent is `CREATIVE_ASSISTANT` to start the plan. If the log is full and the user says "add a new field," the intent is `ITERATIVE_ARCHITECT`.
@@ -36,7 +36,7 @@ class ChiefOfStaffDispatcherPrompt:
 
     _output_format = f"""
     **YOUR OUTPUT FORMAT:**
-    Your entire response MUST be a single JSON object with one key: `"dispatch_to"`.
+    Your response must start with your reasoning in a <thought> block, followed by a single JSON object with one key: `"dispatch_to"`.
     The value MUST be one of the exact agent names listed above.
     {MasterRules.JSON_OUTPUT_RULE}
     """
@@ -64,5 +64,5 @@ class ChiefOfStaffDispatcherPrompt:
         3.  **USER'S LATEST MESSAGE:**
             "{user_prompt}"
         ---
-        Now, perform your reasoning in the scratchpad and provide the final JSON output.
+        Now, write your reasoning in a <thought> block, and then provide the final JSON output.
         """

@@ -20,11 +20,18 @@ class ArchitectPrompt:
     """
 
     _reasoning_structure = """
-    First, in an internal <scratchpad> that you will not show in the final output, you MUST follow these steps:
+    **REASONING PROCESS:**
+    First, in a <thought> block, you MUST follow these steps:
     1.  **Deconstruct the Request:** Briefly summarize the user's core request in your own words.
     2.  **Initial Brainstorm:** Write down a quick, first-draft plan. Don't hold back.
     3.  **Ruthless Critique (The Sinclair Method):** Scrutinize your own brainstormed plan against your directives. Ask yourself: 'Is this truly the simplest way? Is step 3 redundant? Am I adding complexity that wasn't asked for?' Be your own harshest critic.
     4.  **Final Plan Formulation:** Based on your self-critique, formulate the final, refined mission plan.
+    """
+
+    _output_format = f"""
+    **YOUR OUTPUT FORMAT:**
+    Your response must start with your reasoning in a <thought> block, followed by the final JSON plan.
+    {MasterRules.JSON_OUTPUT_RULE}
     """
 
     def render(self, user_idea: str, conversation_history: str) -> str:
@@ -36,12 +43,13 @@ class ArchitectPrompt:
 
         {self._reasoning_structure}
 
+        {self._output_format}
+
         **CONTEXT: CONVERSATION HISTORY**
         {conversation_history}
 
         **USER'S REQUEST:**
         "{user_idea}"
 
-        **YOUR OUTPUT:**
-        {MasterRules.JSON_OUTPUT_RULE}
+        Now, write your reasoning in a <thought> block, and then provide the final JSON output containing the plan.
         """
