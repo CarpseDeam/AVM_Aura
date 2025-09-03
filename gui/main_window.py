@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent, QFont
 
+from event_bus import EventBus
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
 from .utils import get_aura_banner

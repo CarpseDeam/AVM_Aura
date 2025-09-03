@@ -1,6 +1,6 @@
 import toml
 from pathlib import Path
-from typing import any
+from typing import Any
 
 class ConfigManager:
     """Manages loading and accessing application configuration from a TOML file."""
@@ -20,7 +20,7 @@ class ConfigManager:
         except toml.TomlDecodeError as e:
             raise ValueError(f"Error decoding TOML file: {e}")
 
-    def get(self, key: str, default: any = None) -> any:
+    def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a value from the configuration using dot notation.
 

@@ -24,6 +24,8 @@ GitPython
 
 # Development & Testing
 pytest
+pytest-asyncio
+pytest-mock
 watchdog
 pycodestyle
 
