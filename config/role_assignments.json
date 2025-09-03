@@ -2,11 +2,19 @@
     "role_assignments": {
         "coder": "google/gemini-2.5-pro",
         "chat": "google/gemini-2.5-pro",
-        "planner": "google/gemini-2.5-pro"
+        "planner": "google/gemini-2.5-pro",
+        "dispatcher": "google/gemini-2.5-pro",
+        "architect": "google/gemini-2.5-pro",
+        "replanner": "google/gemini-2.5-pro",
+        "sentry": "google/gemini-2.5-pro"
     },
     "role_temperatures": {
         "coder": 0.16,
         "chat": 0.7,
-        "planner": 0.35
+        "planner": 0.35,
+        "dispatcher": 0.3,
+        "architect": 0.3,
+        "replanner": 0.4,
+        "sentry": 0.2
     }
 }
