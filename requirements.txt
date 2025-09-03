@@ -26,3 +26,6 @@ GitPython
 pytest
 watchdog
 pycodestyle
+
+transformers>=4.20.0
+torch>=1.12.0
