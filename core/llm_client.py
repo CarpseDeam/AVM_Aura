@@ -1,9 +1,13 @@
+# core/llm_client.py
 import os
 import json
 import base64
+import logging
 from typing import Dict, Optional, Any, List
 import aiohttp
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -22,7 +26,7 @@ class LLMClient:
         self.role_assignments = {}
         self.role_temperatures = {}
         self.load_assignments()
-        print(f"[LLMClient] Client initialized. Will connect to LLM server at {self.llm_server_url}")
+        logger.info(f"[LLMClient] Client initialized. Will connect to LLM server at {self.llm_server_url}")
 
     def load_assignments(self):
         """Loads role assignments and temperatures from JSON, with smart, self-healing defaults."""
@@ -33,7 +37,7 @@ class LLMClient:
             default_assignments = default_config.get("role_assignments", {})
             default_temperatures = default_config.get("role_temperatures", {})
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(
+            logger.error(
                 f"[LLMClient] CRITICAL: Could not load default_role_assignments.json: {e}. Cannot proceed with defaults.")
             # In a real-world scenario, you might have an emergency hardcoded fallback here.
             # For now, we'll assume the file is part of the application distribution.
@@ -50,7 +54,7 @@ class LLMClient:
                 loaded_assignments = user_config.get("role_assignments", {})
                 loaded_temperatures = user_config.get("role_temperatures", {})
             except (json.JSONDecodeError, TypeError) as e:
-                print(
+                logger.warning(
                     f"[LLMClient] Warning: Could not parse role_assignments.json: {e}. Will use defaults and attempt to repair.")
 
         # Step 3: Merge user settings over the defaults.
@@ -94,10 +98,10 @@ class LLMClient:
                     if response.status == 200:
                         return await response.json()
                     else:
-                        print(f"[LLMClient] Error getting models from server: {response.status}")
+                        logger.error(f"[LLMClient] Error getting models from server: {response.status}")
                         return {}
         except Exception as e:
-            print(f"[LLMClient] Could not connect to LLM server to get models: {e}")
+            logger.error(f"[LLMClient] Could not connect to LLM server to get models: {e}")
             return {}
 
     def get_role_assignments(self) -> dict:
@@ -124,7 +128,7 @@ class LLMClient:
     async def stream_chat(self, provider: str, model: str, prompt: str, role: str = None,
                           image_bytes: Optional[bytes] = None, image_media_type: str = "image/png",
                           history: Optional[List[Dict[str, Any]]] = None):
-        """Streams a chat response from the LLM server."""
+        """Streams a chat response from the LLM server with enhanced debugging."""
         temperature = self.get_role_temperature(role) if role else 0.7
         image_b64 = base64.b64encode(image_bytes).decode('utf-8') if image_bytes else None
 
@@ -138,15 +142,40 @@ class LLMClient:
             "history": history or []
         }
 
+        logger.info(f"[LLMClient] Starting stream chat for role '{role}' using {provider}/{model}")
+        logger.debug(f"[LLMClient] Prompt length: {len(prompt)} characters")
+        logger.debug(f"[LLMClient] Temperature: {temperature}")
+
+        chunk_count = 0
+        total_response = ""
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"{self.llm_server_url}/stream_chat", json=payload, timeout=300) as response:
                     if response.status == 200:
+                        logger.info(f"[LLMClient] Successfully connected to LLM server")
                         async for line in response.content:
                             if line:
-                                yield line.decode('utf-8')
+                                chunk = line.decode('utf-8')
+                                chunk_count += 1
+                                total_response += chunk
+
+                                # Log first few chunks and every 10th chunk for debugging
+                                if chunk_count <= 3 or chunk_count % 10 == 0:
+                                    logger.debug(f"[LLMClient] Chunk {chunk_count}: {chunk[:100]}...")
+
+                                yield chunk
+
+                        logger.info(
+                            f"[LLMClient] Stream completed. Total chunks: {chunk_count}, Response length: {len(total_response)}")
+                        logger.debug(f"[LLMClient] Complete response preview: {total_response[:200]}...")
+
                     else:
                         error_text = await response.text()
-                        yield f"LLM_API_ERROR: Failed to stream from server. Status: {response.status}, Details: {error_text}"
+                        error_msg = f"LLM_API_ERROR: Failed to stream from server. Status: {response.status}, Details: {error_text}"
+                        logger.error(f"[LLMClient] {error_msg}")
+                        yield error_msg
         except Exception as e:
-            yield f"LLM_API_ERROR: Could not connect to LLM server. Is it running? Details: {e}"
+            error_msg = f"LLM_API_ERROR: Could not connect to LLM server. Is it running? Details: {e}"
+            logger.error(f"[LLMClient] {error_msg}")
+            yield error_msg
