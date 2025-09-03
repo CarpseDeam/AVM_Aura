@@ -93,8 +93,8 @@ class ServiceManager:
 
     def initialize_core_components(self, project_root: Path, project_manager: ProjectManager):
         self.log_to_event_bus("info", "[ServiceManager] Initializing core components...")
-        llm_server_url = self.config_manager.get("servers.llm_server_url", "http://127.0.0.1:8002")
-        self.llm_client = LLMClient(project_root, llm_server_url=llm_server_url)
+        llm_server_url = self.config_manager.get("servers.llm_server_url", "http://127.0.0.1:8002") # Default fallback
+        self.llm_client = LLMClient(project_root, llm_server_url)
         self.project_manager = project_manager
         self.execution_engine = ExecutionEngine(self.project_manager)
         self.foundry_manager = FoundryManager()

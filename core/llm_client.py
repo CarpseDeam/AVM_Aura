@@ -16,7 +16,7 @@ class LLMClient:
     It does NOT load any heavy AI libraries itself.
     """
 
-    def __init__(self, project_root: Path, llm_server_url="http://127.0.0.1:8002"):
+    def __init__(self, project_root: Path, llm_server_url: str):
         self.llm_server_url = llm_server_url
         self.project_root = project_root
         self.config_dir = project_root / "config"

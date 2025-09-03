@@ -62,6 +62,16 @@ class PlanReadyForReview:
     """Published by the Dev Team when the Architect's plan is in the Mission Log."""
     pass
 
+@dataclass
+class ProcessingStarted:
+    """Published when a long-running background process begins."""
+    pass
+
+@dataclass
+class ProcessingFinished:
+    """Published when a long-running background process completes."""
+    pass
+
 # --- Code Generation & Streaming Events ---
 
 @dataclass

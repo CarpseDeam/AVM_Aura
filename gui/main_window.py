@@ -14,7 +14,7 @@ from .controller import GUIController
 from .utils import get_aura_banner
 from .widgets.thinking_scanner_widget import ThinkingScannerWidget
 from .widgets.message_renderer_widget import MessageRendererWidget
-from event_bus import EventBus
+from events import ProcessingStarted, ProcessingFinished
 
 logger = logging.getLogger(__name__)
 
@@ -167,11 +167,11 @@ class AuraMainWindow(QMainWindow):
         self.event_bus.subscribe("processing_started", self._show_scanner)
         self.event_bus.subscribe("processing_finished", self._hide_scanner)
 
-    def _show_scanner(self):
+    def _show_scanner(self, event: ProcessingStarted):
         """Show the thinking scanner when processing starts"""
         self.thinking_scanner.show()
 
-    def _hide_scanner(self):
+    def _hide_scanner(self, event: ProcessingFinished):
         """Hide the thinking scanner when processing finishes"""
         self.thinking_scanner.hide()
 
