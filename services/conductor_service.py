@@ -3,7 +3,7 @@ import logging
 import asyncio
 import re
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any, Union
 
 from event_bus import EventBus
 from services.mission_log_service import MissionLogService
@@ -39,9 +39,7 @@ class ConductorService:
 
         self.is_mission_active = False
         self.original_user_goal = ""
-
-        # New! The configurable quality setting for the factory.
-        self.quality_tier = "DRAFT"  # Can be "DRAFT" or "PRODUCTION"
+        self.quality_tier = "DRAFT"
 
         logger.info("ConductorService initialized.")
 
@@ -81,10 +79,8 @@ class ConductorService:
                 task_succeeded = False
 
                 if self.quality_tier == "PRODUCTION" and self._is_code_generation_task(current_task):
-                    # Use the robust, test-driven workflow
                     task_succeeded = await self._run_production_task(current_task)
                 else:
-                    # Use the fast, draft-oriented workflow
                     task_succeeded = await self._run_draft_task(current_task)
 
                 if not task_succeeded:
@@ -93,7 +89,7 @@ class ConductorService:
                                             is_error=True)
                     await self._execute_strategic_replan(current_task)
                 else:
-                    await asyncio.sleep(0.5)  # Small delay between successful tasks
+                    await asyncio.sleep(0.5)
 
         except Exception as e:
             logger.error(f"A critical error occurred during mission execution: {e}", exc_info=True)
@@ -107,6 +103,9 @@ class ConductorService:
         """Handles a task with the fast, retry-based DRAFT workflow."""
         retry_count = 0
         while retry_count <= self.MAX_RETRIES_PER_TASK:
+            self.log("info",
+                     f"Executing task {current_task['id']}: {current_task['description']} (Attempt {retry_count + 1})")
+
             tool_call = await self.development_team_service.run_coding_task(
                 task=current_task,
                 last_error=current_task.get('last_error')
@@ -119,13 +118,22 @@ class ConductorService:
                 self.log("warning", f"{error_msg}. Retry {retry_count}/{self.MAX_RETRIES_PER_TASK}.")
                 continue
 
+            self.log("info",
+                     f"Executing tool: {tool_call.get('tool_name')} with arguments: {tool_call.get('arguments', {})}")
             result = await self.tool_runner_service.run_tool_by_dict(tool_call)
+
+            self.log("info", f"Tool execution result: {result}")
             result_is_error, error_message = self._is_result_an_error(result)
 
             if not result_is_error:
-                self.mission_log_service.mark_task_as_done(current_task['id'])
-                self._post_chat_message("Conductor", f"Task completed: {current_task['description']}")
-                return True
+                self.log("success", f"Task {current_task['id']} completed successfully. Marking as done.")
+                success = self.mission_log_service.mark_task_as_done(current_task['id'])
+                if success:
+                    self.log("success", f"Task {current_task['id']} marked as done in mission log.")
+                    self._post_chat_message("Conductor", f"Task completed: {current_task['description']}")
+                    return True
+                else:
+                    self.log("error", f"Failed to mark task {current_task['id']} as done in mission log.")
             else:
                 current_task['last_error'] = error_message
                 retry_count += 1
@@ -134,29 +142,26 @@ class ConductorService:
                 self._post_chat_message("Conductor", f"Task failed. I will try again. Error: {error_message}",
                                         is_error=True)
 
-        return False  # Task failed all retries
+        return False
 
     async def _run_production_task(self, current_task: dict) -> bool:
         """Handles a code generation task with the robust, TDD-based PRODUCTION workflow."""
         self.log("info", f"Running PRODUCTION workflow for task: {current_task['description']}")
 
-        # 1. Determine paths for implementation and test files
         try:
             impl_path, test_path = self._get_paths_for_task(current_task)
         except ValueError as e:
             current_task['last_error'] = str(e)
             return False
 
-        # 2. Sentry Agent: Write failing tests
         self.event_bus.emit("agent_status_changed", "Sentry", f"Writing tests for {Path(impl_path).name}...",
                             "fa5s.shield-alt")
-        sentry_result = await self.development_team_service.run_sentry_task(current_task, impl_path, test_path)
+        sentry_result = await self.development_team_service.run_sentry_task(current_task)
         if self._is_result_an_error(sentry_result)[0]:
             current_task['last_error'] = f"Sentry failed to write tests: {sentry_result}"
             return False
         self._post_chat_message("Sentry", f"Wrote initial failing tests to `{test_path}`.")
 
-        # 3. Coder Agent: Write implementation code to pass the tests
         current_task_with_test_context = current_task.copy()
         current_task_with_test_context[
             'description'] += f"\n\n**Goal:** Implement the code in `{impl_path}` to make the tests in `{test_path}` pass."
@@ -171,9 +176,8 @@ class ConductorService:
             return False
         self._post_chat_message("Coder", f"Wrote implementation code to `{impl_path}`.")
 
-        # 4. Conductor: Run the tests
         self._post_chat_message("Conductor", "Implementation complete. Running verification tests...")
-        test_command = f"pytest {test_path}"  # Assuming pytest is installed in the venv
+        test_command = f"pytest {test_path}"
         test_result_str = await self.tool_runner_service.run_tool_by_dict({
             "tool_name": "run_shell_command",
             "arguments": {"command": test_command}
@@ -182,12 +186,15 @@ class ConductorService:
         if "failed" in test_result_str.lower() or "error" in test_result_str.lower():
             current_task['last_error'] = f"Tests failed. Pytest output:\n{test_result_str}"
             self._post_chat_message("Conductor", "Tests failed. The code is not yet correct.", is_error=True)
-            return False  # Failed, will trigger re-plan with test output
+            return False
 
-        # 5. Success!
-        self.mission_log_service.mark_task_as_done(current_task['id'])
-        self._post_chat_message("Conductor", "All tests passed! Code is verified and correct.")
-        return True
+        success = self.mission_log_service.mark_task_as_done(current_task['id'])
+        if success:
+            self._post_chat_message("Conductor", "All tests passed! Code is verified and correct.")
+            return True
+        else:
+            self.log("error", f"Failed to mark production task {current_task['id']} as done.")
+            return False
 
     def _is_code_generation_task(self, task: dict) -> bool:
         """Heuristically determines if a task is about writing code."""
@@ -202,26 +209,47 @@ class ConductorService:
     def _get_paths_for_task(self, task: dict) -> Tuple[str, str]:
         """Extracts the implementation path from the task and derives the test path."""
         desc = task['description']
-        # Regex to find file paths like 'src/main.py' or `path/to/file.ext`
         match = re.search(r"[`']([^`']+\.py)[`']", desc)
         if not match:
             raise ValueError("Could not determine the target file path from the task description.")
 
         relative_impl_path = match.group(1)
         impl_path = Path(relative_impl_path)
-
-        # Derive test path, e.g., 'src/utils.py' -> 'tests/test_utils.py'
         test_filename = f"test_{impl_path.name}"
         relative_test_path = Path("tests") / test_filename
 
         return str(relative_impl_path), str(relative_test_path)
 
-    def _is_result_an_error(self, result: any) -> Tuple[bool, Optional[str]]:
-        """Determines if a tool result constitutes an error."""
-        if isinstance(result, str) and result.strip().lower().startswith("error"):
-            return True, result
-        if isinstance(result, dict) and result.get('status', 'success').lower() in ["failure", "error"]:
-            return True, result.get('summary') or result.get('full_output') or "Unknown error from tool."
+    def _is_result_an_error(self, result: Any) -> Tuple[bool, Optional[str]]:
+        """
+        Enhanced error detection that properly handles different result types.
+        Returns (is_error: bool, error_message: Optional[str])
+        """
+        if result is None:
+            return True, "Tool returned None result"
+
+        if isinstance(result, str):
+            result_lower = result.strip().lower()
+            if result_lower.startswith("error"):
+                return True, result
+            if "error:" in result_lower or "failed:" in result_lower:
+                return True, result
+            if result_lower.startswith("❌"):
+                return True, result
+            return False, None
+
+        if isinstance(result, dict):
+            status = result.get('status', '').lower()
+            if status in ["failure", "error", "failed"]:
+                return True, result.get('summary') or result.get('message') or result.get(
+                    'full_output') or "Unknown error from tool."
+            if result.get('error'):
+                return True, str(result.get('error'))
+            return False, None
+
+        if isinstance(result, bool):
+            return not result, "Tool returned False" if not result else None
+
         return False, None
 
     async def _execute_strategic_replan(self, failed_task: Dict):
@@ -247,4 +275,3 @@ class ConductorService:
 
     def log(self, level: str, message: str):
         self.event_bus.emit("log_message_received", "ConductorService", level, message)
-
