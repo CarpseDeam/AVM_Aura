@@ -48,6 +48,11 @@ class PostChatMessage:
     is_error: bool = False
 
 @dataclass
+class PostStructuredMessage:
+    """Requests that a structured AuraMessage be posted to the chat log."""
+    message: Any # Should be AuraMessage
+
+@dataclass
 class AIWorkflowFinished:
     """Published when any main AI workflow (build or chat) completes or fails."""
     pass

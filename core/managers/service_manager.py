@@ -8,6 +8,7 @@ import traceback
 import asyncio
 
 from event_bus import EventBus
+from core.managers.config_manager import ConfigManager
 from core.llm_client import LLMClient
 from core.managers.project_manager import ProjectManager
 from core.execution_engine import ExecutionEngine
@@ -31,6 +32,7 @@ class ServiceManager:
     def __init__(self, event_bus: EventBus, project_root: Path):
         self.event_bus = event_bus
         self.project_root = project_root
+        self.config_manager = ConfigManager(project_root)
         self.llm_client: LLMClient = None
         self.project_manager: ProjectManager = None
         self.execution_engine: ExecutionEngine = None
@@ -91,7 +93,8 @@ class ServiceManager:
 
     def initialize_core_components(self, project_root: Path, project_manager: ProjectManager):
         self.log_to_event_bus("info", "[ServiceManager] Initializing core components...")
-        self.llm_client = LLMClient(project_root)
+        llm_server_url = self.config_manager.get("servers.llm_server_url", "http://127.0.0.1:8002")
+        self.llm_client = LLMClient(project_root, llm_server_url=llm_server_url)
         self.project_manager = project_manager
         self.execution_engine = ExecutionEngine(self.project_manager)
         self.foundry_manager = FoundryManager()

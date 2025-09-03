@@ -69,7 +69,7 @@ class EventCoordinator:
 
     def _wire_ai_workflow_events(self):
         if self.workflow_manager:
-            self.event_bus.subscribe("user_request_submitted", self.workflow_manager.handle_user_request)
+            self.event_bus.subscribe("user_prompt_entered", self.workflow_manager.handle_user_request)
 
         conductor_service = self.service_manager.conductor_service
         if conductor_service:

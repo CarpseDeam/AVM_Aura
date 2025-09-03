@@ -116,7 +116,7 @@ class GUIController(QObject):
                 prompt_text=input_text,
                 conversation_history=self.get_conversation_history()
             )
-            self.event_bus.emit("user_request_submitted", event)
+            self.event_bus.emit("user_prompt_entered", event)
 
     def post_welcome_message(self):
         welcome_msg = """AURA Command Deck Initialized\n\nStatus: READY\nSystem: Online\nMode: Interactive\n\nEnter your commands or describe what you want to build..."""
