@@ -1,0 +1,9 @@
+[application]
+name = "Aura"
+organization = "Aura"
+icon = "assets/Ava_Icon.ico"
+
+[servers]
+llm_server_script = "servers/llm_server.py"
+llm_server_log = "llm_server_subprocess.log"
+startup_timeout = 15

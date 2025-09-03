@@ -94,14 +94,30 @@ class DevelopmentTeamService:
             await self._run_direct_planning_workflow(user_idea, conversation_history)
             return
 
+        self.event_bus.emit("processing_started")
+
         try:
-            response_str = "".join(
-                [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "dispatcher")])
+            stream_chunks = self.llm_client.stream_chat(provider, model, prompt, "dispatcher")
+            dispatch_to = None
 
-            decision_data = self._parse_json_response(response_str)
-            dispatch_to = decision_data.get("dispatch_to")
-            self.log("info", f"Chief of Staff dispatched to: {dispatch_to}")
+            async for message in parse_llm_stream_async(stream_chunks):
+                if message.type == MessageType.AGENT_THOUGHT:
+                    # Display the dispatcher's reasoning
+                    self._post_structured_message(message)
+                elif message.type == MessageType.AGENT_PLAN_JSON:
+                    # Process the dispatcher's JSON decision internally
+                    try:
+                        decision_data = json.loads(message.content)
+                        dispatch_to = decision_data.get("dispatch_to")
+                        self.log("info", f"Chief of Staff dispatched to: {dispatch_to}")
+                    except (ValueError, json.JSONDecodeError) as e:
+                        self.log("warning", f"Dispatcher JSON parsing failed: {e}")
+                        break
+                else:
+                    # Display other message types normally
+                    self._post_structured_message(message)
 
+            # Execute the dispatch decision
             if dispatch_to == "CONDUCTOR":
                 self.log("info", "User requested to start the build. Dispatching to Conductor.")
                 self._post_chat_message("Aura", "Okay, I'll start the build process now.")
@@ -114,9 +130,11 @@ class DevelopmentTeamService:
                 self.log("warning", "Dispatcher returned unknown target. Falling back to planning.")
                 await self._run_direct_planning_workflow(user_idea, conversation_history)
 
-        except (ValueError, json.JSONDecodeError) as e:
-            self.log("warning", f"Dispatcher failed: {e}. Falling back to direct planning.")
+        except Exception as e:
+            self.log("warning", f"Dispatcher workflow failed: {e}. Falling back to direct planning.")
             await self._run_direct_planning_workflow(user_idea, conversation_history)
+        finally:
+            self.event_bus.emit("processing_finished")
 
     async def _run_direct_planning_workflow(self, user_idea: str, conversation_history: list):
         """
@@ -152,124 +170,123 @@ class DevelopmentTeamService:
                         # Process the plan
                         plan_steps = response_data.get("plan", [])
                         if plan_steps:
-                            self.log("info", f"Processing {len(plan_steps)} plan steps...")
-
-                            # Convert plan steps to task descriptions
-                            task_descriptions = []
                             for step in plan_steps:
-                                if isinstance(step, dict):
-                                    # Handle tool call format from JSON plan
-                                    if "tool_name" in step and "parameters" in step:
-                                        # Extract task description from parameters
-                                        params = step["parameters"]
-                                        if "task_description" in params:
-                                            task_descriptions.append(params["task_description"])
-                                        elif "project_name" in params:
-                                            task_descriptions.append(f"Create project: {params['project_name']}")
-                                        else:
-                                            task_descriptions.append(f"Execute {step['tool_name']}")
-                                    elif "description" in step:
-                                        task_descriptions.append(step["description"])
-                                    else:
-                                        # Convert dict to string representation
-                                        task_descriptions.append(str(step)[:100])
-                                else:
-                                    # Handle string descriptions
-                                    task_descriptions.append(str(step))
-
-                            if task_descriptions:
-                                # Set the initial plan in mission log
-                                self.mission_log_service.set_initial_plan(task_descriptions, user_idea)
-                                self.log("info", f"Added {len(task_descriptions)} tasks to mission log.")
-
-                                # Notify user
-                                self._post_chat_message("Aura",
-                                                        "I've created a plan to build your project. Please review it in the 'Agent TODO' list and click 'Dispatch Aura' to begin execution.")
-
-                                # Emit plan ready event
-                                self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
-                            else:
-                                raise ValueError("No valid task descriptions could be extracted from plan.")
+                                self.mission_log_service.add_task(step)
+                            self._post_chat_message("Aura",
+                                                    "I've created a comprehensive plan for your project. Check the 'Agent TODO' list to review the tasks.")
+                            self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
                         else:
-                            raise ValueError("Plan was empty or malformed.")
+                            self.handle_error("Aura", "Failed to generate a valid plan - no tasks found.")
 
                     except (ValueError, json.JSONDecodeError) as e:
                         self.handle_error("Aura", f"Failed to parse the plan: {e}")
-                        self.log("error", f"Plan parsing failure. Raw JSON: {message.content}")
                 else:
-                    # Handle other message types (thoughts, responses, etc.)
                     self._post_structured_message(message)
 
         except Exception as e:
             self.handle_error("Aura", f"Direct planning workflow failed: {str(e)}")
-            self.log("error", f"Direct planning failure. Error: {e}")
         finally:
             self.event_bus.emit("processing_finished")
 
-    async def run_aura_planner_workflow(self, user_idea: str, conversation_history: list):
+    def log(self, level: str, message: str):
+        self.event_bus.emit("log_message_received", "DevelopmentTeamService", level, message)
+
+    def handle_error(self, agent: str, error_msg: str):
+        self.log("error", f"{agent} failed: {error_msg}")
+        self.event_bus.emit("agent_status_changed", "Aura", "Failed", "fa5s.exclamation-triangle")
+        self._post_structured_message(AuraMessage.error(error_msg))
+
+    async def run_architect_task(self, task: Dict[str, any]) -> Optional[Dict[str, str]]:
         """
-        Legacy method - redirects to direct planning workflow.
+        Invokes the Architect AI to plan a specific file based on the task description.
         """
-        await self._run_direct_planning_workflow(user_idea, conversation_history)
+        file_path = task.get("file_path")
+        description = task.get("description", "No description provided.")
 
-    async def run_coding_task(self, task: Dict[str, any], last_error: Optional[str] = None) -> Optional[Dict[str, str]]:
-        """
-        Asks the Coder AI to translate a single natural language task into an
-        executable tool call, providing it with full context including past attempts.
-        """
-        if task.get("tool_call"):
-            self.log("info", f"Using pre-defined tool call for task: {task['description']}")
-            return task["tool_call"]
+        if not file_path:
+            self.log("error", "Architect task requires a 'file_path' in the task arguments.")
+            return None
 
-        current_task_description = task['description']
-        self.log("info", f"Coder translating task to tool call: {current_task_description}")
-        self.event_bus.emit("agent_status_changed", "Aura", f"Coding task: {current_task_description}...", "fa5s.cogs")
+        self.log("info", f"Architect planning file: {file_path}")
+        self.event_bus.emit("agent_status_changed", "Aura", f"Planning: {file_path}...", "fa5s.pencil-ruler")
 
-        log_tasks = self.mission_log_service.get_tasks()
-        mission_log_history = "\n".join(
-            [f"- ID {t['id']} ({'Done' if t['done'] else 'Pending'}): {t['description']}" for t in log_tasks])
-        if not mission_log_history:
-            mission_log_history = "The mission log is empty. This is the first task."
-
-        if last_error:
-            current_task_description += f"\n\n**PREVIOUS ATTEMPT FAILED!** The last attempt to perform this task failed with the following error: `{last_error}`. You MUST analyze this error and try a different tool or different arguments to succeed."
-
-        vector_context = "No existing code snippets were found."
-        if self.vector_context_service and self.vector_context_service.collection.count() > 0:
-            try:
-                retrieved_chunks = self.vector_context_service.query(current_task_description, n_results=5)
-                if retrieved_chunks:
-                    context_parts = [
-                        f"```python\n# From: {chunk['metadata'].get('file_path', 'N/A')}\n{chunk['document']}\n```" for
-                        chunk in retrieved_chunks]
-                    vector_context = "\n\n".join(context_parts)
-            except Exception as e:
-                self.log("error", f"Failed to query vector context: {e}")
-
-        file_structure = "\n".join(
-            sorted(self.project_manager.get_project_files().keys())) or "The project is currently empty."
+        file_structure = "\n".join(sorted(self.project_manager.get_project_files().keys()))
         available_tools = json.dumps(self.foundry_manager.get_llm_tool_definitions(), indent=2)
+
+        prompt_template = ArchitectPrompt()
+        prompt = prompt_template.render(
+            user_idea=description,
+            conversation_history="",
+            file_structure=file_structure,
+            available_tools=available_tools
+        )
+
+        provider, model = self.llm_client.get_model_for_role("architect")
+        if not provider or not model:
+            self.log("error", "No 'architect' model configured.")
+            self.handle_error("Aura", "No 'architect' model configured.")
+            return None
+
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "architect")])
+
+        try:
+            tool_call = self._parse_json_response(response_str)
+            if "tool_name" not in tool_call or "arguments" not in tool_call:
+                raise ValueError("Architect response must be a JSON object with 'tool_name' and 'arguments' keys.")
+
+            if tool_call.get("tool_name") != "stream_and_write_file":
+                self.log("warning", f"Architect returned an unexpected tool: {tool_call.get('tool_name')}")
+
+            return tool_call
+        except (ValueError, json.JSONDecodeError) as e:
+            self.log("error", f"Architect generation failure. Raw response: {response_str}. Error: {e}")
+            self.handle_error("Aura", f"Failed to generate a valid architecture plan: {e}")
+            return None
+
+    async def run_coder_task(self, task: Dict[str, any]) -> Optional[Dict[str, str]]:
+        """
+        Invokes the Coder AI to generate code for a specific file based on the task description.
+        """
+        file_path = task.get("file_path")
+        description = task.get("description", "No description provided.")
+
+        if not file_path:
+            self.log("error", "Coder task requires a 'file_path' in the task arguments.")
+            return None
+
+        self.log("info", f"Coder generating code for: {file_path}")
+        self.event_bus.emit("agent_status_changed", "Aura", f"Coding: {file_path}...", "fa5s.code")
+
+        # Get context from project files
+        relevant_code_snippets = self.vector_context_service.get_relevant_context(description, max_results=5)
+        file_structure = "\n".join(sorted(self.project_manager.get_project_files().keys()))
 
         prompt_template = CoderPrompt()
         prompt = prompt_template.render(
-            current_task=current_task_description,
-            mission_log=mission_log_history,
-            available_tools=available_tools,
-            file_structure=file_structure,
-            relevant_code_snippets=vector_context
+            file_path=file_path,
+            description=description,
+            relevant_code_snippets=relevant_code_snippets,
+            file_structure=file_structure
         )
 
         provider, model = self.llm_client.get_model_for_role("coder")
         if not provider or not model:
             self.log("error", "No 'coder' model configured.")
+            self.handle_error("Aura", "No 'coder' model configured.")
             return None
 
-        response_str = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "coder")])
 
         try:
             tool_call = self._parse_json_response(response_str)
             if "tool_name" not in tool_call or "arguments" not in tool_call:
                 raise ValueError("Coder response must be a JSON object with 'tool_name' and 'arguments' keys.")
+
+            if tool_call.get("tool_name") != "stream_and_write_file":
+                self.log("warning", f"Coder returned an unexpected tool: {tool_call.get('tool_name')}")
+
             return tool_call
         except (ValueError, json.JSONDecodeError) as e:
             self.log("error", f"Coder generation failure. Raw response: {response_str}. Error: {e}")
@@ -326,14 +343,13 @@ class DevelopmentTeamService:
         Invokes the Re-Planner AI to create a new plan when a task fails repeatedly.
         """
         self.log("info", "Strategic re-plan initiated.")
-        self.event_bus.emit("agent_status_changed", "Aura", "Hitting a roadblock. Re-planning strategy...",
-                            "fa5s.route")
+        self.event_bus.emit("agent_status_changed", "Aura", "Hitting a roadblock. Re-planning...", "fa5s.route")
 
         prompt_template = RePlannerPrompt()
         prompt = prompt_template.render(
             original_goal=original_goal,
-            failed_task=failed_task,
-            mission_log=mission_log
+            failed_task=json.dumps(failed_task, indent=2),
+            mission_log=json.dumps(mission_log, indent=2)
         )
 
         provider, model = self.llm_client.get_model_for_role("replanner")
@@ -346,50 +362,48 @@ class DevelopmentTeamService:
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "replanner")])
 
         try:
-            replan_data = self._parse_json_response(response_str)
-            new_plan_steps = replan_data.get("new_plan", [])
+            response_data = self._parse_json_response(response_str)
+            self.log("info", f"Re-planning complete: {response_data}")
 
-            if not new_plan_steps:
-                self.handle_error("Aura", "Re-planner returned an empty plan.")
-                return
+            if "thought" in response_data:
+                self._post_structured_message(AuraMessage.agent_thought(response_data["thought"]))
 
-            failed_task_id = failed_task.get('id')
-            if failed_task_id:
-                self.mission_log_service.replace_tasks_from_id(failed_task_id, new_plan_steps)
-                self.log("info", f"Strategic re-plan complete. Replaced tasks starting from ID {failed_task_id}.")
-            else:
-                self.log("error", "Failed task missing ID - cannot replace tasks.")
+            new_plan = response_data.get("plan", [])
+            if new_plan:
+                self.mission_log_service.clear_tasks()
+                for step in new_plan:
+                    self.mission_log_service.add_task(step)
+                self._post_chat_message("Aura",
+                                        "I've created a new strategy to overcome the roadblock. Check the updated plan in the 'Agent TODO' list.")
+                self.event_bus.emit("plan_ready_for_review", PlanReadyForReview())
 
         except (ValueError, json.JSONDecodeError) as e:
-            self.handle_error("Aura", f"Re-planner failed to create a valid plan: {e}")
-            self.log("error", f"Re-planner failure. Raw response: {response_str}")
+            self.log("error", f"Re-planner generation failure. Raw response: {response_str}. Error: {e}")
+            self.handle_error("Aura", f"Failed to create a new plan: {e}")
 
-    async def generate_mission_summary(self, completed_tasks: List[Dict]) -> str:
+    async def run_mission_summarizer(self, mission_log: List[Dict]) -> str:
         """
-        Creates a celebratory summary when the mission is complete.
+        Uses the Mission Summarizer AI to create a concise summary of the mission log.
+        Returns the summary as a string.
         """
-        self.log("info", "Generating mission summary.")
-        self.event_bus.emit("agent_status_changed", "Aura", "Generating mission summary...", "fa5s.pen-fancy")
-
-        task_descriptions = "\n".join([f"- {task['description']}" for task in completed_tasks if task['done']])
-        if not task_descriptions:
-            return "Mission accomplished, although no specific tasks were marked as completed in the log."
+        self.log("info", "Mission summarization initiated.")
 
         prompt_template = MissionSummarizerPrompt()
-        prompt = prompt_template.render(completed_tasks=task_descriptions)
+        prompt = prompt_template.render(mission_log=json.dumps(mission_log, indent=2))
 
-        provider, model = self.llm_client.get_model_for_role("chat")
+        provider, model = self.llm_client.get_model_for_role("summarizer")
         if not provider or not model:
-            self.log("error", "No 'chat' model available for summary generation.")
-            return "Mission accomplished!"
+            self.log("warning", "No 'summarizer' model configured. Using raw mission log.")
+            return str(mission_log)
 
-        summary = "".join([chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "chat")])
-        return summary.strip() if summary.strip() else "Mission accomplished!"
+        response_str = "".join(
+            [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "summarizer")])
 
-    def handle_error(self, agent: str, error_msg: str):
-        self.log("error", f"{agent} failed: {error_msg}")
-        self.event_bus.emit("agent_status_changed", "Aura", "Failed", "fa5s.exclamation-triangle")
-        self._post_chat_message("Aura", error_msg, is_error=True)
-
-    def log(self, level: str, message: str):
-        self.event_bus.emit("log_message_received", "DevTeamService", level, message)
+        try:
+            response_data = self._parse_json_response(response_str)
+            summary = response_data.get("summary", "Summary generation failed.")
+            self.log("info", f"Mission summary created: {len(summary)} characters")
+            return summary
+        except (ValueError, json.JSONDecodeError) as e:
+            self.log("warning", f"Summarizer failed: {e}. Using raw mission log.")
+            return str(mission_log)
