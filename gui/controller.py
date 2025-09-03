@@ -13,7 +13,7 @@ from events import (
 )
 from services import MissionLogService, CommandHandler
 from .chat_widgets import (
-    AgentActivityWidget, ToolCallWidget, MissionAccomplishedWidget
+    ToolCallWidget, MissionAccomplishedWidget
 )
 from .command_input_widget import CommandInputWidget
 from .mission_log_window import MissionLogWindow
@@ -36,11 +36,8 @@ class GUIController(QObject):
         self.message_renderer = message_renderer
 
         # Subscribe to event bus events
-        self.event_bus.subscribe("agent_status_changed", self.on_status_update)
         self.event_bus.subscribe("post_chat_message", self.on_post_chat_message)
         self.event_bus.subscribe("post_structured_message", self.on_post_structured_message)
-        self.event_bus.subscribe("ai_workflow_finished", self._on_workflow_finished)
-        self.event_bus.subscribe("plan_ready_for_review", self._on_workflow_finished)
         self.event_bus.subscribe("tool_call_initiated", self.on_tool_call_initiated)
         self.event_bus.subscribe("tool_call_completed", self.on_tool_call_completed)
         self.event_bus.subscribe("mission_accomplished", self.on_mission_accomplished)
@@ -52,7 +49,6 @@ class GUIController(QObject):
         self.node_viewer_window = None
         self.code_viewer_window = None
 
-        self.current_activity_widget: Optional[AgentActivityWidget] = None
         self.active_tool_widgets: Dict[int, ToolCallWidget] = {}
 
         self.command_input: Optional[CommandInputWidget] = None
@@ -63,12 +59,10 @@ class GUIController(QObject):
         self.autocomplete_popup = autocomplete_popup
 
     def on_mission_accomplished(self, event: MissionAccomplished):
-        self._on_workflow_finished()
         widget = MissionAccomplishedWidget()
         self.message_renderer.add_widget(widget)
 
     def on_tool_call_initiated(self, event: ToolCallInitiated):
-        self._on_workflow_finished()  # Finalize previous agent activity widget
         widget = ToolCallWidget(tool_name=event.tool_name, params=event.params)
         self.active_tool_widgets[event.widget_id] = widget
         self.message_renderer.add_widget(widget)
@@ -90,26 +84,6 @@ class GUIController(QObject):
     def on_post_structured_message(self, message: AuraMessage):
         self.message_renderer.add_message(message)
 
-    @Slot(str, str, str)
-    def on_status_update(self, agent_name: str, status_text: str, icon_name: str):
-        animate = "..." in status_text
-        self._update_status(agent_name, status_text, animate)
-
-    def _update_status(self, status: str, activity: str, animate: bool):
-        if not self.current_activity_widget:
-            self.current_activity_widget = AgentActivityWidget()
-            self.message_renderer.add_widget(self.current_activity_widget)
-
-        if animate:
-            pulsing_text = activity.replace("...", "")
-            self.current_activity_widget.start_pulsing(pulsing_text)
-        else:
-            self.current_activity_widget.set_agent_status(
-                logo="*",
-                agent_name=status.upper(),
-                activity=activity
-            )
-
     def wire_up_command_handler(self, handler: CommandHandler):
         self.command_handler = handler
         if self.command_input:
@@ -129,11 +103,6 @@ class GUIController(QObject):
         self.message_renderer.add_message(AuraMessage.user_input(input_text))
         self.command_input.clear()
 
-        self._on_workflow_finished()
-        self.current_activity_widget = AgentActivityWidget()
-        self.current_activity_widget.start_pulsing("Aura is processing your request...")
-        self.message_renderer.add_widget(self.current_activity_widget)
-
         if input_text.startswith("/"):
             try:
                 parts = shlex.split(input_text[1:])
@@ -152,12 +121,6 @@ class GUIController(QObject):
     def post_welcome_message(self):
         welcome_msg = """AURA Command Deck Initialized\n\nStatus: READY\nSystem: Online\nMode: Interactive\n\nEnter your commands or describe what you want to build..."""
         self.message_renderer.add_message(AuraMessage.system(welcome_msg))
-
-    @Slot()
-    def _on_workflow_finished(self, event=None):
-        if self.current_activity_widget:
-            self.current_activity_widget.stop_animation()
-            self.current_activity_widget = None
 
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         history = []

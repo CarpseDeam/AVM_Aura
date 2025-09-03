@@ -12,6 +12,7 @@ from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent, QFont
 from .command_input_widget import CommandInputWidget
 from .controller import GUIController
 from .utils import get_aura_banner
+from .widgets.thinking_scanner_widget import ThinkingScannerWidget
 from .widgets.message_renderer_widget import MessageRendererWidget
 from event_bus import EventBus
 
@@ -39,6 +40,7 @@ class AuraMainWindow(QMainWindow):
         )
         self.controller.post_welcome_message()
         self._apply_stylesheet()
+        self._setup_scanner_signals()
 
     def closeEvent(self, event: QCloseEvent):
         """
@@ -68,6 +70,12 @@ class AuraMainWindow(QMainWindow):
         self.identity_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Add with stretch factor 0 to prevent it from being collapsed
         left_column_layout.addWidget(self.identity_banner, 0)
+
+        # Add thinking scanner widget (hidden by default)
+        self.thinking_scanner = ThinkingScannerWidget()
+        self.thinking_scanner.hide()
+        # Add with stretch factor 0
+        left_column_layout.addWidget(self.thinking_scanner, 0)
 
         # Add the new MessageRendererWidget
         self.message_renderer = MessageRendererWidget()
@@ -153,6 +161,19 @@ class AuraMainWindow(QMainWindow):
 
     def get_controller(self) -> GUIController:
         return self.controller
+
+    def _setup_scanner_signals(self):
+        """Connect processing signals to scanner widget visibility"""
+        self.event_bus.subscribe("processing_started", self._show_scanner)
+        self.event_bus.subscribe("processing_finished", self._hide_scanner)
+
+    def _show_scanner(self):
+        """Show the thinking scanner when processing starts"""
+        self.thinking_scanner.show()
+
+    def _hide_scanner(self):
+        """Hide the thinking scanner when processing finishes"""
+        self.thinking_scanner.hide()
 
     def _apply_stylesheet(self):
         self.setStyleSheet("""

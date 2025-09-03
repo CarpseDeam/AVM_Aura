@@ -107,6 +107,9 @@ Brief analysis of what the user is asking and how you should respond.
 Your natural, conversational response to the user.
 </response>"""
         
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         try:
             # Stream and parse messages in real-time
             stream_chunks = self.llm_client.stream_chat(provider, model, prompt, "chat", history=history)
@@ -117,6 +120,9 @@ Your natural, conversational response to the user.
                 
         except Exception as e:
             self.handle_error("Aura", f"Chat workflow failed: {str(e)}")
+        finally:
+            # Signal processing complete
+            self.event_bus.emit("processing_finished")
 
     async def _run_creative_assistant_workflow(self, user_idea: str, conversation_history: list):
         """
@@ -134,6 +140,9 @@ Your natural, conversational response to the user.
         conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history])
         prompt = prompt_template.render(user_idea=user_idea, conversation_history=conv_history_str)
 
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         try:
             # Stream and parse messages in real-time
             stream_chunks = self.llm_client.stream_chat(provider, model, prompt, "planner")
@@ -172,6 +181,9 @@ Your natural, conversational response to the user.
                     
         except Exception as e:
             self.handle_error("Aura", f"Creative assistant workflow failed: {str(e)}")
+        finally:
+            # Signal processing complete
+            self.event_bus.emit("processing_finished")
 
     async def _run_iterative_architect_workflow(self, user_request: str, conversation_history: list):
         """
@@ -198,8 +210,14 @@ Your natural, conversational response to the user.
             available_tools=available_tools
         )
 
+        # Signal processing start
+        self.event_bus.emit("processing_started")
+        
         response_str = "".join(
             [chunk async for chunk in self.llm_client.stream_chat(provider, model, prompt, "architect")])
+
+        # Signal processing complete
+        self.event_bus.emit("processing_finished")
 
         try:
             from events import PlanReadyForReview
