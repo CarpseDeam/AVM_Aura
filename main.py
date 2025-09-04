@@ -85,6 +85,10 @@ class AuraApplication:
         controller.set_project_manager(project_manager)
         controller.set_mission_log_service(mission_log_service)
 
+        # Subscribe the controller's method to show the mission log
+        # This ensures the button in the GUI will work.
+        self.event_bus.subscribe("show_mission_log_requested", controller.show_mission_log)
+
         return main_window
 
     def setup_event_handlers(self):
@@ -116,6 +120,10 @@ class AuraApplication:
             # Create and show GUI
             main_window = self.create_gui(app)
             main_window.show()
+
+            # Emit event to show mission log after the main window is visible
+            # to ensure it loads on startup.
+            self.event_bus.emit("show_mission_log_requested")
 
             logger.info("Launching background services...")
             asyncio.run_coroutine_threadsafe(

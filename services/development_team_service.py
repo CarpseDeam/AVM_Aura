@@ -36,7 +36,13 @@ class DevelopmentTeamService:
         self.vector_context_service = service_manager.vector_context_service
         self.foundry_manager = service_manager.get_foundry_manager()
         self.tool_runner_service = service_manager.tool_runner_service
-        self.workflow_manager = AgentWorkflowManager(self.llm_client, self.service_manager, self.event_bus)
+        self.workflow_manager = AgentWorkflowManager(
+            llm_client=self.llm_client,
+            event_bus=self.event_bus,
+            mission_log_service=self.mission_log_service,
+            project_manager=self.project_manager,
+            foundry_manager=self.foundry_manager
+        )
 
     def _post_chat_message(self, sender: str, message: str, is_error: bool = False):
         if message and message.strip():
