@@ -87,7 +87,7 @@ class AuraApplication:
 
         # Subscribe the controller's method to show the mission log
         # This ensures the button in the GUI will work.
-        self.event_bus.subscribe("show_mission_log_requested", controller.show_mission_log)
+        self.event_bus.subscribe("show_mission_log_requested", controller.toggle_mission_log)
 
         return main_window
 
