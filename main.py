@@ -1,3 +1,4 @@
+# main.py
 """
 AURA - Autonomous Universal Reactive Agent
 Main application entry point with improved conversation handling
@@ -84,10 +85,6 @@ class AuraApplication:
         # Wire up other components to the controller
         controller.set_project_manager(project_manager)
         controller.set_mission_log_service(mission_log_service)
-
-        # Subscribe the controller's method to show the mission log
-        # This ensures the button in the GUI will work.
-        self.event_bus.subscribe("show_mission_log_requested", controller.toggle_mission_log)
 
         return main_window
 

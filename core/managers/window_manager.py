@@ -56,6 +56,9 @@ class WindowManager:
 
         self.event_bus.subscribe("stream_code_chunk", self.handle_code_stream)
 
+        # New subscription for pinning the window
+        self.event_bus.subscribe("main_window_geometry_changed", self._position_side_windows)
+
         print("[WindowManager] Windows initialized")
 
     def handle_code_stream(self, event: StreamCodeChunk):
@@ -75,8 +78,8 @@ class WindowManager:
             if not path_obj.is_absolute():
                 full_path_str = str(self.project_manager.active_project_path / event.filename)
 
-        self.code_viewer.editor_manager.stream_to_tab(full_path_str, event.chunk, getattr(event, 'is_first_chunk', False))
-
+        self.code_viewer.editor_manager.stream_to_tab(full_path_str, event.chunk,
+                                                      getattr(event, 'is_first_chunk', False))
 
     def handle_app_state_change(self, new_state: AppState, project_name: str | None):
         """

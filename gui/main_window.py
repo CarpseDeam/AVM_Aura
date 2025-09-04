@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea, QLabel, QSizePolicy, QPushButton
 )
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent, QFont
+from PySide6.QtGui import QIcon, QResizeEvent, QCloseEvent, QFont, QMoveEvent
 
 from event_bus import EventBus
 from .command_input_widget import CommandInputWidget
@@ -50,6 +50,22 @@ class AuraMainWindow(QMainWindow):
         logger.info("Main window close event triggered. Initiating application shutdown.")
         self.event_bus.emit("application_shutdown")
         event.accept()
+
+    def _handle_geometry_change(self):
+        """Handles both moving and resizing of the window."""
+        if hasattr(self, 'controller') and self.controller:
+            self.controller.reposition_autocomplete_popup()
+        self.event_bus.emit("main_window_geometry_changed")
+
+    def moveEvent(self, event: QMoveEvent):
+        """Emits an event when the main window is moved."""
+        super().moveEvent(event)
+        self._handle_geometry_change()
+
+    def resizeEvent(self, event: QResizeEvent):
+        """Emits an event when the main window is resized."""
+        super().resizeEvent(event)
+        self._handle_geometry_change()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -154,11 +170,6 @@ class AuraMainWindow(QMainWindow):
         self.autocomplete_popup.setFrameShape(QFrame.Shape.Box)
         self.autocomplete_popup.setWordWrap(True)
         self.autocomplete_popup.hide()
-
-    def resizeEvent(self, event: QResizeEvent):
-        super().resizeEvent(event)
-        if hasattr(self, 'controller') and self.controller:
-            self.controller.reposition_autocomplete_popup()
 
     def get_controller(self) -> GUIController:
         return self.controller
