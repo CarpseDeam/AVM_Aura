@@ -7,82 +7,73 @@ from core.models.messages import AuraMessage, MessageType
 
 class LLMStreamParser:
     """
-    Parses LLM streaming responses and extracts structured messages from tags
-    like <thought>, <response>, and [TOOL_CALL].
+    Parses LLM streaming responses. This parser is designed to aggressively find
+    and process a single, primary JSON object (the plan) and discard any
+    surrounding conversational text to prevent it from leaking to the UI.
     """
 
     def __init__(self):
         self.buffer = ""
+        self.plan_processed = False
 
     def parse_chunk(self, chunk: str) -> Generator[AuraMessage, None, None]:
         """
-        Parses a streaming chunk and yields AuraMessage objects for any complete sections found.
+        Parses a streaming chunk. Once a JSON plan is found and processed,
+        it will stop processing to prevent any other content from being displayed.
         """
+        if self.plan_processed:
+            return # A plan has been found and handled; do nothing else.
+
         self.buffer += chunk
 
-        # First, try to handle complete JSON blocks from architect agents
-        if self.buffer.strip().startswith('{'):
+        # Aggressively search for a complete JSON object in the buffer.
+        json_match = re.search(r'(\{.*?\})', self.buffer, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
             try:
-                # Attempt to parse the entire buffer as a JSON object
-                parsed_json = json.loads(self.buffer)
-                # If successful, we have a complete plan. Yield it and clear the buffer.
-                yield AuraMessage(type=MessageType.AGENT_PLAN_JSON, content=self.buffer)
+                # Validate that the matched string is a complete JSON object.
+                json.loads(json_str)
+
+                # It's a valid plan. Yield it for backend processing.
+                yield AuraMessage(type=MessageType.AGENT_PLAN_JSON, content=json_str)
+
+                # Mark the plan as processed and clear the buffer.
+                # This effectively stops any further parsing of this stream.
+                self.plan_processed = True
                 self.buffer = ""
                 return
+
             except json.JSONDecodeError:
-                # The buffer is not a complete JSON object yet, so continue buffering.
+                # The buffer contains something that looks like JSON, but it's not
+                # complete yet. Continue buffering to get the full object.
                 pass
 
-        # If not a JSON block, process for other tags
+        # This part of the logic will only run if a JSON plan has not yet been found.
+        # It handles simple, non-plan conversational responses.
         while True:
-            matches = []
-            thought_match = re.search(r'<thought>(.*?)</thought>', self.buffer, re.DOTALL)
-            if thought_match:
-                matches.append({'type': 'thought', 'match': thought_match})
-
-            response_match = re.search(r'<response>(.*?)</response>', self.buffer, re.DOTALL)
-            if response_match:
-                matches.append({'type': 'response', 'match': response_match})
-
-            tool_match = re.search(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', self.buffer, re.DOTALL)
-            if tool_match:
-                matches.append({'type': 'tool', 'match': tool_match})
-
-            if not matches:
+            tag_match = re.search(r'<response>(.*?)</response>', self.buffer, re.DOTALL)
+            if not tag_match:
                 break
 
-            first_match_info = min(matches, key=lambda m: m['match'].start())
-            match_obj = first_match_info['match']
-            match_type = first_match_info['type']
-
-            pre_match_content = self.buffer[:match_obj.start()].strip()
-            if pre_match_content:
-                yield AuraMessage.agent_response(pre_match_content)
-
-            content = match_obj.group(1).strip()
+            content = tag_match.group(1).strip()
             if content:
-                if match_type == 'thought':
-                    yield AuraMessage.agent_thought(content)
-                elif match_type == 'response':
-                    yield AuraMessage.agent_response(content)
-                elif match_type == 'tool':
-                    yield AuraMessage.tool_call(content)
+                yield AuraMessage.agent_response(content)
 
-            self.buffer = self.buffer[match_obj.end():]
+            # Remove the processed tag and all content before it.
+            self.buffer = self.buffer[tag_match.end():]
 
     def finalize(self) -> Generator[AuraMessage, None, None]:
         """
-        Process any remaining content in the buffer when streaming is complete.
+        Finalizes the stream. This is intentionally left blank to prevent any
+        unprocessed buffer content (like partial thoughts or pre-JSON text)
+        from being accidentally displayed.
         """
-        content = self.buffer.strip()
-        if content:
-            # If there's remaining content that isn't a JSON plan, treat as a final response.
-            if not content.startswith('{'):
-                yield AuraMessage.agent_response(content)
         self.buffer = ""
+        yield from ()
 
 
 async def parse_llm_stream_async(stream_chunks: AsyncGenerator[str, None]) -> AsyncGenerator[AuraMessage, None]:
+    """Asynchronously parses a stream of LLM chunks into AuraMessages."""
     parser = LLMStreamParser()
     try:
         async for chunk in stream_chunks:

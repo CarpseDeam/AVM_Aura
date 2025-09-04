@@ -1,4 +1,4 @@
-import toml
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -10,14 +10,13 @@ class ConfigManager:
         self.config = self._load_config()
 
     def _load_config(self) -> dict:
-        """Loads the configuration from the TOML file."""
+        """Loads the configuration from the TOML file using the standard tomllib library."""
         try:
-            return toml.load(self.config_path)
+            with open(self.config_path, "rb") as f:
+                return tomllib.load(f)
         except FileNotFoundError:
-            # In a real application, you might want to create a default config
-            # or raise a more specific error.
             raise FileNotFoundError(f"Configuration file not found at {self.config_path}")
-        except toml.TomlDecodeError as e:
+        except tomllib.TOMLDecodeError as e:
             raise ValueError(f"Error decoding TOML file: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:

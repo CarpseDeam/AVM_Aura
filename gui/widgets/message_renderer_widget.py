@@ -125,6 +125,10 @@ class MessageRendererWidget(QScrollArea):
         Args:
             message: AuraMessage object to display
         """
+        # Do not display internal agent thoughts or plans
+        if message.type in [MessageType.AGENT_THOUGHT, MessageType.AGENT_PLAN_JSON]:
+            return
+
         if not message or not message.content.strip():
             return
             

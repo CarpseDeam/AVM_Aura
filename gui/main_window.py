@@ -168,11 +168,11 @@ class AuraMainWindow(QMainWindow):
         self.event_bus.subscribe("processing_started", self._show_scanner)
         self.event_bus.subscribe("processing_finished", self._hide_scanner)
 
-    def _show_scanner(self, event: ProcessingStarted):
+    def _show_scanner(self):
         """Show the thinking scanner when processing starts"""
         self.thinking_scanner.show()
 
-    def _hide_scanner(self, event: ProcessingFinished):
+    def _hide_scanner(self):
         """Hide the thinking scanner when processing finishes"""
         self.thinking_scanner.hide()
 
