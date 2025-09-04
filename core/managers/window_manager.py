@@ -13,7 +13,7 @@ from gui.mission_log_window import MissionLogWindow
 
 from event_bus import EventBus
 from core.app_state import AppState
-from events import StreamCodeChunk
+from events import StreamCodeChunk, MainWindowGeometryChanged
 
 if TYPE_CHECKING:
     from core.managers import ProjectManager
@@ -115,7 +115,7 @@ class WindowManager:
         # Use a short timer to ensure the main window has been painted before we query its geometry
         QTimer.singleShot(50, self._position_side_windows)
 
-    def _position_side_windows(self):
+    def _position_side_windows(self, event: MainWindowGeometryChanged = None):
         """Adjusts the MissionLog window to sit neatly beside the main window."""
         if not self.main_window or not self.main_window.isVisible():
             return

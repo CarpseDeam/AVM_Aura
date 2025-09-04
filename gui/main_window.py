@@ -15,7 +15,7 @@ from .controller import GUIController
 from .utils import get_aura_banner
 from .widgets.thinking_scanner_widget import ThinkingScannerWidget
 from .widgets.message_renderer_widget import MessageRendererWidget
-from events import ProcessingStarted, ProcessingFinished
+from events import ProcessingStarted, ProcessingFinished, MainWindowGeometryChanged
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class AuraMainWindow(QMainWindow):
         """Handles both moving and resizing of the window."""
         if hasattr(self, 'controller') and self.controller:
             self.controller.reposition_autocomplete_popup()
-        self.event_bus.emit("main_window_geometry_changed")
+        self.event_bus.emit("main_window_geometry_changed", MainWindowGeometryChanged())
 
     def moveEvent(self, event: QMoveEvent):
         """Emits an event when the main window is moved."""

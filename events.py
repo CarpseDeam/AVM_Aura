@@ -165,3 +165,8 @@ class ProjectCreated:
     """Published by the ProjectManager when a new project is created and becomes active."""
     project_name: str
     project_path: str
+
+@dataclass
+class MainWindowGeometryChanged:
+    """Published by the main window when it is moved or resized."""
+    pass
