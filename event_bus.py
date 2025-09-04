@@ -29,6 +29,5 @@ class EventBus:
                     else:
                         callback(*args, **kwargs)
                 except Exception as e:
-                    import traceback
-                    print(f"[EventBus] Error in callback for event '{event_name}': {e}")
-                    traceback.print_exc()
+                    print(f"[EventBus] FATAL: Exception in callback for event '{event_name}': {e}")
+                    print("[EventBus] FATAL: traceback.print_exc() is disabled to prevent recursion.")

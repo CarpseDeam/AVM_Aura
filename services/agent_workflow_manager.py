@@ -1,3 +1,4 @@
+# Force recompile again
 """
 Agent Workflow Manager - Fixed version with proper chat handling
 """
@@ -38,24 +39,27 @@ class AgentWorkflowManager:
         self.mission_log_service = mission_log_service
         self.project_manager = project_manager
         self.foundry_manager = foundry_manager
+        self._agent_workflows = None  # Defer initialization
+        logger.info("AgentWorkflowManager initialized.")
 
-        # Define available workflows
-        self._agent_workflows = {
-            "GENERAL_CHAT": {
-                "name": "General Chat",
-                "handler": self._run_general_chat_workflow
-            },
-            "CREATIVE_ASSISTANT": {
-                "name": "Creative Assistant",
-                "handler": self._run_creative_assistant_workflow
-            },
-            "ITERATIVE_ARCHITECT": {
-                "name": "Iterative Architect",
-                "handler": self._run_iterative_architect_workflow
+    def _initialize_workflows(self):
+        """Initializes the workflow dictionary on first use."""
+        if self._agent_workflows is None:
+            logger.info("Initializing agent workflows...")
+            self._agent_workflows = {
+                "GENERAL_CHAT": {
+                    "name": "General Chat",
+                    "handler": self._run_general_chat_workflow
+                },
+                "CREATIVE_ASSISTANT": {
+                    "name": "Creative Assistant",
+                    "handler": self._run_creative_assistant_workflow
+                },
+                "ITERATIVE_ARCHITECT": {
+                    "name": "Iterative Architect",
+                    "handler": self._run_iterative_architect_workflow
+                }
             }
-        }
-
-        logger.info("AgentWorkflowManager initialized with chat fix")
 
     def log(self, level: str, message: str):
         """Log messages to the event bus"""
@@ -81,6 +85,7 @@ class AgentWorkflowManager:
         """
         Run a specific workflow based on the agent key.
         """
+        self._initialize_workflows()  # Ensure workflows are initialized
         workflow = self._agent_workflows.get(agent_key)
         if not workflow:
             self.handle_error("AgentWorkflowManager", f"Unknown agent key: {agent_key}")
