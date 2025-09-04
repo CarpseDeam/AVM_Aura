@@ -101,7 +101,7 @@ class ConversationManager:
             self.logger.error(f"Error processing message: {e}")
             self._post_error(f"I encountered an issue processing your message: {str(e)}")
 
-    def _analyze_intent(self, message: str, history: List[Dict]) -> ConversationIntent:
+    def _analyze_intent(self, message: str, _history: List[Dict]) -> ConversationIntent:
         """
         Analyzes user message to determine intent.
         Uses both keyword matching and context awareness.
@@ -143,7 +143,7 @@ class ConversationManager:
         # Default to casual chat
         return ConversationIntent.CASUAL_CHAT
 
-    async def _handle_greeting(self, message: str) -> None:
+    async def _handle_greeting(self, _message: str) -> None:
         """Handles initial greetings with a warm, helpful response"""
         response = (
             "Hey there! 👋 I'm Aura, your AI coding companion! I'm here to help you design, "
@@ -329,7 +329,8 @@ Context from conversation:
 
 Create an efficient, practical plan that focuses on implementation."""
 
-    def _build_architecture_prompt(self, message: str, history: List[Dict]) -> str:
+    @staticmethod
+    def _build_architecture_prompt(message: str, _history: List[Dict]) -> str:
         """Builds a prompt for architecture discussions"""
         return f"""You are Aura, an expert software architect.
 
@@ -347,7 +348,8 @@ Provide insights on:
 
 Keep your response focused and actionable."""
 
-    def _build_debugging_prompt(self, message: str, history: List[Dict], project_files: Dict) -> str:
+    @staticmethod
+    def _build_debugging_prompt(message: str, _history: List[Dict], project_files: Dict) -> str:
         """Builds a prompt for debugging assistance"""
         files_context = "\n".join(project_files.keys()) if project_files else "No files in project yet"
 
@@ -436,7 +438,8 @@ Provide complete, working code that solves their problem."""
             # If not valid JSON, just post as regular response
             self._post_message(response_text, MessageType.AGENT_RESPONSE)
 
-    def _needs_planning(self, message: str) -> bool:
+    @staticmethod
+    def _needs_planning(message: str) -> bool:
         """Determines if a coding request needs planning first"""
         complexity_indicators = [
             "application", "system", "full", "complete", "entire",
@@ -444,7 +447,8 @@ Provide complete, working code that solves their problem."""
         ]
         return any(indicator in message.lower() for indicator in complexity_indicators)
 
-    def _format_history(self, history: List[Dict]) -> str:
+    @staticmethod
+    def _format_history(history: List[Dict]) -> str:
         """Formats conversation history for prompts"""
         if not history:
             return "No previous conversation"

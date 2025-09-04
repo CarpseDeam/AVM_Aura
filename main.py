@@ -8,20 +8,12 @@ import asyncio
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import QThread
 
-from core.llm_client import LLMClient
 from event_bus import EventBus
-
-from core.managers import ProjectManager
-from services import (
-    MissionLogService,
-
-    DevelopmentTeamService,
-    CommandHandler
-)
-from foundry import FoundryManager
-from services.agent_workflow_manager import AgentWorkflowManager
+from core.managers import ProjectManager, ServiceManager
+from services import CommandHandler
+from gui.main_window import AuraMainWindow
 
 # Configure logging
 logging.basicConfig(
@@ -36,79 +28,62 @@ class AuraApplication:
     Main application class that initializes and manages all AURA components
     """
 
-    def __init__(self):
+    def __init__(self, async_thread: 'AsyncEventLoop'):
+        self.async_thread = async_thread
         self.event_bus = EventBus()
-        self.components = {}
+        self.project_root = Path(__file__).resolve().parent
+        self.service_manager = ServiceManager(self.event_bus, self.project_root)
         self.initialize_components()
 
     def initialize_components(self):
         """Initialize all application components in the correct order"""
         logger.info("Initializing AURA components...")
 
-        # Core components
-        self.components['llm_client'] = LLMClient()
-        self.components['project_manager'] = ProjectManager(self.event_bus)
-        self.components['foundry_manager'] = FoundryManager(
-            self.event_bus,
-            self.components['project_manager']
-        )
+        # ProjectManager is created here and passed to the service manager
+        project_manager = ProjectManager(self.event_bus, str(self.project_root))
 
-        # Service layer
-        self.components['mission_log_service'] = MissionLogService(self.event_bus)
-
-        # Initialize workflow manager
-        self.components['workflow_manager'] = AgentWorkflowManager(
-            event_bus=self.event_bus,
-            llm_client=self.components['llm_client'],
-            mission_log_service=self.components['mission_log_service'],
-            project_manager=self.components['project_manager'],
-            foundry_manager=self.components['foundry_manager']
+        # ServiceManager handles the rest
+        self.service_manager.initialize_core_components(
+            project_root=self.project_root,
+            project_manager=project_manager
         )
-
-        # Initialize development team service with conversation manager
-        self.components['dev_team_service'] = DevelopmentTeamService(
-            event_bus=self.event_bus,
-            llm_client=self.components['llm_client'],
-            project_manager=self.components['project_manager'],
-            mission_log_service=self.components['mission_log_service'],
-            workflow_manager=self.components['workflow_manager']
-        )
+        self.service_manager.initialize_services()
 
         logger.info("All components initialized successfully")
 
-    def create_gui(self, app):
+    def create_gui(self, _app):
         """Create and configure the GUI"""
         logger.info("Creating GUI...")
 
         # Create main window
-        main_window = MainWindow(self.event_bus)
+        main_window = AuraMainWindow(self.event_bus, self.project_root)
+
+        # Get the controller created by the main window
+        controller = main_window.get_controller()
+
+        # Get managers and services from the ServiceManager
+        project_manager = self.service_manager.get_project_manager()
+        foundry_manager = self.service_manager.get_foundry_manager()
+        mission_log_service = self.service_manager.mission_log_service
 
         # Initialize command handler
         def get_conversation_history():
             """Helper to get conversation history from controller"""
-            if hasattr(main_window, 'command_deck_controller'):
-                return main_window.command_deck_controller.get_conversation_history()
-            return []
+            return controller.get_conversation_history()
 
         command_handler = CommandHandler(
-            foundry_manager=self.components['foundry_manager'],
+            foundry_manager=foundry_manager,
             event_bus=self.event_bus,
-            project_manager=self.components['project_manager'],
+            project_manager=project_manager,
             conversation_history_fetcher=get_conversation_history
         )
 
-        # Create command deck controller
-        controller = CommandDeckController(
-            command_deck=main_window.command_deck,
-            event_bus=self.event_bus,
-            command_handler=command_handler
-        )
+        # Wire up the command handler to the GUI controller
+        controller.wire_up_command_handler(command_handler)
 
-        # Store reference for history fetching
-        main_window.command_deck_controller = controller
-
-        # Show welcome message
-        controller.post_welcome_message()
+        # Wire up other components to the controller
+        controller.set_project_manager(project_manager)
+        controller.set_mission_log_service(mission_log_service)
 
         return main_window
 
@@ -117,10 +92,9 @@ class AuraApplication:
 
         def on_critical_error(error_msg):
             logger.critical(f"Critical error: {error_msg}")
-            # Could show error dialog here
 
         def on_status_update(agent, status, icon):
-            logger.debug(f"Status update - {agent}: {status}")
+            logger.debug(f"Status update - {agent}: {status} [{icon}]")
 
         self.event_bus.subscribe("critical_error", on_critical_error)
         self.event_bus.subscribe("agent_status_changed", on_status_update)
@@ -142,6 +116,12 @@ class AuraApplication:
             # Create and show GUI
             main_window = self.create_gui(app)
             main_window.show()
+
+            logger.info("Launching background services...")
+            asyncio.run_coroutine_threadsafe(
+                self.service_manager.launch_background_servers(),
+                self.async_thread.loop
+            )
 
             logger.info("AURA is ready!")
 
@@ -188,7 +168,7 @@ def main():
 
     try:
         # Create and run application
-        app = AuraApplication()
+        app = AuraApplication(async_thread)
         app.run()
     finally:
         # Cleanup

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class MissionLogWindow(QMainWindow):
     """
-    A pop-out window to display and manage the project's Agent TODO list.
+    A pop-out window to display and manage the project's Agent
     """
     update_tasks_signal = Signal(list)
 
